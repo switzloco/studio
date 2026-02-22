@@ -1,3 +1,4 @@
+
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
@@ -9,6 +10,7 @@ export async function sendChatMessage(
   photoDataUri?: string
 ) {
   try {
+    // Injecting the live state from the health service before every AI turn
     const health = await mockHealthService.getHealthSummary();
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const currentDay = dayNames[new Date().getDay()];
@@ -21,7 +23,7 @@ export async function sendChatMessage(
       dailyProteinGrams: health.proteinGrams,
       recoveryStatus: health.recoveryStatus,
       currentDay,
-      recentWorkoutLoad: "Moderate activity audit. Recent frisbee and basketball high-intensity movements.",
+      recentWorkoutLoad: "Activity audit: High-intensity assets active. Recent frisbee and basketball movements identified.",
     });
 
     return { success: true, response: response.response };
