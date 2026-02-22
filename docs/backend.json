@@ -1,0 +1,201 @@
+{
+  "entities": {
+    "UserProfile": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "UserProfile",
+      "type": "object",
+      "description": "Represents a user's profile within the CFO Fitness app, storing core identity, health summaries, and account status. This entity's ID is directly tied to the Firebase Authentication User ID (UID).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the UserProfile entity, corresponding to the Firebase Authentication User ID (UID). This ID remains constant even if an anonymous user links a Google account."
+        },
+        "visceralFatPoints": {
+          "type": "number",
+          "description": "The current score tracking the user's progress towards the 'Visceral Fat Points' goal (target: 3000 points). This reflects 'Visceral Fat Portfolio'."
+        },
+        "dailyProteinG": {
+          "type": "number",
+          "description": "The current daily protein intake in grams, tracked against the minimum 150g goal. This represents 'Protein Solvency'."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the user profile was initially created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating the last time the user profile's core data (e.g., vitals summary) was updated.",
+          "format": "date-time"
+        },
+        "isAnonymous": {
+          "type": "boolean",
+          "description": "A boolean flag indicating if the user is currently operating as an anonymous guest. 'true' for anonymous users, 'false' if linked to a Google account."
+        }
+      },
+      "required": [
+        "id",
+        "visceralFatPoints",
+        "dailyProteinG",
+        "createdAt",
+        "isAnonymous"
+      ]
+    },
+    "Log": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Log",
+      "type": "object",
+      "description": "Records various user activities and health data synchronizations, such as workouts, meals, and recovery events. These logs provide detailed history for AI analysis and personalized coaching.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Log entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the UserProfile entity to which this log entry belongs. (Relationship: UserProfile 1:N Log)"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "The exact date and time when the activity or data synchronization occurred.",
+          "format": "date-time"
+        },
+        "category": {
+          "type": "string",
+          "description": "The type of log entry, categorizing the activity (e.g., 'explosiveness', 'strength', 'food', 'recovery', 'health_sync')."
+        },
+        "content": {
+          "type": "string",
+          "description": "A detailed textual description or summary of the log entry, such as workout specifics, meal details, or health sync notes."
+        },
+        "metrics": {
+          "type": "array",
+          "description": "A flexible array of key-value objects, each representing a specific metric relevant to the log's category (e.g., [{ 'name': 'protein_g', 'value': 150 }], [{ 'name': 'duration_min', 'value': 60 }, { 'name': 'sets', 'value': 3 }]).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "vectorEmbeddings": {
+          "type": "array",
+          "description": "An array of numerical values representing the vector embeddings of the log's content, used for efficient vector search and AI context retrieval.",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "timestamp",
+        "category",
+        "content",
+        "metrics",
+        "vectorEmbeddings"
+      ]
+    },
+    "ChatSession": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ChatSession",
+      "type": "object",
+      "description": "Stores the entire conversational memory between a user and the AI coach. Each session maintains context, allowing for ongoing and relevant interactions.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the ChatSession entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the UserProfile entity with whom this chat session was conducted. (Relationship: UserProfile 1:N ChatSession)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the chat session was initiated.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating the last time new messages were added to this chat session.",
+          "format": "date-time"
+        },
+        "title": {
+          "type": "string",
+          "description": "A short, descriptive title for the chat session, either generated by the AI or user-defined, summarizing its main topic."
+        },
+        "messages": {
+          "type": "array",
+          "description": "An ordered array of stringified messages exchanged in the session. Each string represents a single message, potentially including role and content (e.g., 'user: Hello CFO', 'assistant: Good morning, Nick. What's the audit today?').",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "createdAt",
+        "messages"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "UserProfile",
+          "schema": {
+            "$ref": "#/backend/entities/UserProfile"
+          },
+          "description": "Stores the primary profile information for each user. The document ID matches the Firebase Authentication UID. This document acts as the root for all user-specific data and includes the 'isAnonymous' field for client-side UI logic regarding account status."
+        }
+      },
+      {
+        "path": "/users/{userId}/logs/{logId}",
+        "definition": {
+          "entityName": "Log",
+          "schema": {
+            "$ref": "#/backend/entities/Log"
+          },
+          "description": "Stores individual log entries (workouts, meals, health syncs) for a specific user. Each log document includes the 'userId' field, explicitly denormalizing ownership to ensure authorization independence and simplify security rules. This field MUST match the parent 'userId' from the path.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The Firebase Authentication UID of the user who owns this log entry."
+            },
+            {
+              "name": "logId",
+              "description": "A unique identifier for a specific log entry."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/chat_sessions/{chatSessionId}",
+        "definition": {
+          "entityName": "ChatSession",
+          "schema": {
+            "$ref": "#/backend/entities/ChatSession"
+          },
+          "description": "Stores conversational memory for AI chat sessions for a specific user. Each chat session document includes the 'userId' field, explicitly denormalizing ownership to ensure authorization independence and simplify security rules. This field MUST match the parent 'userId' from the path.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The Firebase Authentication UID of the user who owns this chat session."
+            },
+            {
+              "name": "chatSessionId",
+              "description": "A unique identifier for a specific chat session."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The recommended Firestore structure is based on a strict multi-tenant, user-centric model, prioritizing Authorization Independence and robust QAPs (Query as Authorization Policies). All user-specific data is nested under a top-level `/users/{userId}` collection. The document ID for each user's profile (`UserProfile`) directly corresponds to their Firebase Authentication UID. This immediately establishes path-based ownership, making security rules simple and explicit: `request.auth.uid` must match the `{userId}` wildcard in the path.\n\nTo achieve **Authorization Independence** for subcollections (like `logs` and `chat_sessions`), the `userId` field is explicitly denormalized into every `Log` and `ChatSession` document. This means a security rule for `/users/{userId}/logs/{logId}` can check both `request.auth.uid == userId` (path ownership) AND `request.resource.data.userId == userId` (document content ownership) without requiring any `get()` operations on the parent `UserProfile` document. This approach allows for atomic creation and modification of subcollection documents and prevents security rule complexity related to hierarchical data dependencies.\n\nThis structure inherently supports **QAPs** by ensuring that all `list` operations are scoped to the authenticated user's data. Since all `Log` and `ChatSession` documents reside within `/users/{userId}/...`, any query initiated by a user must include their `uid` in the path. The security rules will then verify this `uid` against `request.auth.uid`. This design means that queries naturally act as authorization policies; a user can only query for data that they are explicitly authorized to access, as defined by their `uid` in the query path and the security rules. There is no mixing of data with different security postures within the same collection, preventing the need for server-side filtering and ensuring query efficiency.\n\nThe 'Lazy Authentication' requirement is handled seamlessly by Firebase Authentication's ability to link anonymous accounts, preserving the original `uid`. The Firestore security rules will simply check `request.auth.uid == userId` for all user data, which applies equally to anonymous and Google-linked users (as their `uid` remains constant). The `isAnonymous` field in the `UserProfile` is for client-side UI logic, not for security rule enforcement, adhering to the DBAC principle where roles (or account states) are reflected in the database but authorization relies primarily on `request.auth.uid` and structural ownership."
+  }
+}

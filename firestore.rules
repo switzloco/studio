@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * CFO Fitness - Security Rules Documentation
+     * 
+     * Core Philosophy: 
+     * This ruleset implements a strict "User-Ownership" model. Access to data is restricted
+     * to the authenticated user associated with the specific data path. This model 
+     * supports "Lazy Authentication," allowing both anonymous and identified (Google-linked) 
+     * users to securely access their own data.
+     * 
+     * Data Structure:
+     * All application data is organized hierarchically under the `/users/{userId}` path. 
+     * Subcollections for `logs` and `chat_sessions` are nested within the user's root document.
+     * 
+     * Key Security Decisions:
+     * - Ownership-Based Access: All read and write operations require `request.auth.uid` 
+     *   to match the `{userId}` parameter in the document path.
+     * - Denormalization for Authorization: Critical relational fields (like `userId`) are 
+     *   enforced within document bodies to ensure internal data consistency with the 
+     *   authorization path without requiring expensive cross-document lookups.
+     * - Immutability: Ownership fields are made immutable after creation to prevent 
+     *   data hijacking or accidental reassignment.
+     * - Privacy: There are no public read or list permissions. All data is private to the owner.
+     */
+
+    // --- Helper Functions ---
+
+    /**
+     * @description Checks if the request is made by an authenticated user (Anonymous or Provider-based).
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * @description Validates that the authenticated user's UID matches the provided userId from the path.
+     */
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /**
+     * @description Combines ownership validation with a check to ensure the document exists for updates/deletes.
+     */
+    function isExistingOwner(userId) {
+      return resource != null && isOwner(userId);
+    }
+
+    // --- Collection Rules ---
+
+    /**
+     * @description Rules for the UserProfile entity, which stores core user identity and status.
+     * @path /users/{userId}
+     * @allow (get) If the user is signed in and requesting their own profile document.
+     * @deny (list) If a user attempts to list all user profiles (listing is restricted to one's own ID).
+     * @principle Enforces strict path-based ownership for the root user document.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.id == userId;
+      allow update: if isExistingOwner(userId) && request.resource.data.id == resource.data.id;
+      allow delete: if isExistingOwner(userId);
+
+      /**
+       * @description Rules for user-specific activity logs (workouts, meals, health syncs).
+       * @path /users/{userId}/logs/{logId}
+       * @allow (create) If the user is the owner and the document body's userId matches the path.
+       * @deny (update) If the user attempts to change the userId field to a different value.
+       * @principle Uses denormalized ownership fields to ensure relational integrity within the user tree.
+       */
+      match /logs/{logId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.userId == userId;
+        allow update: if isExistingOwner(userId) && request.resource.data.userId == resource.data.userId;
+        allow delete: if isExistingOwner(userId);
+      }
+
+      /**
+       * @description Rules for user-specific AI Chat Sessions and conversational memory.
+       * @path /users/{userId}/chat_sessions/{chatSessionId}
+       * @allow (list) If the authenticated user is listing their own chat sessions.
+       * @deny (create) If the userId in the document does not match the authenticated user's ID.
+       * @principle Ensures private conversational data is only accessible to the account owner.
+       */
+      match /chat_sessions/{chatSessionId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.userId == userId;
+        allow update: if isExistingOwner(userId) && request.resource.data.userId == resource.data.userId;
+        allow delete: if isExistingOwner(userId);
+      }
+    }
+  }
+}
