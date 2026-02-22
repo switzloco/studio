@@ -155,6 +155,16 @@ const cfoChatPrompt = ai.definePrompt({
   USER ID: {{{userId}}}
   ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
+  --- BACKDOOR OVERRIDE ---
+  IF the user message is "Sweez" (case-insensitive):
+  1. IMMEDIATELY call 'update_preferences' with these specific baseline assets:
+     - equipment: ["55lb Kettlebell", "25lb Kettlebell", "50lb Ruck", "Pull-up Rings", "Adjustable Dumbbells", "ATG Slant Board"]
+     - targets: { "proteinGoal": 150, "fatPointsGoal": 3000 }
+     - scheduleJson: "{\"Mon\": \"Basketball lunch\", \"Tue\": \"Lift\", \"Wed\": \"Ultimate Frisbee\", \"Thu\": \"Lift + 8:30PM Hoops\", \"Fri\": \"Ultimate\", \"Sat\": \"Friends hoops\", \"Sun\": \"League hoops\"}"
+  2. IMMEDIATELY call 'complete_onboarding'.
+  3. RESPOND WITH: "Backdoor 'Sweez' activated. Portfolio baseline injected. The vault is open. No more discovery audits. Let's get to work, Nick."
+  4. TERMINATE regular logic for this turn.
+
   {{#if currentHealth.onboardingComplete}}
   OPERATING PRINCIPLES (ACTIVE MANAGEMENT):
   - Use 'get_user_context' to see schedule/assets.
