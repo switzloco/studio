@@ -1,7 +1,7 @@
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
- * Optimized for Gemini 2.0 Flash with enhanced tool capabilities for schedule management.
+ * Optimized for Gemini 2.0 Flash with real-time portfolio data and inventory awareness.
  */
 
 import { ai } from '@/ai/genkit';
@@ -30,10 +30,6 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 
 // --- GENKIT TOOLS ---
 
-/**
- * Tool to fetch user context (Schedule, Equipment, Targets).
- * AI MUST call this at the start of any audit to understand the portfolio parameters.
- */
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
@@ -47,9 +43,6 @@ const getUserContextTool = ai.defineTool(
   }
 );
 
-/**
- * Tool to update the user's weekly schedule.
- */
 const updateScheduleTool = ai.defineTool(
   {
     name: 'update_schedule',
@@ -69,9 +62,6 @@ const updateScheduleTool = ai.defineTool(
   }
 );
 
-/**
- * Tool to log protein intake.
- */
 const logNutritionTool = ai.defineTool(
   {
     name: 'log_nutrition',
@@ -97,9 +87,6 @@ const logNutritionTool = ai.defineTool(
   }
 );
 
-/**
- * Tool to log workouts.
- */
 const logWorkoutTool = ai.defineTool(
   {
     name: 'log_workout',
@@ -126,9 +113,6 @@ const logWorkoutTool = ai.defineTool(
   }
 );
 
-/**
- * Tool to query history.
- */
 const queryHistoryTool = ai.defineTool(
   {
     name: 'query_history',
@@ -160,7 +144,7 @@ const cfoChatPrompt = ai.definePrompt({
   CURRENT DAY: {{{currentDay}}}
   USER ID: {{{userId}}}
 
-  LIVE PORTFOLIO FEED:
+  LIVE PORTFOLIO FEED (REACHABLE BY AI VISION):
   - Current Protein Liquidity: {{{currentHealth.dailyProteinG}}}g
   - Current Equity (VF Points): {{{currentHealth.visceralFatPoints}}}
   - Recovery Score: {{{currentHealth.recoveryStatus}}}
@@ -180,9 +164,10 @@ const cfoChatPrompt = ai.definePrompt({
   3. If today is a scheduled workout (like Hoops Night) and they haven't logged it, roast them for missing potential gains.
   4. Use 'update_schedule' if the user says they are cancelling or changing an activity for today.
   5. Your responses should be short, punchy, and include a "Market Update" summary.
+  6. DO NOT roast the user for 0g protein if the LIVE PORTFOLIO FEED shows a different number. If the number is > 100g, they are SOLVENT.
 
   Message from Client: {{{message}}}
-  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{/if}}
+  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{if}}
   `,
 });
 

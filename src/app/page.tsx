@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -6,7 +5,7 @@ import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
 import { PreferencesView } from '@/components/preferences-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid } from 'lucide-react';
+import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,12 +19,14 @@ import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from '@/fireb
 import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { runInternalAudit } from '@/lib/internal-audit';
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
   const auth = useAuth();
   const db = useFirestore();
   const { toast } = useToast();
+  const [isAuditing, setIsAuditing] = useState(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc(userDocRef);
@@ -47,6 +48,22 @@ export default function Home() {
     }
   };
 
+  const handleInternalAudit = async () => {
+    if (!user) return;
+    setIsAuditing(true);
+    toast({ title: "Audit Initialized", description: "Running CFO diagnostic suite..." });
+    
+    await runInternalAudit(db, user.uid, (test, success, message) => {
+      toast({
+        variant: success ? "default" : "destructive",
+        title: `Audit ${test} ${success ? 'Passed' : 'Failed'}`,
+        description: message
+      });
+    });
+    
+    setIsAuditing(false);
+  };
+
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background shadow-xl overflow-hidden">
       <header className="p-4 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
@@ -63,7 +80,7 @@ export default function Home() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
-              <Settings className="w-5 h-5 text-muted-foreground" />
+              {isAuditing ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Settings className="w-5 h-5 text-muted-foreground" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -73,9 +90,9 @@ export default function Home() {
                 <span>Save My Portfolio</span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem className="flex items-center gap-2">
+            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4" />
-              <span>Internal Audit</span>
+              <span>Run Internal Audit</span>
             </DropdownMenuItem>
             {!user?.isAnonymous && (
               <>
