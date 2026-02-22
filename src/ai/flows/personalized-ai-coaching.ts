@@ -102,14 +102,28 @@ const logWorkoutTool = ai.defineTool(
   async (input) => {
     const { firestore } = initializeFirebase();
     const current = await healthService.getHealthSummary(firestore, input.userId);
-    const newTotal = (current?.visceralFatPoints || 0) + input.pointsDelta;
-    await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotal });
+    const newTotalEquity = (current?.visceralFatPoints || 0) + input.pointsDelta;
+    
+    // 1. Update Core Vitals
+    await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotalEquity });
+    
+    // 2. Add Detailed Activity Log
     await healthService.logActivity(firestore, input.userId, {
       category: input.category,
       content: `Asset Injection: ${input.workoutDetails}`,
-      metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotal}`],
+      metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotalEquity}`],
     });
-    return `Equity recalibrated. New portfolio value: ${newTotal} Visceral Fat Points.`;
+
+    // 3. Add to History Chart Array
+    await healthService.recordEquityEvent(firestore, input.userId, {
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      gain: input.pointsDelta,
+      status: input.pointsDelta >= 0 ? 'Bullish' : 'Correction',
+      detail: input.workoutDetails,
+      equity: newTotalEquity
+    });
+
+    return `Equity recalibrated. New portfolio value: ${newTotalEquity} Visceral Fat Points.`;
   }
 );
 

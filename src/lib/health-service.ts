@@ -1,6 +1,9 @@
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
-// Removed 'use client' so this can be used by the Genkit flow on the server.
+/**
+ * @fileOverview Health service for managing fitness portfolio data in Firestore.
+ */
+
 export interface HistoryEntry {
   date: string;
   gain: number;
@@ -46,10 +49,23 @@ export const healthService = {
     const docRef = doc(db, 'users', userId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return docSnap.data() as HealthData;
+    
     const initialData: HealthData = {
-      steps: 0, hrv: 50, sleepHours: 7, recoveryStatus: 'medium',
-      dailyProteinG: 0, visceralFatPoints: 0, history: [],
-      isAnonymous: true, createdAt: serverTimestamp(),
+      steps: 0,
+      hrv: 50,
+      sleepHours: 7,
+      recoveryStatus: 'medium',
+      dailyProteinG: 0,
+      visceralFatPoints: 1250, // Starting equity
+      history: [{
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        gain: 0,
+        status: 'Stable',
+        detail: 'Portfolio Initialized',
+        equity: 1250
+      }],
+      isAnonymous: true,
+      createdAt: serverTimestamp(),
     };
     await setDoc(docRef, initialData);
     return initialData;
@@ -60,12 +76,19 @@ export const healthService = {
     await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() });
   },
 
+  async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
+    const docRef = doc(db, 'users', userId);
+    await updateDoc(docRef, {
+      history: arrayUnion(entry),
+      updatedAt: serverTimestamp()
+    });
+  },
+
   async getUserPreferences(db: Firestore, userId: string): Promise<UserPreferences | null> {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return docSnap.data() as UserPreferences;
     
-    // Updated default schedule and equipment as requested
     const defaultPrefs: UserPreferences = {
       weeklySchedule: JSON.stringify({
         "Mon": "Basketball lunch",
@@ -86,7 +109,7 @@ export const healthService = {
       ],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 }
     };
-    await setDoc(docRef, defaultPrefs);
+    await setDoc(docRef, defaultPrefs, { merge: true });
     return defaultPrefs;
   },
 
@@ -100,7 +123,7 @@ export const healthService = {
     await addDoc(logsRef, { ...log, userId, timestamp: serverTimestamp() });
   },
 
-  async queryLogs(db: Firestore, userId: string, category?: string, limitCount: number = 5): Promise<HealthLog[]> {
+  async queryLogs(db: Firestore, userId: string, category?: string, limitCount: number = 10): Promise<HealthLog[]> {
     const logsRef = collection(db, 'users', userId, 'logs');
     let q = query(logsRef, orderBy('timestamp', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
