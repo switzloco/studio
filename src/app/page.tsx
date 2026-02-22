@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -79,12 +80,12 @@ export default function Home() {
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background shadow-xl overflow-hidden">
       <header className="p-4 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-primary text-white rounded-lg">
+          <div className="p-1.5 bg-primary text-white rounded-lg shadow-sm">
             <Briefcase className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight leading-none text-foreground">CFO Fitness</h1>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase mt-0.5">Asset Management System</p>
+            <h1 className="text-lg font-bold tracking-tight leading-none text-foreground italic uppercase">The CFO</h1>
+            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-tighter">Chief Fitness Officer • v2.0</p>
           </div>
         </div>
         
@@ -96,19 +97,19 @@ export default function Home() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             {user?.isAnonymous && (
-              <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-bold">
+              <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs">
                 <Cloud className="w-4 h-4" />
                 <span>Save My Portfolio</span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2">
+            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs">
               <ShieldCheck className="w-4 h-4" />
               <span>Run Internal Audit</span>
             </DropdownMenuItem>
             {!user?.isAnonymous && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive">
+                <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs">
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </DropdownMenuItem>
@@ -119,38 +120,38 @@ export default function Home() {
       </header>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
-            <TabsContent value="chat" className="h-full m-0 flex flex-col">
+        <Tabs defaultValue="chat" className="flex-1 flex flex-col h-full overflow-hidden">
+          <div className="flex-1 relative overflow-hidden h-full">
+            <TabsContent value="chat" className="h-full w-full m-0 absolute inset-0 flex flex-col data-[state=inactive]:hidden">
               <ChatInterface />
             </TabsContent>
-            <TabsContent value="daily" className="h-full m-0 overflow-y-auto">
+            <TabsContent value="daily" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
               <DashboardCards data={healthData} isLoading={isHealthLoading} />
             </TabsContent>
-            <TabsContent value="history" className="h-full m-0 overflow-y-auto">
+            <TabsContent value="history" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
               <HistoryView />
             </TabsContent>
-            <TabsContent value="assets" className="h-full m-0 overflow-y-auto">
+            <TabsContent value="assets" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
               <PreferencesView />
             </TabsContent>
           </div>
 
-          <TabsList className="grid grid-cols-4 h-16 bg-card border-t rounded-none shrink-0 p-0">
-            <TabsTrigger value="chat" className="flex flex-col gap-1 h-full rounded-none">
+          <TabsList className="grid grid-cols-4 h-16 bg-card border-t rounded-none shrink-0 p-0 gap-0">
+            <TabsTrigger value="chat" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
               <MessageSquare className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase">Coach</span>
+              <span className="text-[9px] font-black uppercase">Coach</span>
             </TabsTrigger>
-            <TabsTrigger value="daily" className="flex flex-col gap-1 h-full rounded-none">
+            <TabsTrigger value="daily" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
               <Target className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase">Focus</span>
+              <span className="text-[9px] font-black uppercase">Focus</span>
             </TabsTrigger>
-            <TabsTrigger value="history" className="flex flex-col gap-1 h-full rounded-none">
+            <TabsTrigger value="history" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
               <History className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase">Audit</span>
+              <span className="text-[9px] font-black uppercase">Audit</span>
             </TabsTrigger>
-            <TabsTrigger value="assets" className="flex flex-col gap-1 h-full rounded-none">
+            <TabsTrigger value="assets" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
               <LayoutGrid className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase">Portfolio</span>
+              <span className="text-[9px] font-black uppercase">Assets</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>

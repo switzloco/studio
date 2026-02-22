@@ -13,7 +13,7 @@ interface DashboardCardsProps {
 }
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
-  // 1. LOADING STATE
+  // 1. LOADING STATE - Skeletons for a high-fidelity feel
   if (isLoading) {
     return (
       <div className="flex flex-col h-full space-y-6 p-4 bg-background">
@@ -42,56 +42,56 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   // 2. NO DATA / INITIALIZING STATE (Wait for useEffect to create the doc)
   if (!data) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background space-y-6">
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] p-8 text-center bg-background space-y-6">
         <div className="p-4 bg-primary/10 rounded-full">
           <ShieldAlert className="w-12 h-12 text-primary animate-pulse" />
         </div>
         <div className="space-y-2">
           <h2 className="text-xl font-black tracking-tight">Portfolio Discovery</h2>
-          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+          <p className="text-sm text-muted-foreground max-w-xs mx-auto leading-relaxed">
             Opening your terminal... The CFO is initializing your personal ledger in the secure vault.
           </p>
         </div>
         <div className="flex items-center gap-2 text-primary">
           <Loader2 className="w-4 h-4 animate-spin" />
-          <span className="text-[10px] font-black uppercase">Establishing Connection...</span>
+          <span className="text-[10px] font-black uppercase tracking-widest">Establishing Connection...</span>
         </div>
       </div>
     );
   }
 
-  // 3. ONBOARDING LOCKED STATE
+  // 3. ONBOARDING LOCKED STATE - Explicit instruction for the user
   if (!data.onboardingComplete) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background space-y-6">
-        <div className="p-6 bg-muted rounded-full relative">
+      <div className="flex flex-col items-center justify-center h-full min-h-[500px] p-8 text-center bg-background space-y-8">
+        <div className="p-6 bg-muted/30 rounded-full relative">
           <Lock className="w-12 h-12 text-muted-foreground opacity-50" />
-          <div className="absolute -bottom-1 -right-1 bg-primary text-white p-1.5 rounded-full shadow-lg">
+          <div className="absolute -bottom-1 -right-1 bg-primary text-white p-2 rounded-full shadow-lg ring-4 ring-background">
             <ShieldAlert className="w-4 h-4" />
           </div>
         </div>
-        <div className="space-y-3">
-          <h2 className="text-2xl font-black tracking-tight uppercase">Portfolio Locked</h2>
-          <div className="h-1 w-12 bg-primary mx-auto rounded-full" />
-          <p className="text-sm text-muted-foreground max-w-[280px] mx-auto leading-relaxed">
-            The CFO is currently performing a <span className="font-bold text-foreground">Discovery Audit</span>. 
+        <div className="space-y-4">
+          <h2 className="text-2xl font-black tracking-tighter uppercase italic text-primary">Portfolio Under Audit</h2>
+          <div className="h-1 w-16 bg-primary mx-auto rounded-full" />
+          <p className="text-sm text-muted-foreground max-w-[300px] mx-auto leading-relaxed font-medium">
+            The CFO is currently performing a <span className="font-bold text-foreground underline decoration-primary decoration-2 underline-offset-4">Discovery Audit</span>. 
             <br/><br/>
-            Head to the <span className="font-bold text-primary italic">COACH</span> tab and complete the interview to unlock your live performance ledger.
+            Switch to the <span className="font-bold text-primary italic">COACH</span> tab and complete the briefing to unlock your performance metrics.
           </p>
         </div>
-        <Card className="bg-card/50 border-dashed border-2 p-4 mt-4 max-w-[280px]">
-          <p className="text-[10px] font-bold text-muted-foreground uppercase text-left mb-2">Audit Requirements:</p>
-          <ul className="text-[10px] font-bold text-left space-y-1">
-            <li className="flex items-center gap-2 opacity-60">
-              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
-              DEFINE WAREHOUSE ASSETS
+        <Card className="bg-card border-dashed border-2 p-5 mt-4 max-w-[300px] shadow-none">
+          <p className="text-[10px] font-black text-muted-foreground uppercase text-left mb-3 tracking-widest">Audit Requirements:</p>
+          <ul className="text-[10px] font-black text-left space-y-2">
+            <li className="flex items-center gap-2 text-muted-foreground">
+              <div className="w-1.5 h-1.5 bg-primary/30 rounded-full" />
+              IDENTIFY PHYSICAL ASSETS
             </li>
-            <li className="flex items-center gap-2 opacity-60">
-              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+            <li className="flex items-center gap-2 text-muted-foreground">
+              <div className="w-1.5 h-1.5 bg-primary/30 rounded-full" />
               SET PROTEIN SOLVENCY TARGETS
             </li>
-            <li className="flex items-center gap-2 opacity-60">
-              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+            <li className="flex items-center gap-2 text-muted-foreground">
+              <div className="w-1.5 h-1.5 bg-primary/30 rounded-full" />
               ESTABLISH WEEKLY ROUTINE
             </li>
           </ul>

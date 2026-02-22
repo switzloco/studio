@@ -1,13 +1,13 @@
+
 'use client';
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Briefcase, BarChart3, TrendingUp, AlertCircle, Loader2, ArrowRight } from "lucide-react";
+import { Briefcase, BarChart3, TrendingUp, AlertCircle, Loader2, ArrowRight, History as HistoryIcon } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Area, AreaChart, CartesianGrid, XAxis, ResponsiveContainer } from "recharts";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit } from 'firebase/firestore';
-import { Button } from '@/components/ui/button';
 
 export function HistoryView() {
   const { user } = useUser();
@@ -46,7 +46,7 @@ export function HistoryView() {
   }
 
   return (
-    <div className="p-4 space-y-6 pb-24 h-full overflow-y-auto">
+    <div className="p-4 space-y-6 pb-24 h-full overflow-y-auto bg-background">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-black tracking-tight">Portfolio History</h2>
@@ -87,7 +87,8 @@ export function HistoryView() {
           ) : (
             <div className="h-48 flex flex-col items-center justify-center text-center gap-2 bg-muted/20 rounded-lg border border-dashed">
               <AlertCircle className="w-8 h-8 text-muted-foreground opacity-50" />
-              <p className="text-[10px] font-bold text-muted-foreground uppercase">No Historical Market Data</p>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter">No Historical Market Data</p>
+              <p className="text-[8px] text-muted-foreground italic px-4">Transactions will appear here once you begin depositing assets into your ledger.</p>
             </div>
           )}
         </CardContent>
@@ -126,11 +127,16 @@ export function HistoryView() {
             ))}
           </div>
         ) : (
-          <div className="p-8 text-center bg-white/50 rounded-xl border-2 border-dashed border-muted space-y-4">
-            <p className="text-xs font-bold text-muted-foreground">The audit trail is currently cold.</p>
-            <Button variant="outline" className="text-[10px] font-bold uppercase gap-2 h-8 rounded-full">
-               Start Auditing Assets
-            </Button>
+          <div className="p-12 text-center bg-white/50 rounded-xl border-2 border-dashed border-muted space-y-4 flex flex-col items-center">
+            <div className="p-3 bg-muted/20 rounded-full">
+              <HistoryIcon className="w-8 h-8 text-muted-foreground/40" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Audit Trail: Cold</p>
+              <p className="text-[10px] text-muted-foreground max-w-[200px] leading-relaxed">
+                The transaction ledger is empty. Complete your Discovery Audit and start logging activities to see them analyzed here.
+              </p>
+            </div>
           </div>
         )}
       </div>
