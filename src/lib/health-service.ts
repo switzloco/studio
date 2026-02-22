@@ -1,8 +1,6 @@
-
-'use client';
-
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp } from 'firebase/firestore';
 
+// Removed 'use client' so this can be used by the Genkit flow on the server.
 export interface HistoryEntry {
   date: string;
   gain: number;
@@ -53,6 +51,7 @@ export const healthService = {
       dailyProteinG: 0, visceralFatPoints: 0, history: [],
       isAnonymous: true, createdAt: serverTimestamp(),
     };
+    // Note: In server context, this write is fine.
     await setDoc(docRef, initialData);
     return initialData;
   },
