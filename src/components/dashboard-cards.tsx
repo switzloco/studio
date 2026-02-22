@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -23,10 +24,10 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
 
   return (
     <div className="flex flex-col gap-6 p-4 pb-2 overflow-y-auto">
-      {/* Primary: Daily Scores Breakdown */}
+      {/* PRIMARY: DAILY PERFORMANCE AUDIT */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
+          <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit (Daily)</h2>
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
             <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter">Market Open</span>
@@ -34,7 +35,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
         </div>
         
         <div className="grid grid-cols-1 gap-3">
-          {/* Protein Score - The most important "Daily" stat for Nick */}
+          {/* Protein Score */}
           <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
             <CardContent className="p-4 flex items-center gap-4">
               <div className="p-3 bg-purple-100 rounded-xl">
@@ -48,7 +49,9 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
                 <Progress value={proteinProgress} className="h-2 bg-purple-50" />
               </div>
               <div className="text-right shrink-0">
-                <p className="text-[10px] font-black text-amber-600 uppercase tracking-tight">Debt Alert</p>
+                <p className={`text-[10px] font-black uppercase tracking-tight ${data.proteinGrams < 100 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {data.proteinGrams < 100 ? 'Debt Alert' : 'Solvent'}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -69,7 +72,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
               </CardContent>
             </Card>
 
-            {/* Recovery/Audit Score */}
+            {/* Recovery Audit */}
             <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
               <CardContent className="p-4">
                 <div className="flex justify-between items-start mb-3">
@@ -79,11 +82,11 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
                   <Activity className="w-3 h-3 text-blue-500" />
                 </div>
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Recovery Audit</p>
-                <h4 className="text-lg font-bold text-foreground">92.4</h4>
+                <h4 className="text-lg font-bold text-foreground">{data.hrv > 50 ? 'Prime' : 'Risk'}</h4>
                 <div className="flex gap-0.5 mt-1 h-1">
-                   <div className="flex-1 bg-emerald-500 rounded-full" />
-                   <div className="flex-1 bg-emerald-500 rounded-full" />
-                   <div className="flex-1 bg-emerald-500 rounded-full" />
+                   <div className={`flex-1 ${data.hrv > 30 ? 'bg-emerald-500' : 'bg-muted'} rounded-full`} />
+                   <div className={`flex-1 ${data.hrv > 50 ? 'bg-emerald-500' : 'bg-muted'} rounded-full`} />
+                   <div className={`flex-1 ${data.hrv > 70 ? 'bg-emerald-500' : 'bg-muted'} rounded-full`} />
                    <div className="flex-1 bg-muted rounded-full" />
                 </div>
               </CardContent>
@@ -92,7 +95,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
         </div>
       </div>
 
-      {/* Secondary: Total Portfolio Balance */}
+      {/* SECONDARY: TOTAL PORTFOLIO BALANCE */}
       <div className="space-y-2">
         <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-1 italic">Long-Term Portfolio</h2>
         <Card className="border-none shadow-sm overflow-hidden bg-primary text-white">
@@ -102,7 +105,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
                 <Briefcase className="w-5 h-5 text-white" />
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest">Total Asset Value</p>
+                <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest">Total Asset Value (Visceral Fat Points)</p>
                 <h3 className="text-xl font-black">{data.visceralFatPoints.toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000 pts</span></h3>
               </div>
             </div>

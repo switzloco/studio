@@ -1,7 +1,9 @@
+
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
  * It handles real-time chat interactions and multi-modal image analysis.
+ * Uses Gemini 3 Pro Preview with relaxed safety settings as per user request.
  *
  * - personalizedAICoaching - A function that handles the AI coaching chat process.
  * - PersonalizedAICoachingInput - The input type for the personalizedAICoaching function.
@@ -43,6 +45,14 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
+  config: {
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    ],
+  },
   prompt: `
   You are 'The CFO' (Chief Fitness Officer). Your client is Nick, a 42-year-old male.
   Your mission is to manage his body like a high-stakes financial portfolio.
@@ -72,7 +82,7 @@ const cfoChatPrompt = ai.definePrompt({
   Nick's current message: {{{message}}}
   {{#if photoDataUri}}Photo Audit Attached: {{media url=photoDataUri}}{{/if}}
 
-  Your response must be concise, direct, and embody the CFO persona. Format as JSON with 'response' field.
+  Your response must be concise, direct, and embody the CFO persona.
   `,
 });
 
