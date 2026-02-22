@@ -1,17 +1,13 @@
-
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
- * It handles real-time chat interactions and multi-modal image analysis.
- * Uses Gemini 3 Pro Preview with relaxed safety settings as per user request.
- *
- * - personalizedAICoaching - A function that handles the AI coaching chat process.
- * - PersonalizedAICoachingInput - The input type for the personalizedAICoaching function.
- * - PersonalizedAICoachingOutput - The return type for the personalizedAICoaching function.
+ * It handles real-time chat interactions, multi-modal image analysis, and tool-based vital updates.
+ * Uses Gemini 3 Pro Preview with relaxed safety settings.
  */
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { mockHealthService } from '@/lib/health-service';
 
 // Input Schema for the AI Coaching Flow
 const PersonalizedAICoachingInputSchema = z.object({
@@ -35,16 +31,34 @@ const PersonalizedAICoachingOutputSchema = z.object({
 });
 export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoachingOutputSchema>;
 
-// Wrapper function to call the Genkit flow
-export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  return personalizedAICoachingFlow(input);
-}
+// TOOL: Update Vitals
+// This tool allows the CFO to actually modify the portfolio data.
+const updateVitalsTool = ai.defineTool(
+  {
+    name: 'updateVitals',
+    description: "Updates Nick's health portfolio metrics. Use this when Nick consumes protein, completes a workout, or earns points. You can add or subtract values.",
+    inputSchema: z.object({
+      proteinGrams: z.number().optional().describe('Grams of protein to ADD to the current total (can be negative).'),
+      visceralFatPoints: z.number().optional().describe('Points to ADD to the visceral fat portfolio (can be negative).'),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const current = await mockHealthService.getHealthSummary();
+    await mockHealthService.updateHealthData({
+      proteinGrams: current.proteinGrams + (input.proteinGrams || 0),
+      visceralFatPoints: current.visceralFatPoints + (input.visceralFatPoints || 0),
+    });
+    return "Portfolio updated successfully. The new assets are reflected in the terminal.";
+  }
+);
 
 // Define the prompt for "The CFO" AI coach
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
+  tools: [updateVitalsTool],
   config: {
     safetySettings: [
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -67,11 +81,14 @@ const cfoChatPrompt = ai.definePrompt({
   - Recent CapEx (Activity): {{{recentWorkoutLoad}}}
 
   TONE: Sarcastic, data-driven, tough-love, financial metaphor heavy. 
-  If protein is over 100g, do NOT call it a penny stock; acknowledge the liquidity but push for the full 150g.
   
+  **TOOL USAGE:**
+  If Nick reports consuming protein (e.g., "I just had a 50g shake") or completing a task that earns points, call the 'updateVitals' tool immediately. 
+  Confirm the "capital infusion" in your response.
+
   **Multi-modal Directive:**
   If Nick provides a photo (photoDataUri), perform an immediate "Asset Audit". 
-  
+
   **Chat History:**
   {{#each chatHistory}}
   {{#if (eq role "user")}}Nick: {{{content}}}
@@ -101,3 +118,7 @@ const personalizedAICoachingFlow = ai.defineFlow(
     return output;
   }
 );
+
+export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
+  return personalizedAICoachingFlow(input);
+}

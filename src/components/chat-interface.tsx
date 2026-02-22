@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -15,7 +14,11 @@ interface Message {
   image?: string;
 }
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+  onMessageProcessed?: () => void;
+}
+
+export function ChatInterface({ onMessageProcessed }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'model', content: "Nick, let's look at the portfolio. Your protein intake is looking like a penny stock. Time for a capital infusion. What's the plan for today's lunch session?" }
   ]);
@@ -60,6 +63,10 @@ export function ChatInterface() {
 
     if (result.success && result.response) {
       setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
+      // Trigger a refresh of the dashboard cards if the CFO updated the portfolio
+      if (onMessageProcessed) {
+        onMessageProcessed();
+      }
     } else {
       toast({
         variant: "destructive",

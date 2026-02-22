@@ -7,22 +7,33 @@ export interface HealthData {
   visceralFatPoints: number;
 }
 
+// Mutable singleton state for the demo session
+let currentHealth: HealthData = {
+  steps: 8432,
+  hrv: 62,
+  sleepHours: 7.2,
+  recoveryStatus: 'medium',
+  proteinGrams: 110,
+  visceralFatPoints: 1250,
+};
+
 export const mockHealthService = {
   async getHealthSummary(): Promise<HealthData> {
-    // Simulating API latency
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Generating consistent pseudo-random metrics for Nick
-    const hour = new Date().getHours();
-    
-    return {
-      steps: 8432,
-      hrv: 62,
-      sleepHours: 7.2,
-      recoveryStatus: 'medium',
-      proteinGrams: hour > 14 ? 110 : 45, // Simulating mid-day protein intake
-      visceralFatPoints: 1250,
+    // Simulating minor latency
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return { ...currentHealth };
+  },
+
+  async updateHealthData(updates: Partial<HealthData>): Promise<HealthData> {
+    console.log("Updating Vitals:", updates);
+    currentHealth = { 
+      ...currentHealth, 
+      ...updates,
+      // Ensure we don't go below zero
+      proteinGrams: Math.max(0, (updates.proteinGrams !== undefined ? updates.proteinGrams : currentHealth.proteinGrams)),
+      visceralFatPoints: Math.max(0, (updates.visceralFatPoints !== undefined ? updates.visceralFatPoints : currentHealth.visceralFatPoints))
     };
+    return { ...currentHealth };
   },
 
   async requestPermissions(): Promise<boolean> {

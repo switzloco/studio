@@ -1,25 +1,23 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { mockHealthService, HealthData } from '@/lib/health-service';
 import { Briefcase, Settings, Menu, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const [healthData, setHealthData] = useState<HealthData | null>(null);
-  const router = useRouter();
+
+  const fetchHealthData = useCallback(async () => {
+    const data = await mockHealthService.getHealthSummary();
+    setHealthData(data);
+  }, []);
 
   useEffect(() => {
-    async function init() {
-      // Mocking auth check for this demo environment
-      const data = await mockHealthService.getHealthSummary();
-      setHealthData(data);
-    }
-    init();
-  }, []);
+    fetchHealthData();
+  }, [fetchHealthData]);
 
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background shadow-xl overflow-hidden">
@@ -65,7 +63,7 @@ export default function Home() {
         </div>
 
         <DashboardCards data={healthData} />
-        <ChatInterface />
+        <ChatInterface onMessageProcessed={fetchHealthData} />
       </main>
     </div>
   );
