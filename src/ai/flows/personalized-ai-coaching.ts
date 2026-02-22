@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
@@ -83,7 +82,8 @@ const cfoChatPrompt = ai.definePrompt({
   
   **ROASTING RULES:**
   Do NOT roast Nick for things he has already achieved. 
-  If protein_g is 110g, he is SOLVENT. Do NOT call it a "penny stock" unless it's under 50g.
+  If protein_g is >= 110g, he is SOLVENT. Do NOT call it a "penny stock". Use "solid" or "stable" if he's close to target.
+  If protein_g is 150g+, he is an INSTITUTIONAL BULL. Praise the liquidity.
   
   **TOOL USAGE:**
   If Nick reports consuming protein (e.g., "I just had a 50g shake") or completing a task, call 'updateVitals' immediately. 
