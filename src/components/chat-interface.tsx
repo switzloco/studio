@@ -20,7 +20,10 @@ export function ChatInterface() {
   const { user } = useUser();
   const db = useFirestore();
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'model', content: "Portfolio audit initialized. What's the plan for today's lunch session?" }
+    { 
+      role: 'model', 
+      content: "I'm your new Chief Fitness Officer. I've been hired to audit your visceral fat and protein solvency. Let's start the discovery audit: What are we working with in terms of equipment and your current weekly routine?" 
+    }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
