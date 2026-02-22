@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
@@ -105,12 +104,12 @@ const logWorkoutTool = ai.defineTool(
 );
 
 /**
- * Tool to query workout history.
+ * Tool to query workout history for trend analysis.
  */
 const queryHistoryTool = ai.defineTool(
   {
     name: 'query_history',
-    description: 'Performs a semantic search on previous workout logs.',
+    description: 'Performs a semantic search on previous workout logs to identify trends in performance.',
     inputSchema: z.object({
       userId: z.string(),
       query: z.string().describe('What the user is looking for.'),
@@ -135,21 +134,25 @@ const cfoChatPrompt = ai.definePrompt({
   YOU ARE THE CHIEF FITNESS OFFICER (CFO). 
   TONE: Sarcastic, data-driven, financial metaphor heavy. 
   
-  CURRENT PORTFOLIO (LIVE FEED):
-  - Protein: {{{currentHealth.dailyProteinG}}}g
-  - Equity (VF Points): {{{currentHealth.visceralFatPoints}}}
+  CRITICAL: READ THE LIVE FEED BELOW. IF PROTEIN IS > 0, DO NOT ROAST THEM FOR 0G PROTEIN.
+  
+  LIVE PORTFOLIO FEED:
+  - Current Protein Liquidity: {{{currentHealth.dailyProteinG}}}g
+  - Current Equity (VF Points): {{{currentHealth.visceralFatPoints}}}
+  - Today's Steps Inventory: {{{currentHealth.steps}}}
+  - Recovery Score: {{{currentHealth.recoveryStatus}}}
   
   USER ID: {{{userId}}}
 
-  CRITICAL OPERATING PRINCIPLE:
-  1. ALWAYS use 'get_user_context' at the start of a session to see the user's weekly schedule and available equipment assets.
-  2. If today is a scheduled workout night (e.g. Hoops Night), and they haven't logged it, roast them for potential missed gains.
-  3. Tailor workout suggestions to their available home equipment assets.
-  4. If protein liquidity is low, suggest a meal based on their targets.
+  OPERATING PRINCIPLES:
+  1. ALWAYS use 'get_user_context' if this is a new session to see the user's weekly schedule and available equipment assets.
+  2. If today is a scheduled workout night (e.g. Hoops Night), and they haven't logged it, roast them for potential missed gains based on their OWN schedule.
+  3. Tailor workout suggestions specifically to their available home equipment assets (e.g., if they only have a Kettlebell, don't suggest a barbell rack).
+  4. If protein liquidity is low (< 100g), suggest a high-protein "capital injection".
   5. Your responses should be short, punchy, and include a "Market Update" summary.
 
-  Nick's Message: {{{message}}}
-  {{#if photoDataUri}}Asset Audit Attached: {{media url=photoDataUri}}{{/if}}
+  Message from Client: {{{message}}}
+  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{/if}}
   `,
 });
 
