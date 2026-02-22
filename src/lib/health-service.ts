@@ -1,3 +1,7 @@
+'use client';
+
+import { doc, getDoc, setDoc, updateDoc, Firestore, serverTimestamp } from 'firebase/firestore';
+
 export interface HistoryEntry {
   date: string;
   gain: number;
@@ -7,6 +11,7 @@ export interface HistoryEntry {
 }
 
 export interface HealthData {
+  id?: string;
   steps: number;
   hrv: number;
   sleepHours: number;
@@ -14,77 +19,80 @@ export interface HealthData {
   protein_g: number;
   visceral_fat_points: number;
   history: HistoryEntry[];
+  updatedAt?: any;
+  createdAt?: any;
+  isAnonymous: boolean;
 }
 
 /**
- * MOCK HEALTH SERVICE (MUTABLE SINGLETON)
- * 
- * In a real app, this would be a Firestore collection. 
- * For this MVP, we use a mutable singleton to allow the AI to 
- * 'write' to your portfolio in real-time.
+ * HEALTH SERVICE (FIRESTORE BACKED)
  */
-let currentHealth: HealthData = {
-  steps: 8432,
-  hrv: 62,
-  sleepHours: 7.2,
-  recoveryStatus: 'medium',
-  protein_g: 110,
-  visceral_fat_points: 1250,
-  history: [
-    { date: "Oct 24", gain: 350, status: "Bullish", detail: "High Protein Intake | Solvency Met", equity: 1250 },
-    { date: "Oct 23", gain: 150, status: "Stable", detail: "Recovery Audit: Prime", equity: 900 },
-    { date: "Oct 22", gain: 200, status: "Bullish", detail: "Capital Infusion: Leg Day", equity: 750 },
-    { date: "Oct 21", gain: -50, status: "Correction", detail: "Liquidity Shortage | Sleep Debt", equity: 550 },
-  ]
-};
-
-export const mockHealthService = {
-  async getHealthSummary(): Promise<HealthData> {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return { ...currentHealth };
-  },
-
-  async updateHealthData(updates: Partial<HealthData>): Promise<HealthData> {
-    currentHealth = { 
-      ...currentHealth, 
-      ...updates,
-      protein_g: Math.max(0, (updates.protein_g !== undefined ? updates.protein_g : currentHealth.protein_g)),
-      visceral_fat_points: Math.max(0, (updates.visceral_fat_points !== undefined ? updates.visceral_fat_points : currentHealth.visceral_fat_points)),
-      history: updates.history || currentHealth.history
+export const healthService = {
+  async getHealthSummary(db: Firestore, userId: string): Promise<HealthData | null> {
+    const docRef = doc(db, 'users', userId);
+    const docSnap = await getDoc(docRef);
+    
+    if (docSnap.exists()) {
+      return docSnap.data() as HealthData;
+    }
+    
+    // Initialize if doesn't exist
+    const initialData: HealthData = {
+      steps: 0,
+      hrv: 50,
+      sleepHours: 7,
+      recoveryStatus: 'medium',
+      protein_g: 0,
+      visceral_fat_points: 0,
+      history: [],
+      isAnonymous: true,
+      createdAt: serverTimestamp(),
     };
-    return { ...currentHealth };
+    
+    await setDoc(docRef, initialData);
+    return initialData;
   },
 
-  async addHistoryEntry(entry: HistoryEntry) {
-    currentHealth.history = [entry, ...currentHealth.history];
-    if (currentHealth.history.length > 14) {
-      currentHealth.history = currentHealth.history.slice(0, 14);
-    }
-    return currentHealth.history;
+  async updateHealthData(db: Firestore, userId: string, updates: Partial<HealthData>): Promise<void> {
+    const docRef = doc(db, 'users', userId);
+    await updateDoc(docRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
   },
 
-  async updateHistoryEntry(date: string, updates: Partial<HistoryEntry>) {
-    const index = currentHealth.history.findIndex(h => h.date === date);
+  async addHistoryEntry(db: Firestore, userId: string, entry: HistoryEntry) {
+    const current = await this.getHealthSummary(db, userId);
+    if (!current) return;
+    
+    const newHistory = [entry, ...current.history].slice(0, 30);
+    await this.updateHealthData(db, userId, { history: newHistory });
+  },
+
+  async updateHistoryEntry(db: Firestore, userId: string, date: string, updates: Partial<HistoryEntry>) {
+    const current = await this.getHealthSummary(db, userId);
+    if (!current) return;
+
+    const index = current.history.findIndex(h => h.date === date);
     if (index !== -1) {
-      currentHealth.history[index] = { ...currentHealth.history[index], ...updates };
-      // If equity changed, we might need to re-calculate subsequent running totals, 
-      // but for this MVP we update the specific record.
+      const updatedHistory = [...current.history];
+      updatedHistory[index] = { ...updatedHistory[index], ...updates };
+      
+      const payload: Partial<HealthData> = { history: updatedHistory };
       if (updates.equity !== undefined && index === 0) {
-        currentHealth.visceral_fat_points = updates.equity;
+        payload.visceral_fat_points = updates.equity;
       }
+      
+      await this.updateHealthData(db, userId, payload);
     }
-    return currentHealth.history;
   },
 
-  async batchUpdateHistory(entries: HistoryEntry[]) {
-    currentHealth.history = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    if (entries.length > 0) {
-      currentHealth.visceral_fat_points = entries[0].equity;
-    }
-    return currentHealth.history;
-  },
-
-  async requestPermissions(): Promise<boolean> {
-    return true;
+  async batchUpdateHistory(db: Firestore, userId: string, entries: HistoryEntry[]) {
+    const sorted = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const payload: Partial<HealthData> = { 
+      history: sorted,
+      visceral_fat_points: sorted.length > 0 ? sorted[0].equity : 0
+    };
+    await this.updateHealthData(db, userId, payload);
   }
 };

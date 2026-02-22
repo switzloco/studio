@@ -1,16 +1,14 @@
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
-import { mockHealthService } from '@/lib/health-service';
 
 export async function sendChatMessage(
   message: string, 
   chatHistory: { role: 'user' | 'model', content: string }[],
+  currentHealth: any,
   photoDataUri?: string
 ) {
   try {
-    // RE-FETCH LIVE STATE: This ensures the CFO "sees" the dashboard and history before it speaks.
-    const health = await mockHealthService.getHealthSummary();
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const currentDay = dayNames[new Date().getDay()];
 
@@ -18,17 +16,16 @@ export async function sendChatMessage(
       message,
       photoDataUri,
       chatHistory,
-      visceral_fat_points: health.visceral_fat_points,
-      protein_g: health.protein_g,
-      recoveryStatus: health.recoveryStatus,
+      visceral_fat_points: currentHealth.visceral_fat_points,
+      protein_g: currentHealth.protein_g,
+      recoveryStatus: currentHealth.recoveryStatus,
       currentDay,
-      history: health.history,
-      recentWorkoutLoad: "Activity audit: High-intensity assets active. Recent movement identified.",
+      history: currentHealth.history,
     });
 
-    return { success: true, response: response.response };
+    return { success: true, response: response.response, commands: response.commands };
   } catch (error) {
     console.error("Chat flow error:", error);
-    return { success: false, error: "The CFO is currently reviewing other portfolios. Market is closed." };
+    return { success: false, error: "The CFO is reviewing other portfolios. Market is closed." };
   }
 }

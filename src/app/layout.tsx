@@ -1,11 +1,11 @@
 import type {Metadata} from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
+import { FirebaseClientProvider } from '@/firebase/client-provider';
 
 export const metadata: Metadata = {
   title: 'CFO Fitness | Chief Fitness Officer',
   description: 'Manage your body like a high-stakes financial portfolio.',
-  manifest: '/manifest.json',
 };
 
 export default function RootLayout({
@@ -24,7 +24,9 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="CFO Fitness" />
       </head>
       <body className="font-body antialiased bg-background text-foreground min-h-screen flex flex-col">
-        {children}
+        <FirebaseClientProvider>
+          {children}
+        </FirebaseClientProvider>
         <Toaster />
       </body>
     </html>
