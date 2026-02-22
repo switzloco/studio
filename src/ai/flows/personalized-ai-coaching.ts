@@ -6,7 +6,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import { initializeFirebase } from '@/firebase';
+import { initializeFirebase } from '@/firebase/sdk';
 import { healthService } from '@/lib/health-service';
 
 const PersonalizedAICoachingInputSchema = z.object({
@@ -167,7 +167,7 @@ const cfoChatPrompt = ai.definePrompt({
   6. DO NOT roast the user for 0g protein if the LIVE PORTFOLIO FEED shows they are solvent (>100g).
 
   Message from Client: {{{message}}}
-  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{if}}
+  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{/if}}
   `,
 });
 

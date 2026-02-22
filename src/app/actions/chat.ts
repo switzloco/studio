@@ -1,7 +1,11 @@
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
-import { initializeFirebase } from '@/firebase';
+import { initializeFirebase } from '@/firebase/sdk';
+
+/**
+ * @fileOverview Server Action for sending chat messages to the CFO AI Coach.
+ */
 
 export async function sendChatMessage(
   message: string, 

@@ -18,8 +18,9 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
     </div>
   );
 
-  const fatProgress = (data.visceral_fat_points / 3000) * 100;
-  const proteinProgress = (data.protein_g / 150) * 100;
+  // Use camelCase properties as defined in health-service.ts and backend.json
+  const fatProgress = (data.visceralFatPoints / 3000) * 100;
+  const proteinProgress = (data.dailyProteinG / 150) * 100;
 
   return (
     <div className="flex flex-col gap-6 p-4 pb-20">
@@ -40,13 +41,13 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
                 <p className="text-xs font-bold text-foreground">Protein Liquidity</p>
-                <span className="text-[10px] font-bold text-muted-foreground">{data.protein_g}g / 150g</span>
+                <span className="text-[10px] font-bold text-muted-foreground">{data.dailyProteinG}g / 150g</span>
               </div>
               <Progress value={proteinProgress} className="h-2 bg-purple-50" />
             </div>
             <div className="text-right shrink-0">
-              <p className={`text-[10px] font-black uppercase ${data.protein_g >= 110 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {data.protein_g >= 110 ? 'Solvent' : 'Debt Alert'}
+              <p className={`text-[10px] font-black uppercase ${data.dailyProteinG >= 110 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {data.dailyProteinG >= 110 ? 'Solvent' : 'Debt Alert'}
               </p>
             </div>
           </CardContent>
@@ -59,7 +60,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
                 <Zap className="w-4 h-4 text-orange-600" />
               </div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Steps Inventory</p>
-              <h4 className="text-lg font-bold">{data.steps.toLocaleString()}</h4>
+              <h4 className="text-lg font-bold">{(data.steps || 0).toLocaleString()}</h4>
             </CardContent>
           </Card>
 
@@ -85,11 +86,11 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase opacity-80">Equity Score (VF Points)</p>
-                <h3 className="text-xl font-black">{data.visceral_fat_points.toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000</span></h3>
+                <h3 className="text-xl font-black">{(data.visceralFatPoints || 0).toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000</span></h3>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-xs font-black text-emerald-300">{Math.min(100, fatProgress).toFixed(1)}%</p>
+              <p className="text-xs font-black text-emerald-300">{Math.min(100, fatProgress || 0).toFixed(1)}%</p>
             </div>
           </CardContent>
           <Progress value={fatProgress} className="h-1 rounded-none bg-white/10" />
