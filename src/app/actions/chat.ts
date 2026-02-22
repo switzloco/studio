@@ -13,9 +13,13 @@ export async function sendChatMessage(
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
 
+    // Get current day of the week for the AI context
+    const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
+
     const response = await personalizedAICoaching({
       userId,
       message,
+      currentDay,
       photoDataUri,
       chatHistory,
       currentHealth,

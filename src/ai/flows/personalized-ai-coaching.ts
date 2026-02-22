@@ -1,7 +1,7 @@
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
- * Utilizes Genkit Tools for real-time portfolio management and contextual awareness.
+ * Optimized for Gemini 2.0 Flash with enhanced tool capabilities for schedule management.
  */
 
 import { ai } from '@/ai/genkit';
@@ -12,6 +12,7 @@ import { healthService } from '@/lib/health-service';
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
   message: z.string(),
+  currentDay: z.string().describe('The current day of the week (e.g., Monday).'),
   photoDataUri: z.string().optional(),
   currentHealth: z.any().optional(),
   chatHistory: z.array(z.object({
@@ -47,7 +48,29 @@ const getUserContextTool = ai.defineTool(
 );
 
 /**
- * Tool to log protein intake and update portfolio solvency.
+ * Tool to update the user's weekly schedule.
+ */
+const updateScheduleTool = ai.defineTool(
+  {
+    name: 'update_schedule',
+    description: 'Updates a specific day in the user schedule or the entire JSON schedule. Use this when the user cancels an activity or changes their routine.',
+    inputSchema: z.object({
+      userId: z.string(),
+      newScheduleJson: z.string().describe('The complete updated JSON string for the weekly schedule.'),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const { firestore } = initializeFirebase();
+    await healthService.updateUserPreferences(firestore, input.userId, {
+      weeklySchedule: input.newScheduleJson
+    });
+    return "Schedule recalibrated. Portfolio updated with new routine parameters.";
+  }
+);
+
+/**
+ * Tool to log protein intake.
  */
 const logNutritionTool = ai.defineTool(
   {
@@ -75,7 +98,7 @@ const logNutritionTool = ai.defineTool(
 );
 
 /**
- * Tool to log workouts and calculate Visceral Fat Points.
+ * Tool to log workouts.
  */
 const logWorkoutTool = ai.defineTool(
   {
@@ -104,12 +127,12 @@ const logWorkoutTool = ai.defineTool(
 );
 
 /**
- * Tool to query workout history for trend analysis.
+ * Tool to query history.
  */
 const queryHistoryTool = ai.defineTool(
   {
     name: 'query_history',
-    description: 'Performs a semantic search on previous workout logs to identify trends in performance.',
+    description: 'Performs a search on previous workout logs to identify trends in performance.',
     inputSchema: z.object({
       userId: z.string(),
       query: z.string().describe('What the user is looking for.'),
@@ -129,26 +152,33 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
-  tools: [getUserContextTool, logNutritionTool, logWorkoutTool, queryHistoryTool],
+  tools: [getUserContextTool, updateScheduleTool, logNutritionTool, logWorkoutTool, queryHistoryTool],
   prompt: `
   YOU ARE THE CHIEF FITNESS OFFICER (CFO). 
   TONE: Sarcastic, data-driven, financial metaphor heavy. 
   
-  CRITICAL: READ THE LIVE FEED BELOW. IF PROTEIN IS > 0, DO NOT ROAST THEM FOR 0G PROTEIN.
-  
+  CURRENT DAY: {{{currentDay}}}
+  USER ID: {{{userId}}}
+
   LIVE PORTFOLIO FEED:
   - Current Protein Liquidity: {{{currentHealth.dailyProteinG}}}g
   - Current Equity (VF Points): {{{currentHealth.visceralFatPoints}}}
-  - Today's Steps Inventory: {{{currentHealth.steps}}}
   - Recovery Score: {{{currentHealth.recoveryStatus}}}
-  
-  USER ID: {{{userId}}}
+
+  INVENTORY AWARENESS (CORE ASSETS):
+  You must only suggest workouts using these specific assets:
+  - 55lb kettlebell
+  - 25lb kettlebell
+  - 50lb ruck
+  - Pull-up rings
+  - Adjustable dumbbells
+  - ATG slant board
 
   OPERATING PRINCIPLES:
-  1. ALWAYS use 'get_user_context' if this is a new session to see the user's weekly schedule and available equipment assets.
-  2. If today is a scheduled workout night (e.g. Hoops Night), and they haven't logged it, roast them for potential missed gains based on their OWN schedule.
-  3. Tailor workout suggestions specifically to their available home equipment assets (e.g., if they only have a Kettlebell, don't suggest a barbell rack).
-  4. If protein liquidity is low (< 100g), suggest a high-protein "capital injection".
+  1. ALWAYS use 'get_user_context' at the start of a session if you haven't yet, to see the user's weekly schedule and available assets.
+  2. If the user asks "What's the play today?", identify today's scheduled activity from the context (e.g., Lift, Hoops, etc.) and suggest a specific workout tailored to their INVENTORY.
+  3. If today is a scheduled workout (like Hoops Night) and they haven't logged it, roast them for missing potential gains.
+  4. Use 'update_schedule' if the user says they are cancelling or changing an activity for today.
   5. Your responses should be short, punchy, and include a "Market Update" summary.
 
   Message from Client: {{{message}}}

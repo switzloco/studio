@@ -51,7 +51,6 @@ export const healthService = {
       dailyProteinG: 0, visceralFatPoints: 0, history: [],
       isAnonymous: true, createdAt: serverTimestamp(),
     };
-    // Note: In server context, this write is fine.
     await setDoc(docRef, initialData);
     return initialData;
   },
@@ -65,9 +64,26 @@ export const healthService = {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return docSnap.data() as UserPreferences;
+    
+    // Updated default schedule and equipment as requested
     const defaultPrefs: UserPreferences = {
-      weeklySchedule: JSON.stringify({ "Mon": "Legs", "Tue": "Rest", "Wed": "Push", "Thu": "Hoops Night", "Fri": "Pull", "Sat": "LISS", "Sun": "Rest" }, null, 2),
-      equipment: ["55lb Kettlebell", "Slant Board", "Pull Up Bar"],
+      weeklySchedule: JSON.stringify({
+        "Mon": "Basketball lunch",
+        "Tue": "Lift",
+        "Wed": "Ultimate Frisbee",
+        "Thu": "Lift + 8:30PM Hoops",
+        "Fri": "Ultimate",
+        "Sat": "Friends hoops",
+        "Sun": "League hoops"
+      }, null, 2),
+      equipment: [
+        "55lb kettlebell",
+        "25lb kettlebell",
+        "50lb ruck",
+        "pull-up rings",
+        "adjustable dumbbells",
+        "ATG slant board"
+      ],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 }
     };
     await setDoc(docRef, defaultPrefs);
