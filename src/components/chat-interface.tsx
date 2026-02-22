@@ -1,13 +1,13 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Mic, Send, Camera, User, Briefcase, X, ImageIcon } from "lucide-react";
+import { Mic, Send, Camera, User, Briefcase, X } from "lucide-react";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
-import Image from 'next/image';
 
 interface Message {
   role: 'user' | 'model';
@@ -75,8 +75,8 @@ export function ChatInterface() {
     setIsLiveActive(!isLiveActive);
     if (!isLiveActive) {
       toast({
-        title: "Gemini Live API Active",
-        description: "Establishing bidirectional voice link with the CFO...",
+        title: "Live Bidirectional Active",
+        description: "Establishing low-latency link with the CFO...",
       });
     }
   };
@@ -150,7 +150,7 @@ export function ChatInterface() {
                         <div className="w-3 h-3 bg-primary rounded-full animate-ping absolute" />
                         <div className="w-3 h-3 bg-primary rounded-full" />
                     </div>
-                    <span className="text-xs font-semibold text-primary">Gemini Live Active</span>
+                    <span className="text-xs font-semibold text-primary">High-Intensity Mode Active</span>
                 </div>
                 <div className="flex gap-1.5">
                     {[1, 2, 3, 4, 5].map(i => (
@@ -207,7 +207,7 @@ export function ChatInterface() {
           </Button>
         </div>
         <p className="text-[10px] text-center text-muted-foreground mt-3 font-medium uppercase tracking-widest opacity-60">
-            Multimodal Audit | Gemini 2.5 Flash
+            Multimodal Audit | Gemini 3 Pro Preview
         </p>
       </div>
     </div>
