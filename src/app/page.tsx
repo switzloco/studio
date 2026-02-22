@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
+import { HistoryView } from '@/components/history-view';
 import { mockHealthService, HealthData } from '@/lib/health-service';
-import { Briefcase, Settings, Menu, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Briefcase, Settings, TrendingUp, ShieldCheck, MessageSquare, Target, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -13,6 +14,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { runInternalAudit } from '@/lib/internal-audit';
 import { useToast } from '@/hooks/use-toast';
 
@@ -52,14 +59,14 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background shadow-xl overflow-hidden">
       {/* Header */}
-      <header className="p-4 flex items-center justify-between glass-morphism border-b z-10">
+      <header className="p-4 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-primary text-white rounded-lg shadow-sm">
             <Briefcase className="w-5 h-5" />
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-foreground leading-none">CFO Fitness</h1>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase mt-0.5 text-xs">Asset Management System</p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase mt-0.5 tracking-wider">Asset Management System</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -86,28 +93,65 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main App Area */}
+      {/* Main App Area with Tabs */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
         
-        {/* Morning Audit Alert */}
-        <div className="px-4 py-2 mt-2">
-            <div className="bg-primary text-white p-3 rounded-xl flex items-center justify-between shadow-lg animate-in slide-in-from-top-4 duration-500">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-                        <TrendingUp className="w-4 h-4" />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase opacity-80">Audit Complete</p>
-                        <p className="text-xs font-semibold">Portfolios healthy. High-intensity assets active.</p>
-                    </div>
-                </div>
-                <ChevronRight className="w-4 h-4 opacity-50" />
-            </div>
-        </div>
+        <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <TabsContent value="chat" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden flex flex-col">
+              <ChatInterface onMessageProcessed={fetchHealthData} />
+            </TabsContent>
+            
+            <TabsContent value="daily" className="flex-1 overflow-y-auto m-0 data-[state=inactive]:hidden">
+              {/* Morning Audit Alert */}
+              <div className="px-4 py-2 mt-2">
+                  <div className="bg-primary text-white p-3 rounded-xl flex items-center justify-between shadow-lg animate-in slide-in-from-top-4 duration-500">
+                      <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+                              <TrendingUp className="w-4 h-4" />
+                          </div>
+                          <div>
+                              <p className="text-[10px] font-bold uppercase opacity-80">Audit Complete</p>
+                              <p className="text-xs font-semibold">Portfolios healthy. High-intensity assets active.</p>
+                          </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 opacity-50" />
+                  </div>
+              </div>
+              <DashboardCards data={healthData} />
+            </TabsContent>
+            
+            <TabsContent value="history" className="flex-1 overflow-y-auto m-0 data-[state=inactive]:hidden">
+              <HistoryView />
+            </TabsContent>
+          </div>
 
-        <DashboardCards data={healthData} />
-        <ChatInterface onMessageProcessed={fetchHealthData} />
+          {/* Bottom Tab Bar */}
+          <TabsList className="grid grid-cols-3 h-16 bg-card border-t rounded-none shrink-0 p-0">
+            <TabsTrigger 
+              value="chat" 
+              className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-primary/5 data-[state=active]:text-primary border-r last:border-r-0"
+            >
+              <MessageSquare className="w-5 h-5" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Coach</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="daily" 
+              className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-primary/5 data-[state=active]:text-primary border-r last:border-r-0"
+            >
+              <Target className="w-5 h-5" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Focus</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="history" 
+              className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-primary/5 data-[state=active]:text-primary"
+            >
+              <History className="w-5 h-5" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Audit</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </main>
     </div>
   );
