@@ -76,39 +76,39 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-3xl mx-auto bg-background shadow-xl overflow-hidden">
-      <header className="p-4 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-primary text-white rounded-lg shadow-sm">
+    <div className="flex flex-col h-screen max-w-5xl mx-auto bg-background shadow-2xl overflow-hidden border-x">
+      <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-primary text-white rounded-xl shadow-md">
             <Briefcase className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight leading-none text-foreground italic uppercase">The CFO</h1>
-            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-tighter">Chief Fitness Officer • v2.0</p>
+            <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">The CFO</h1>
+            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">Chief Fitness Officer • v2.0</p>
           </div>
         </div>
         
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full">
+            <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted">
               {isAuditing ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Settings className="w-5 h-5 text-muted-foreground" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-64">
             {user?.isAnonymous && (
-              <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs">
+              <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3">
                 <Cloud className="w-4 h-4" />
                 <span>Save My Portfolio</span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs">
+            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3">
               <ShieldCheck className="w-4 h-4" />
               <span>Run Internal Audit</span>
             </DropdownMenuItem>
             {!user?.isAnonymous && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs">
+                <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </DropdownMenuItem>
@@ -135,22 +135,22 @@ export default function Home() {
             </TabsContent>
           </div>
 
-          <TabsList className="grid grid-cols-4 h-16 bg-card border-t rounded-none shrink-0 p-0 gap-0">
-            <TabsTrigger value="chat" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
-              <MessageSquare className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase">Coach</span>
+          <TabsList className="grid grid-cols-4 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
+            <TabsTrigger value="chat" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <MessageSquare className="w-6 h-6" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Coach</span>
             </TabsTrigger>
-            <TabsTrigger value="daily" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
-              <Target className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase">Focus</span>
+            <TabsTrigger value="daily" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <Target className="w-6 h-6" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Focus</span>
             </TabsTrigger>
-            <TabsTrigger value="history" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
-              <History className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase">Audit</span>
+            <TabsTrigger value="history" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <History className="w-6 h-6" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Audit</span>
             </TabsTrigger>
-            <TabsTrigger value="assets" className="flex flex-col gap-1 h-full rounded-none data-[state=active]:bg-muted/50">
-              <LayoutGrid className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase">Assets</span>
+            <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <LayoutGrid className="w-6 h-6" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Assets</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
