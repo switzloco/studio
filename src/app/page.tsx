@@ -1,10 +1,12 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud } from 'lucide-react';
+import { PreferencesView } from '@/components/preferences-view';
+import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -100,9 +102,12 @@ export default function Home() {
             <TabsContent value="history" className="h-full m-0 overflow-y-auto">
               <HistoryView />
             </TabsContent>
+            <TabsContent value="assets" className="h-full m-0 overflow-y-auto">
+              <PreferencesView />
+            </TabsContent>
           </div>
 
-          <TabsList className="grid grid-cols-3 h-16 bg-card border-t rounded-none shrink-0 p-0">
+          <TabsList className="grid grid-cols-4 h-16 bg-card border-t rounded-none shrink-0 p-0">
             <TabsTrigger value="chat" className="flex flex-col gap-1 h-full rounded-none">
               <MessageSquare className="w-5 h-5" />
               <span className="text-[10px] font-bold uppercase">Coach</span>
@@ -114,6 +119,10 @@ export default function Home() {
             <TabsTrigger value="history" className="flex flex-col gap-1 h-full rounded-none">
               <History className="w-5 h-5" />
               <span className="text-[10px] font-bold uppercase">Audit</span>
+            </TabsTrigger>
+            <TabsTrigger value="assets" className="flex flex-col gap-1 h-full rounded-none">
+              <LayoutGrid className="w-5 h-5" />
+              <span className="text-[10px] font-bold uppercase">Portfolio</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
