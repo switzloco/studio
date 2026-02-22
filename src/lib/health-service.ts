@@ -1,3 +1,10 @@
+export interface HistoryEntry {
+  date: string;
+  gain: number;
+  status: 'Bullish' | 'Stable' | 'Correction';
+  detail: string;
+  equity: number;
+}
 
 export interface HealthData {
   steps: number;
@@ -6,6 +13,7 @@ export interface HealthData {
   recoveryStatus: 'low' | 'medium' | 'high';
   protein_g: number;
   visceral_fat_points: number;
+  history: HistoryEntry[];
 }
 
 /**
@@ -22,25 +30,50 @@ let currentHealth: HealthData = {
   recoveryStatus: 'medium',
   protein_g: 110,
   visceral_fat_points: 1250,
+  history: [
+    { date: "Oct 24", gain: 350, status: "Bullish", detail: "High Protein Intake | Solvency Met", equity: 1250 },
+    { date: "Oct 23", gain: 150, status: "Stable", detail: "Recovery Audit: Prime", equity: 900 },
+    { date: "Oct 22", gain: 200, status: "Bullish", detail: "Capital Infusion: Leg Day", equity: 750 },
+    { date: "Oct 21", gain: -50, status: "Correction", detail: "Liquidity Shortage | Sleep Debt", equity: 550 },
+  ]
 };
 
 export const mockHealthService = {
   async getHealthSummary(): Promise<HealthData> {
-    // Simulating minor network latency
     await new Promise(resolve => setTimeout(resolve, 50));
     return { ...currentHealth };
   },
 
   async updateHealthData(updates: Partial<HealthData>): Promise<HealthData> {
-    // This is the "Portfolio Transaction" logic.
-    // We update the local state which triggers the dashboard refresh on the next fetch.
     currentHealth = { 
       ...currentHealth, 
       ...updates,
       protein_g: Math.max(0, (updates.protein_g !== undefined ? updates.protein_g : currentHealth.protein_g)),
-      visceral_fat_points: Math.max(0, (updates.visceral_fat_points !== undefined ? updates.visceral_fat_points : currentHealth.visceral_fat_points))
+      visceral_fat_points: Math.max(0, (updates.visceral_fat_points !== undefined ? updates.visceral_fat_points : currentHealth.visceral_fat_points)),
+      history: updates.history || currentHealth.history
     };
     return { ...currentHealth };
+  },
+
+  async addHistoryEntry(entry: HistoryEntry) {
+    currentHealth.history = [entry, ...currentHealth.history];
+    // Keep only last 14 days for MVP
+    if (currentHealth.history.length > 14) {
+      currentHealth.history = currentHealth.history.slice(0, 14);
+    }
+    return currentHealth.history;
+  },
+
+  async batchUpdateHistory(entries: HistoryEntry[]) {
+    // Replace history with sorted entries (newest first)
+    currentHealth.history = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
+    // Update total visceral fat points based on the most recent entry
+    if (entries.length > 0) {
+      currentHealth.visceral_fat_points = entries[0].equity;
+    }
+    
+    return currentHealth.history;
   },
 
   async requestPermissions(): Promise<boolean> {

@@ -2,7 +2,7 @@
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
  * It handles real-time chat interactions, multi-modal image analysis, and tool-based vital updates.
- * Uses Gemini 3 Pro Preview with relaxed safety settings and thinking config.
+ * Includes support for historical audit sheet ingestion.
  */
 
 import { ai } from '@/ai/genkit';
@@ -12,7 +12,7 @@ import { mockHealthService } from '@/lib/health-service';
 // Input Schema for the AI Coaching Flow
 const PersonalizedAICoachingInputSchema = z.object({
   message: z.string().describe("The user's current chat message to the AI coach."),
-  photoDataUri: z.string().optional().describe("A photo asset for audit (e.g., meal, workout, scale), as a data URI."),
+  photoDataUri: z.string().optional().describe("A photo asset for audit (e.g., meal, workout, scale, or historical spreadsheet), as a data URI."),
   visceral_fat_points: z.number().optional().describe("Current 'Visceral Fat Points' (goal: 3000)."),
   protein_g: z.number().optional().describe("Current daily protein intake in grams (goal: 150g)."),
   recoveryStatus: z.enum(['low', 'medium', 'high']).optional().describe("Current recovery status based on sleep/HRV ('low', 'medium', 'high')."),
@@ -35,10 +35,10 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const updateVitalsTool = ai.defineTool(
   {
     name: 'updateVitals',
-    description: "Updates Nick's health portfolio metrics. Use this when Nick consumes protein, completes a workout, or earns points. You can add or subtract values.",
+    description: "Updates Nick's health portfolio metrics. Use this when Nick consumes protein, completes a workout, or earns points.",
     inputSchema: z.object({
-      protein_g: z.number().optional().describe('Grams of protein to ADD to the current total (can be negative).'),
-      visceral_fat_points: z.number().optional().describe('Points to ADD to the visceral fat portfolio (can be negative).'),
+      protein_g: z.number().optional().describe('Grams of protein to ADD to the current total.'),
+      visceral_fat_points: z.number().optional().describe('Points to ADD to the visceral fat portfolio.'),
     }),
     outputSchema: z.string(),
   },
@@ -48,7 +48,34 @@ const updateVitalsTool = ai.defineTool(
       protein_g: current.protein_g + (input.protein_g || 0),
       visceral_fat_points: current.visceral_fat_points + (input.visceral_fat_points || 0),
     });
-    return "Portfolio updated successfully. The new assets are reflected in the terminal.";
+    return "Portfolio updated successfully.";
+  }
+);
+
+// TOOL: Batch Update History
+const batchUpdateHistoryTool = ai.defineTool(
+  {
+    name: 'batchUpdateHistory',
+    description: "Ingests historical audit data from a spreadsheet. Use this when Nick provides a photo of a tracking sheet.",
+    inputSchema: z.object({
+      entries: z.array(z.object({
+        date: z.string().describe("The date of the entry (e.g., '1/11' or 'Jan 11')."),
+        gain: z.number().describe("The VF Score delta or gain for that day."),
+        status: z.enum(['Bullish', 'Stable', 'Correction']).describe("The market sentiment based on the score."),
+        detail: z.string().describe("Short notes about the day."),
+        equity: z.number().describe("The running total Visceral Fat Score at the end of that day."),
+      })),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    // Map internal types to service types
+    const entries = input.entries.map(e => ({
+      ...e,
+      status: e.status as 'Bullish' | 'Stable' | 'Correction'
+    }));
+    await mockHealthService.batchUpdateHistory(entries);
+    return "Historical portfolio records ingested successfully. The growth curve has been recalibrated.";
   }
 );
 
@@ -57,7 +84,7 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
-  tools: [updateVitalsTool],
+  tools: [updateVitalsTool, batchUpdateHistoryTool],
   config: {
     safetySettings: [
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -82,14 +109,17 @@ const cfoChatPrompt = ai.definePrompt({
   
   **ROASTING RULES:**
   Do NOT roast Nick for things he has already achieved. 
-  If protein_g is >= 110g, he is SOLVENT. Do NOT call it a "penny stock". Use "solid" or "stable" if he's close to target.
-  If protein_g is 150g+, he is an INSTITUTIONAL BULL. Praise the liquidity.
+  If protein_g is >= 110g, he is SOLVENT. 
+  If protein_g is 150g+, he is an INSTITUTIONAL BULL.
   
-  **TOOL USAGE:**
-  If Nick reports consuming protein (e.g., "I just had a 50g shake") or completing a task, call 'updateVitals' immediately. 
+  **HISTORICAL INGESTION (NEW CAPABILITY):**
+  If Nick provides a photo (photoDataUri) of a spreadsheet, spreadsheet log, or table containing historical data (Day, Date, VF Score, Notes), use 'batchUpdateHistory' to ingest ALL the data shown in the image. 
+  Calculate the running 'equity' (Total VF Points) based on the gains/losses shown.
+  Example columns: Sun, 1/11, 95 (Gain) -> Equity += 95.
 
-  **Multi-modal Directive:**
-  If a photo (photoDataUri) is provided, perform an immediate "Asset Audit". 
+  **TOOL USAGE:**
+  - Call 'updateVitals' for real-time protein/point additions.
+  - Call 'batchUpdateHistory' if a spreadsheet audit photo is provided.
 
   **Chat History:**
   {{#each chatHistory}}
@@ -97,7 +127,7 @@ const cfoChatPrompt = ai.definePrompt({
   {{/each}}
 
   Nick's Current Message: {{{message}}}
-  {{#if photoDataUri}}Photo Audit Attached: {{media url=photoDataUri}}{{/if}}
+  {{#if photoDataUri}}Audit Asset Attached: {{media url=photoDataUri}}{{/if}}
   
   CFO RESPONSE:
   `,

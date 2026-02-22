@@ -1,38 +1,80 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Briefcase, TrendingUp, BarChart3, ArrowUpRight } from "lucide-react";
+import { Briefcase, BarChart3, ArrowUpRight, UploadCloud } from "lucide-react";
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { Area, AreaChart, CartesianGrid, XAxis, ResponsiveContainer } from "recharts";
-
-const chartData = [
-  { day: "Mon", equity: 800 },
-  { day: "Tue", equity: 950 },
-  { day: "Wed", equity: 920 },
-  { day: "Thu", equity: 1100 },
-  { day: "Fri", equity: 1250 },
-  { day: "Sat", equity: 1400 },
-  { day: "Sun", equity: 1750 },
-];
-
-const chartConfig = {
-  equity: {
-    label: "Visceral Fat Points",
-    color: "hsl(var(--primary))",
-  },
-};
+import { mockHealthService, HistoryEntry } from '@/lib/health-service';
+import { Button } from '@/components/ui/button';
 
 export function HistoryView() {
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const data = await mockHealthService.getHealthSummary();
+      setHistory(data.history);
+      setLoading(false);
+    };
+    fetchHistory();
+  }, []);
+
+  // Format chart data (Oldest to newest for the chart)
+  const chartData = [...history].reverse().map(entry => ({
+    day: entry.date,
+    equity: entry.equity
+  }));
+
+  const chartConfig = {
+    equity: {
+      label: "Visceral Fat Points",
+      color: "hsl(var(--primary))",
+    },
+  };
+
+  if (loading) return (
+    <div className="p-4 space-y-4">
+      <div className="h-8 w-1/2 bg-muted animate-pulse rounded" />
+      <div className="h-48 bg-muted animate-pulse rounded-xl" />
+      <div className="space-y-2">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-4 space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-xl font-black tracking-tight text-foreground">Portfolio History</h2>
-        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">7-Day Fiscal Audit</p>
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-black tracking-tight text-foreground">Portfolio History</h2>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Historical Asset Audit</p>
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="rounded-full flex items-center gap-2 border-primary/20 text-primary hover:bg-primary/5"
+          onClick={() => {
+            // In a real app, this would trigger a dedicated upload flow.
+            // Here, we point users to the chat where the CFO handles ingestion.
+            const chatTab = document.querySelector('[value="chat"]') as HTMLButtonElement;
+            if (chatTab) chatTab.click();
+            setTimeout(() => {
+                const input = document.querySelector('input[placeholder*="Send message"]') as HTMLInputElement;
+                if (input) input.placeholder = "Upload your spreadsheet audit sheet here...";
+            }, 100);
+          }}
+        >
+          <UploadCloud className="w-4 h-4" />
+          <span className="text-[10px] font-bold uppercase tracking-widest">Ingest Audit</span>
+        </Button>
       </div>
 
       {/* Growth Chart */}
@@ -81,43 +123,43 @@ export function HistoryView() {
         <h3 className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest px-1">Historical Audit Log</h3>
         
         <div className="space-y-2">
-          {[
-            { date: "Oct 24", gain: "+350 pts", status: "Bullish", detail: "High Protein Intake | Solvency Met" },
-            { date: "Oct 23", gain: "+150 pts", status: "Stable", detail: "Recovery Audit: Prime" },
-            { date: "Oct 22", gain: "+200 pts", status: "Bullish", detail: "Capital Infusion: Leg Day" },
-            { date: "Oct 21", gain: "-50 pts", status: "Correction", detail: "Liquidity Shortage | Sleep Debt" },
-          ].map((audit, i) => (
-            <Card key={i} className="border-none shadow-sm bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
-              <CardContent className="p-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Briefcase className="w-4 h-4 text-primary" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs font-black">{audit.date}</p>
-                      <span className={`text-[8px] font-black uppercase px-1 rounded ${
-                        audit.status === 'Bullish' ? 'bg-emerald-100 text-emerald-700' : 
-                        audit.status === 'Stable' ? 'bg-blue-100 text-blue-700' : 
-                        'bg-amber-100 text-amber-700'
-                      }`}>
-                        {audit.status}
-                      </span>
+          {history.length > 0 ? (
+            history.map((audit, i) => (
+              <Card key={i} className="border-none shadow-sm bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+                <CardContent className="p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <Briefcase className="w-4 h-4 text-primary" />
                     </div>
-                    <p className="text-[10px] text-muted-foreground font-medium">{audit.detail}</p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-black">{audit.date}</p>
+                        <span className={`text-[8px] font-black uppercase px-1 rounded ${
+                          audit.status === 'Bullish' ? 'bg-emerald-100 text-emerald-700' : 
+                          audit.status === 'Stable' ? 'bg-blue-100 text-blue-700' : 
+                          'bg-amber-100 text-amber-700'
+                        }`}>
+                          {audit.status}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-medium">{audit.detail}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <span className={`text-xs font-black ${audit.gain.startsWith('+') ? 'text-emerald-600' : 'text-amber-600'}`}>
-                      {audit.gain}
-                    </span>
-                    <ArrowUpRight className={`w-3 h-3 ${audit.gain.startsWith('+') ? 'text-emerald-600' : 'text-amber-600 rotate-90'}`} />
+                  <div className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <span className={`text-xs font-black ${audit.gain >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {audit.gain > 0 ? `+${audit.gain}` : audit.gain} pts
+                      </span>
+                      <ArrowUpRight className={`w-3 h-3 ${audit.gain >= 0 ? 'text-emerald-600' : 'text-amber-600 rotate-90'}`} />
+                    </div>
+                    <p className="text-[8px] font-bold text-muted-foreground uppercase">{audit.equity} total</p>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <p className="text-center text-xs text-muted-foreground py-8">No historical assets audited yet. Upload a sheet to begin ingestion.</p>
+          )}
         </div>
       </div>
     </div>
