@@ -53,10 +53,14 @@ export function ChatInterface() {
     setMessages(prev => [...prev, { role: 'user', content: userMessage || "Asset Audit Attached", image: userImage || undefined }]);
     setIsLoading(true);
 
+    // CRITICAL FIX: Sanitize healthData for Server Action. 
+    // Firestore Timestamps are not plain objects and cause serialization errors in Server Actions.
+    const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
+
     const result = await sendChatMessage(
       userMessage, 
       messages.map(m => ({ role: m.role, content: m.content })), 
-      healthData || {},
+      sanitizedHealth,
       userImage || undefined,
       user.uid
     );
