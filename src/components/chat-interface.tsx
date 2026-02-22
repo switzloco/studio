@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Mic, Send, Camera, User, Briefcase, X } from "lucide-react";
+import { Send, Camera, X, Loader2 } from "lucide-react";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
-import { healthService } from '@/lib/health-service';
 import { doc } from 'firebase/firestore';
 
 interface Message {
@@ -17,7 +16,7 @@ interface Message {
   image?: string;
 }
 
-export function ChatInterface({ onMessageProcessed }: { onMessageProcessed?: () => void }) {
+export function ChatInterface() {
   const { user } = useUser();
   const db = useFirestore();
   const [messages, setMessages] = useState<Message[]>([
@@ -27,10 +26,18 @@ export function ChatInterface({ onMessageProcessed }: { onMessageProcessed?: () 
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc(userDocRef);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoading]);
 
   const handleSend = async () => {
     if (!user || (!input.trim() && !selectedImage) || isLoading) return;
@@ -47,29 +54,14 @@ export function ChatInterface({ onMessageProcessed }: { onMessageProcessed?: () 
       userMessage, 
       messages.map(m => ({ role: m.role, content: m.content })), 
       healthData || {},
-      userImage || undefined
+      userImage || undefined,
+      user.uid
     );
 
     if (result.success && result.response) {
       setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
-      
-      // Execute commands from the AI
-      if (result.commands && result.commands.length > 0) {
-        for (const cmd of result.commands) {
-          if (cmd.type === 'UPDATE_VITALS' && healthData) {
-            await healthService.updateHealthData(db, user.uid, {
-              protein_g: (healthData.protein_g || 0) + (cmd.payload.protein_g || 0),
-              visceral_fat_points: (healthData.visceral_fat_points || 0) + (cmd.payload.visceral_fat_points || 0),
-            });
-          } else if (cmd.type === 'BATCH_UPDATE') {
-            await healthService.batchUpdateHistory(db, user.uid, cmd.payload.entries);
-          } else if (cmd.type === 'CORRECT_HISTORY') {
-            await healthService.updateHistoryEntry(db, user.uid, cmd.payload.date, cmd.payload);
-          }
-        }
-      }
     } else {
-      toast({ variant: "destructive", title: "Liquidity Crisis", description: result.error });
+      toast({ variant: "destructive", title: "Audit Failed", description: result.error });
     }
 
     setIsLoading(false);
@@ -90,7 +82,15 @@ export function ChatInterface({ onMessageProcessed }: { onMessageProcessed?: () 
               </div>
             </div>
           ))}
-          <div className="h-4" />
+          {isLoading && (
+            <div className="flex flex-col items-start">
+              <div className="chat-bubble-ai flex items-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="text-[10px] font-bold uppercase">Auditing Assets...</span>
+              </div>
+            </div>
+          )}
+          <div ref={scrollRef} className="h-4" />
         </div>
       </ScrollArea>
 

@@ -1,31 +1,29 @@
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
+import { initializeFirebase } from '@/firebase';
 
 export async function sendChatMessage(
   message: string, 
   chatHistory: { role: 'user' | 'model', content: string }[],
   currentHealth: any,
-  photoDataUri?: string
+  photoDataUri?: string,
+  userId?: string
 ) {
   try {
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const currentDay = dayNames[new Date().getDay()];
+    if (!userId) throw new Error("Anonymous UID required for audit.");
 
     const response = await personalizedAICoaching({
+      userId,
       message,
       photoDataUri,
       chatHistory,
-      visceral_fat_points: currentHealth.visceral_fat_points,
-      protein_g: currentHealth.protein_g,
-      recoveryStatus: currentHealth.recoveryStatus,
-      currentDay,
-      history: currentHealth.history,
+      currentHealth,
     });
 
-    return { success: true, response: response.response, commands: response.commands };
-  } catch (error) {
-    console.error("Chat flow error:", error);
+    return { success: true, response: response.response };
+  } catch (error: any) {
+    console.error("CFO Audit Interrupted:", error);
     return { success: false, error: "The CFO is reviewing other portfolios. Market is closed." };
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { doc, getDoc, setDoc, updateDoc, Firestore, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp } from 'firebase/firestore';
 
 export interface HistoryEntry {
   date: string;
@@ -10,14 +10,24 @@ export interface HistoryEntry {
   equity: number;
 }
 
+export interface HealthLog {
+  id?: string;
+  userId: string;
+  timestamp: any;
+  category: 'explosiveness' | 'strength' | 'food' | 'recovery' | 'health_sync';
+  content: string;
+  metrics: string[];
+  vectorEmbeddings?: number[];
+}
+
 export interface HealthData {
   id?: string;
   steps: number;
   hrv: number;
   sleepHours: number;
   recoveryStatus: 'low' | 'medium' | 'high';
-  protein_g: number;
-  visceral_fat_points: number;
+  dailyProteinG: number;
+  visceralFatPoints: number;
   history: HistoryEntry[];
   updatedAt?: any;
   createdAt?: any;
@@ -26,6 +36,7 @@ export interface HealthData {
 
 /**
  * HEALTH SERVICE (FIRESTORE BACKED)
+ * Central management for CFO Fitness assets and activity logs.
  */
 export const healthService = {
   async getHealthSummary(db: Firestore, userId: string): Promise<HealthData | null> {
@@ -42,8 +53,8 @@ export const healthService = {
       hrv: 50,
       sleepHours: 7,
       recoveryStatus: 'medium',
-      protein_g: 0,
-      visceral_fat_points: 0,
+      dailyProteinG: 0,
+      visceralFatPoints: 0,
       history: [],
       isAnonymous: true,
       createdAt: serverTimestamp(),
@@ -59,6 +70,24 @@ export const healthService = {
       ...updates,
       updatedAt: serverTimestamp(),
     });
+  },
+
+  async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>) {
+    const logsRef = collection(db, 'users', userId, 'logs');
+    await addDoc(logsRef, {
+      ...log,
+      userId,
+      timestamp: serverTimestamp(),
+    });
+  },
+
+  async queryLogs(db: Firestore, userId: string, category?: string, limitCount: number = 5): Promise<HealthLog[]> {
+    const logsRef = collection(db, 'users', userId, 'logs');
+    // Simplified "Vector Search" proxy: Fetch recent logs in category
+    let q = query(logsRef, orderBy('timestamp', 'desc'), limit(limitCount));
+    
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as HealthLog);
   },
 
   async addHistoryEntry(db: Firestore, userId: string, entry: HistoryEntry) {
@@ -80,7 +109,7 @@ export const healthService = {
       
       const payload: Partial<HealthData> = { history: updatedHistory };
       if (updates.equity !== undefined && index === 0) {
-        payload.visceral_fat_points = updates.equity;
+        payload.visceralFatPoints = updates.equity;
       }
       
       await this.updateHealthData(db, userId, payload);
@@ -91,7 +120,7 @@ export const healthService = {
     const sorted = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const payload: Partial<HealthData> = { 
       history: sorted,
-      visceral_fat_points: sorted.length > 0 ? sorted[0].equity : 0
+      visceralFatPoints: sorted.length > 0 ? sorted[0].equity : 0
     };
     await this.updateHealthData(db, userId, payload);
   }
