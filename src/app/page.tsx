@@ -20,6 +20,7 @@ import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut } from 'f
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
+import { healthService } from '@/lib/health-service';
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
@@ -29,13 +30,23 @@ export default function Home() {
   const [isAuditing, setIsAuditing] = useState(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
-  const { data: healthData } = useDoc(userDocRef);
+  const { data: healthData, isLoading: isHealthLoading } = useDoc(userDocRef);
 
+  // Auto-login logic
   useEffect(() => {
     if (!isUserLoading && !user) {
       signInAnonymously(auth).catch(console.error);
     }
   }, [user, isUserLoading, auth]);
+
+  // Data Initialization logic: Ensure the user's "Portfolio" exists in Firestore
+  useEffect(() => {
+    if (user && db) {
+      // Trigger "get or create" for profile and preferences
+      healthService.getHealthSummary(db, user.uid);
+      healthService.getUserPreferences(db, user.uid);
+    }
+  }, [user, db]);
 
   const handleUpgradeAccount = async () => {
     if (!user) return;
@@ -114,7 +125,7 @@ export default function Home() {
               <ChatInterface />
             </TabsContent>
             <TabsContent value="daily" className="h-full m-0 overflow-y-auto">
-              <DashboardCards data={healthData} />
+              <DashboardCards data={healthData} isLoading={isHealthLoading} />
             </TabsContent>
             <TabsContent value="history" className="h-full m-0 overflow-y-auto">
               <HistoryView />

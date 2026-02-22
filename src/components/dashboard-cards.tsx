@@ -3,24 +3,43 @@
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { TrendingUp, Target, Zap, Activity, DollarSign, Briefcase } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2 } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
 
-export function DashboardCards({ data }: { data: HealthData | null }) {
-  if (!data) return (
-    <div className="space-y-4 p-4">
+interface DashboardCardsProps {
+  data: HealthData | null;
+  isLoading?: boolean;
+}
+
+export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
+  if (isLoading || !data) return (
+    <div className="space-y-6 p-4">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
+        <div className="flex items-center gap-1.5">
+          <Loader2 className="w-3 h-3 animate-spin text-primary" />
+          <span className="text-[10px] font-bold text-muted-foreground uppercase">Syncing Ledger...</span>
+        </div>
+      </div>
       <div className="h-24 bg-muted animate-pulse rounded-xl" />
       <div className="grid grid-cols-2 gap-3">
         {[...Array(2)].map((_, i) => (
           <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />
         ))}
       </div>
+      <div className="h-24 bg-muted animate-pulse rounded-xl" />
     </div>
   );
 
-  // Use camelCase properties as defined in health-service.ts and backend.json
-  const fatProgress = (data.visceralFatPoints / 3000) * 100;
-  const proteinProgress = (data.dailyProteinG / 150) * 100;
+  // Use default values to prevent NaN progress bars
+  const dailyProteinG = data.dailyProteinG || 0;
+  const visceralFatPoints = data.visceralFatPoints || 0;
+  
+  const proteinGoal = 150; // Standard CFO target
+  const fatPointsGoal = 3000; // Standard CFO target
+
+  const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
+  const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
   return (
     <div className="flex flex-col gap-6 p-4 pb-20">
@@ -41,13 +60,13 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
                 <p className="text-xs font-bold text-foreground">Protein Liquidity</p>
-                <span className="text-[10px] font-bold text-muted-foreground">{data.dailyProteinG}g / 150g</span>
+                <span className="text-[10px] font-bold text-muted-foreground">{dailyProteinG}g / {proteinGoal}g</span>
               </div>
               <Progress value={proteinProgress} className="h-2 bg-purple-50" />
             </div>
             <div className="text-right shrink-0">
-              <p className={`text-[10px] font-black uppercase ${data.dailyProteinG >= 110 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {data.dailyProteinG >= 110 ? 'Solvent' : 'Debt Alert'}
+              <p className={`text-[10px] font-black uppercase ${dailyProteinG >= 110 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {dailyProteinG >= 110 ? 'Solvent' : 'Debt Alert'}
               </p>
             </div>
           </CardContent>
@@ -70,7 +89,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
                 <Target className="w-4 h-4 text-blue-600" />
               </div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Recovery Audit</p>
-              <h4 className="text-lg font-bold uppercase">{data.recoveryStatus}</h4>
+              <h4 className="text-lg font-bold uppercase">{data.recoveryStatus || 'MEDIUM'}</h4>
             </CardContent>
           </Card>
         </div>
@@ -86,11 +105,11 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase opacity-80">Equity Score (VF Points)</p>
-                <h3 className="text-xl font-black">{(data.visceralFatPoints || 0).toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000</span></h3>
+                <h3 className="text-xl font-black">{(visceralFatPoints).toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ {fatPointsGoal.toLocaleString()}</span></h3>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-xs font-black text-emerald-300">{Math.min(100, fatProgress || 0).toFixed(1)}%</p>
+              <p className="text-xs font-black text-emerald-300">{fatProgress.toFixed(1)}%</p>
             </div>
           </CardContent>
           <Progress value={fatProgress} className="h-1 rounded-none bg-white/10" />
