@@ -4,7 +4,7 @@
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Target, Zap, DollarSign, Briefcase, Loader2, Lock } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
 
 interface DashboardCardsProps {
@@ -13,38 +13,94 @@ interface DashboardCardsProps {
 }
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
-  if (isLoading || !data) return (
-    <div className="space-y-6 p-4">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
-        <div className="flex items-center gap-1.5">
-          <Loader2 className="w-3 h-3 animate-spin text-primary" />
-          <span className="text-[10px] font-bold text-muted-foreground uppercase">Syncing Ledger...</span>
-        </div>
-      </div>
-      <div className="h-24 bg-muted animate-pulse rounded-xl" />
-      <div className="grid grid-cols-2 gap-3">
-        {[...Array(2)].map((_, i) => (
-          <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />
-        ))}
-      </div>
-    </div>
-  );
-
-  if (!data.onboardingComplete) {
+  // 1. LOADING STATE
+  if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center space-y-4">
-        <div className="p-4 bg-muted rounded-full">
-          <Lock className="w-12 h-12 text-muted-foreground opacity-50" />
+      <div className="flex flex-col h-full space-y-6 p-4 bg-background">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
+          <div className="flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 animate-spin text-primary" />
+            <span className="text-[10px] font-bold text-muted-foreground uppercase">Syncing Ledger...</span>
+          </div>
         </div>
-        <div className="space-y-2">
-          <h2 className="text-lg font-black tracking-tight">Portfolio Under Audit</h2>
-          <p className="text-sm text-muted-foreground">The CFO is currently performing a discovery audit. Please complete the onboarding conversation in the Coach tab to unlock your live ledger.</p>
+        <div className="space-y-4">
+          <div className="h-24 bg-muted/50 animate-pulse rounded-xl" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-32 bg-muted/50 animate-pulse rounded-xl" />
+            <div className="h-32 bg-muted/50 animate-pulse rounded-xl" />
+          </div>
+          <div className="h-32 bg-muted/50 animate-pulse rounded-xl" />
+        </div>
+        <div className="flex-1 flex items-end justify-center pb-8">
+          <p className="text-[10px] font-bold text-muted-foreground uppercase animate-pulse">Initializing CFO Diagnostic Suite</p>
         </div>
       </div>
     );
   }
 
+  // 2. NO DATA / INITIALIZING STATE (Wait for useEffect to create the doc)
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background space-y-6">
+        <div className="p-4 bg-primary/10 rounded-full">
+          <ShieldAlert className="w-12 h-12 text-primary animate-pulse" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-black tracking-tight">Portfolio Discovery</h2>
+          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+            Opening your terminal... The CFO is initializing your personal ledger in the secure vault.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-primary">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-[10px] font-black uppercase">Establishing Connection...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. ONBOARDING LOCKED STATE
+  if (!data.onboardingComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background space-y-6">
+        <div className="p-6 bg-muted rounded-full relative">
+          <Lock className="w-12 h-12 text-muted-foreground opacity-50" />
+          <div className="absolute -bottom-1 -right-1 bg-primary text-white p-1.5 rounded-full shadow-lg">
+            <ShieldAlert className="w-4 h-4" />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <h2 className="text-2xl font-black tracking-tight uppercase">Portfolio Locked</h2>
+          <div className="h-1 w-12 bg-primary mx-auto rounded-full" />
+          <p className="text-sm text-muted-foreground max-w-[280px] mx-auto leading-relaxed">
+            The CFO is currently performing a <span className="font-bold text-foreground">Discovery Audit</span>. 
+            <br/><br/>
+            Head to the <span className="font-bold text-primary italic">COACH</span> tab and complete the interview to unlock your live performance ledger.
+          </p>
+        </div>
+        <Card className="bg-card/50 border-dashed border-2 p-4 mt-4 max-w-[280px]">
+          <p className="text-[10px] font-bold text-muted-foreground uppercase text-left mb-2">Audit Requirements:</p>
+          <ul className="text-[10px] font-bold text-left space-y-1">
+            <li className="flex items-center gap-2 opacity-60">
+              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+              DEFINE WAREHOUSE ASSETS
+            </li>
+            <li className="flex items-center gap-2 opacity-60">
+              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+              SET PROTEIN SOLVENCY TARGETS
+            </li>
+            <li className="flex items-center gap-2 opacity-60">
+              <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+              ESTABLISH WEEKLY ROUTINE
+            </li>
+          </ul>
+        </Card>
+      </div>
+    );
+  }
+
+  // 4. ACTIVE DASHBOARD
   const dailyProteinG = data.dailyProteinG || 0;
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = 150; 
@@ -54,7 +110,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
   return (
-    <div className="flex flex-col gap-6 p-4 pb-20">
+    <div className="flex flex-col gap-6 p-4 pb-20 bg-background h-full overflow-y-auto">
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
