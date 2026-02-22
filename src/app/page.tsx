@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -77,7 +76,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background shadow-xl overflow-hidden">
+    <div className="flex flex-col h-screen max-w-3xl mx-auto bg-background shadow-xl overflow-hidden">
       <header className="p-4 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-primary text-white rounded-lg shadow-sm">
