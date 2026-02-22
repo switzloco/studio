@@ -1,0 +1,21 @@
+{
+  "name": "CFO Fitness",
+  "short_name": "CFO",
+  "description": "Manage your body like a high-stakes financial portfolio.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E8EAF6",
+  "theme_color": "#3F51B5",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/cfo-icon-192/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/cfo-icon-512/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
