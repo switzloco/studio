@@ -3,15 +3,18 @@
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { TrendingUp, TrendingDown, Target, Zap, Activity, DollarSign } from "lucide-react";
+import { TrendingUp, Target, Zap, Activity, DollarSign, Briefcase } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
 
 export function DashboardCards({ data }: { data: HealthData | null }) {
   if (!data) return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
-      {[...Array(4)].map((_, i) => (
-        <div key={i} className="h-24 bg-muted animate-pulse rounded-xl" />
-      ))}
+    <div className="space-y-4 p-4">
+      <div className="h-24 bg-muted animate-pulse rounded-xl" />
+      <div className="grid grid-cols-2 gap-3">
+        {[...Array(2)].map((_, i) => (
+          <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />
+        ))}
+      </div>
     </div>
   );
 
@@ -19,80 +22,92 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
   const proteinProgress = (data.proteinGrams / 150) * 100;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pb-2">
-      <Card className="border-none shadow-sm overflow-hidden bg-white/50">
-        <CardContent className="p-4 flex flex-col justify-between h-full">
-          <div className="flex justify-between items-start">
-            <div className="p-1.5 bg-blue-100 rounded-lg">
-              <TrendingUp className="w-4 h-4 text-primary" />
+    <div className="flex flex-col gap-4 p-4 pb-2">
+      {/* Secondary: Total Portfolio Score */}
+      <Card className="border-none shadow-sm overflow-hidden bg-primary text-white">
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <Briefcase className="w-5 h-5 text-white" />
             </div>
-            <span className="text-[10px] font-semibold text-green-600 flex items-center gap-0.5">
-              +5.2% <Activity className="w-2.5 h-2.5" />
-            </span>
+            <div>
+              <p className="text-[10px] font-bold uppercase opacity-80 tracking-wider">Total Portfolio Value</p>
+              <h3 className="text-xl font-bold">{data.visceralFatPoints.toLocaleString()} <span className="text-sm font-normal opacity-70">/ 3,000 pts</span></h3>
+            </div>
           </div>
-          <div className="mt-2">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Visceral Fat Portfolio</p>
-            <h3 className="text-lg font-bold text-foreground">{data.visceralFatPoints.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">pts</span></h3>
+          <div className="text-right">
+            <p className="text-[10px] font-bold uppercase opacity-80 tracking-wider">Market Cap</p>
+            <p className="text-sm font-bold text-emerald-300">{fatProgress.toFixed(1)}%</p>
           </div>
-          <Progress value={fatProgress} className="h-1 mt-2 bg-blue-100" />
         </CardContent>
+        <Progress value={fatProgress} className="h-1 rounded-none bg-white/10" />
       </Card>
 
-      <Card className="border-none shadow-sm overflow-hidden bg-white/50">
-        <CardContent className="p-4 flex flex-col justify-between h-full">
-          <div className="flex justify-between items-start">
-            <div className="p-1.5 bg-purple-100 rounded-lg">
-              <DollarSign className="w-4 h-4 text-accent" />
-            </div>
-            <span className="text-[10px] font-semibold text-amber-600">IN DEBT</span>
-          </div>
-          <div className="mt-2">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Protein Solvency</p>
-            <h3 className="text-lg font-bold text-foreground">{data.proteinGrams} <span className="text-sm font-normal text-muted-foreground">/ 150g</span></h3>
-          </div>
-          <Progress value={proteinProgress} className="h-1 mt-2 bg-purple-100" />
-        </CardContent>
-      </Card>
+      {/* Primary: Daily Scores Breakdown */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Daily Performance Audit</h2>
+          <span className="text-[10px] font-bold text-primary uppercase">Open Market</span>
+        </div>
+        
+        <div className="grid grid-cols-1 gap-3">
+          {/* Protein Score */}
+          <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="p-3 bg-purple-100 rounded-xl">
+                <DollarSign className="w-5 h-5 text-accent" />
+              </div>
+              <div className="flex-1">
+                <div className="flex justify-between items-end mb-1">
+                  <p className="text-xs font-bold text-foreground">Protein Solvency</p>
+                  <span className="text-[10px] font-bold text-muted-foreground">{data.proteinGrams}g / 150g</span>
+                </div>
+                <Progress value={proteinProgress} className="h-2 bg-purple-50" />
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-[10px] font-bold text-amber-600 uppercase">In Debt</p>
+              </div>
+            </CardContent>
+          </Card>
 
-      <Card className="border-none shadow-sm overflow-hidden bg-white/50">
-        <CardContent className="p-4 flex flex-col justify-between h-full">
-          <div className="flex justify-between items-start">
-            <div className="p-1.5 bg-orange-100 rounded-lg">
-              <Zap className="w-4 h-4 text-orange-600" />
-            </div>
-          </div>
-          <div className="mt-2">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Explosiveness Trend</p>
-            <h3 className="text-lg font-bold text-foreground">BULLISH</h3>
-          </div>
-          <div className="flex gap-1 mt-2 h-1 overflow-hidden rounded-full">
-             <div className="flex-1 bg-green-500 rounded-full" />
-             <div className="flex-1 bg-green-500 rounded-full" />
-             <div className="flex-1 bg-green-300 rounded-full" />
-             <div className="flex-1 bg-muted rounded-full" />
-          </div>
-        </CardContent>
-      </Card>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Activity/Explosiveness Score */}
+            <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm">
+              <CardContent className="p-4">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="p-2 bg-orange-100 rounded-lg">
+                    <Zap className="w-4 h-4 text-orange-600" />
+                  </div>
+                  <TrendingUp className="w-3 h-3 text-green-500" />
+                </div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Daily Yield</p>
+                <h4 className="text-lg font-bold text-foreground">+12.4%</h4>
+                <p className="text-[10px] font-medium text-green-600">BULLISH TREND</p>
+              </CardContent>
+            </Card>
 
-      <Card className="border-none shadow-sm overflow-hidden bg-white/50">
-        <CardContent className="p-4 flex flex-col justify-between h-full">
-          <div className="flex justify-between items-start">
-            <div className="p-1.5 bg-emerald-100 rounded-lg">
-              <Target className="w-4 h-4 text-emerald-600" />
-            </div>
+            {/* Recovery/Audit Score */}
+            <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm">
+              <CardContent className="p-4">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="p-2 bg-emerald-100 rounded-lg">
+                    <Target className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <Activity className="w-3 h-3 text-blue-500" />
+                </div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Audit Score</p>
+                <h4 className="text-lg font-bold text-foreground">92.4</h4>
+                <div className="flex gap-0.5 mt-1 h-1.5">
+                   <div className="flex-1 bg-emerald-500 rounded-full" />
+                   <div className="flex-1 bg-emerald-500 rounded-full" />
+                   <div className="flex-1 bg-emerald-500 rounded-full" />
+                   <div className="flex-1 bg-muted rounded-full" />
+                </div>
+              </CardContent>
+            </Card>
           </div>
-          <div className="mt-2">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Strength Index</p>
-            <h3 className="text-lg font-bold text-foreground">92.4 <span className="text-sm font-normal text-muted-foreground">pts</span></h3>
-          </div>
-          <div className="flex items-end gap-0.5 mt-2 h-4">
-             <div className="w-2 bg-emerald-200 h-[20%] rounded-t-sm" />
-             <div className="w-2 bg-emerald-300 h-[40%] rounded-t-sm" />
-             <div className="w-2 bg-emerald-400 h-[70%] rounded-t-sm" />
-             <div className="w-2 bg-emerald-600 h-[90%] rounded-t-sm" />
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
