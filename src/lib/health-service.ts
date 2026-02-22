@@ -57,22 +57,30 @@ export const mockHealthService = {
 
   async addHistoryEntry(entry: HistoryEntry) {
     currentHealth.history = [entry, ...currentHealth.history];
-    // Keep only last 14 days for MVP
     if (currentHealth.history.length > 14) {
       currentHealth.history = currentHealth.history.slice(0, 14);
     }
     return currentHealth.history;
   },
 
+  async updateHistoryEntry(date: string, updates: Partial<HistoryEntry>) {
+    const index = currentHealth.history.findIndex(h => h.date === date);
+    if (index !== -1) {
+      currentHealth.history[index] = { ...currentHealth.history[index], ...updates };
+      // If equity changed, we might need to re-calculate subsequent running totals, 
+      // but for this MVP we update the specific record.
+      if (updates.equity !== undefined && index === 0) {
+        currentHealth.visceral_fat_points = updates.equity;
+      }
+    }
+    return currentHealth.history;
+  },
+
   async batchUpdateHistory(entries: HistoryEntry[]) {
-    // Replace history with sorted entries (newest first)
     currentHealth.history = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
-    // Update total visceral fat points based on the most recent entry
     if (entries.length > 0) {
       currentHealth.visceral_fat_points = entries[0].equity;
     }
-    
     return currentHealth.history;
   },
 
