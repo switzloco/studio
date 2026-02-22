@@ -10,7 +10,7 @@ export async function sendChatMessage(
   photoDataUri?: string
 ) {
   try {
-    // Injecting the live state from the health service before every AI turn
+    // RE-FETCH LIVE STATE: This ensures the CFO "sees" the dashboard before it speaks.
     const health = await mockHealthService.getHealthSummary();
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const currentDay = dayNames[new Date().getDay()];
@@ -19,11 +19,11 @@ export async function sendChatMessage(
       message,
       photoDataUri,
       chatHistory,
-      visceralFatPoints: health.visceralFatPoints,
-      dailyProteinGrams: health.proteinGrams,
+      visceral_fat_points: health.visceral_fat_points,
+      protein_g: health.protein_g,
       recoveryStatus: health.recoveryStatus,
       currentDay,
-      recentWorkoutLoad: "Activity audit: High-intensity assets active. Recent frisbee and basketball movements identified.",
+      recentWorkoutLoad: "Activity audit: High-intensity assets active. Recent movement identified.",
     });
 
     return { success: true, response: response.response };

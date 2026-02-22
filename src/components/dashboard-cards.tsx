@@ -19,8 +19,8 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
     </div>
   );
 
-  const fatProgress = (data.visceralFatPoints / 3000) * 100;
-  const proteinProgress = (data.proteinGrams / 150) * 100;
+  const fatProgress = (data.visceral_fat_points / 3000) * 100;
+  const proteinProgress = (data.protein_g / 150) * 100;
 
   return (
     <div className="flex flex-col gap-6 p-4 pb-2 overflow-y-auto">
@@ -44,20 +44,20 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
               <div className="flex-1">
                 <div className="flex justify-between items-end mb-1">
                   <p className="text-xs font-bold text-foreground">Protein Liquidity</p>
-                  <span className="text-[10px] font-bold text-muted-foreground">{data.proteinGrams}g / 150g</span>
+                  <span className="text-[10px] font-bold text-muted-foreground">{data.protein_g}g / 150g</span>
                 </div>
                 <Progress value={proteinProgress} className="h-2 bg-purple-50" />
               </div>
               <div className="text-right shrink-0">
-                <p className={`text-[10px] font-black uppercase tracking-tight ${data.proteinGrams < 100 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                  {data.proteinGrams < 100 ? 'Debt Alert' : 'Solvent'}
+                <p className={`text-[10px] font-black uppercase tracking-tight ${data.protein_g < 100 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {data.protein_g < 100 ? 'Debt Alert' : 'Solvent'}
                 </p>
               </div>
             </CardContent>
           </Card>
 
           <div className="grid grid-cols-2 gap-3">
-            {/* Activity/Explosiveness Score */}
+            {/* Activity Score */}
             <Card className="border-none shadow-sm bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
               <CardContent className="p-4">
                 <div className="flex justify-between items-start mb-3">
@@ -106,7 +106,7 @@ export function DashboardCards({ data }: { data: HealthData | null }) {
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest">Total Asset Value (Visceral Fat Points)</p>
-                <h3 className="text-xl font-black">{data.visceralFatPoints.toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000 pts</span></h3>
+                <h3 className="text-xl font-black">{data.visceral_fat_points.toLocaleString()} <span className="text-[10px] font-normal opacity-70">/ 3,000 pts</span></h3>
               </div>
             </div>
             <div className="text-right">
