@@ -1,3 +1,4 @@
+
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 /**
@@ -33,6 +34,8 @@ export interface HealthData {
   updatedAt?: any;
   createdAt?: any;
   isAnonymous: boolean;
+  onboardingDay: number;
+  onboardingComplete: boolean;
 }
 
 export interface UserPreferences {
@@ -65,6 +68,8 @@ export const healthService = {
         equity: 1250
       }],
       isAnonymous: true,
+      onboardingDay: 1,
+      onboardingComplete: false,
       createdAt: serverTimestamp(),
     };
     await setDoc(docRef, initialData);
@@ -91,22 +96,15 @@ export const healthService = {
     
     const defaultPrefs: UserPreferences = {
       weeklySchedule: JSON.stringify({
-        "Mon": "Basketball lunch",
-        "Tue": "Lift",
-        "Wed": "Ultimate Frisbee",
-        "Thu": "Lift + 8:30PM Hoops",
-        "Fri": "Ultimate",
-        "Sat": "Friends hoops",
-        "Sun": "League hoops"
+        "Mon": "Pending Audit",
+        "Tue": "Pending Audit",
+        "Wed": "Pending Audit",
+        "Thu": "Pending Audit",
+        "Fri": "Pending Audit",
+        "Sat": "Pending Audit",
+        "Sun": "Pending Audit"
       }, null, 2),
-      equipment: [
-        "55lb kettlebell",
-        "25lb kettlebell",
-        "50lb ruck",
-        "pull-up rings",
-        "adjustable dumbbells",
-        "ATG slant board"
-      ],
+      equipment: [],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 }
     };
     await setDoc(docRef, defaultPrefs, { merge: true });

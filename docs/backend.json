@@ -22,6 +22,14 @@
         },
         "isAnonymous": {
           "type": "boolean"
+        },
+        "onboardingDay": {
+          "type": "integer",
+          "description": "The current day in the onboarding sequence."
+        },
+        "onboardingComplete": {
+          "type": "boolean",
+          "description": "Whether the user has finished the discovery audit."
         }
       },
       "required": [
@@ -70,19 +78,6 @@
         "metrics": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "userId", "timestamp", "category", "content", "metrics"]
-    },
-    "ChatSession": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "ChatSession",
-      "type": "object",
-      "description": "Stores the conversational memory between a user and the AI coach.",
-      "properties": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "messages": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["id", "userId", "createdAt", "messages"]
     }
   },
   "auth": {

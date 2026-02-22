@@ -1,7 +1,8 @@
+
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
- * Optimized for Gemini 2.0 Flash with real-time portfolio data and inventory awareness.
+ * Optimized for Day-Zero onboarding and portfolio auditing.
  */
 
 import { ai } from '@/ai/genkit';
@@ -33,7 +34,7 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
-    description: 'Returns the user schedule, available equipment assets, and long-term targets. Use this FIRST to understand the user context.',
+    description: 'Returns the user schedule, equipment, and targets. Use this to understand what assets we are working with.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.any(),
   },
@@ -43,22 +44,41 @@ const getUserContextTool = ai.defineTool(
   }
 );
 
-const updateScheduleTool = ai.defineTool(
+const updatePreferencesTool = ai.defineTool(
   {
-    name: 'update_schedule',
-    description: 'Updates a specific day in the user schedule or the entire JSON schedule. Use this when the user cancels an activity or changes their routine.',
+    name: 'update_preferences',
+    description: 'Updates equipment list, schedule, or long-term targets in the user portfolio.',
     inputSchema: z.object({
       userId: z.string(),
-      newScheduleJson: z.string().describe('The complete updated JSON string for the weekly schedule.'),
+      equipment: z.array(z.string()).optional(),
+      targets: z.object({ proteinGoal: z.number().optional(), fatPointsGoal: z.number().optional() }).optional(),
+      scheduleJson: z.string().optional(),
     }),
     outputSchema: z.string(),
   },
   async (input) => {
     const { firestore } = initializeFirebase();
-    await healthService.updateUserPreferences(firestore, input.userId, {
-      weeklySchedule: input.newScheduleJson
-    });
-    return "Schedule recalibrated. Portfolio updated with new routine parameters.";
+    const updates: any = {};
+    if (input.equipment) updates.equipment = input.equipment;
+    if (input.targets) updates.targets = input.targets;
+    if (input.scheduleJson) updates.weeklySchedule = input.scheduleJson;
+    
+    await healthService.updateUserPreferences(firestore, input.userId, updates);
+    return "Portfolio parameters adjusted. Audit trails updated.";
+  }
+);
+
+const completeOnboardingTool = ai.defineTool(
+  {
+    name: 'complete_onboarding',
+    description: 'Call this once the user has provided their equipment, targets, and routine. Unlocks the full dashboard.',
+    inputSchema: z.object({ userId: z.string() }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const { firestore } = initializeFirebase();
+    await healthService.updateHealthData(firestore, input.userId, { onboardingComplete: true });
+    return "Onboarding complete. Dashboard unlocked. Portfolio now in active management.";
   }
 );
 
@@ -68,8 +88,8 @@ const logNutritionTool = ai.defineTool(
     description: 'Updates the user portfolio with new protein intake.',
     inputSchema: z.object({
       userId: z.string(),
-      proteinG: z.number().describe('Amount of protein in grams to add to the daily total.'),
-      description: z.string().describe('Short summary of the meal for the audit log.'),
+      proteinG: z.number().describe('Amount of protein in grams.'),
+      description: z.string().describe('Meal summary.'),
     }),
     outputSchema: z.string(),
   },
@@ -83,19 +103,19 @@ const logNutritionTool = ai.defineTool(
       content: `Meal Audit: ${input.description} (+${input.proteinG}g Protein)`,
       metrics: [`protein_g:${input.proteinG}`, `daily_total:${newTotal}`],
     });
-    return `Solvency updated. New daily protein liquidity: ${newTotal}g.`;
+    return `Solvency updated. Current liquidity: ${newTotal}g.`;
   }
 );
 
 const logWorkoutTool = ai.defineTool(
   {
     name: 'log_workout',
-    description: 'Calculates points and updates total asset value based on a workout.',
+    description: 'Updates fat points based on movement.',
     inputSchema: z.object({
       userId: z.string(),
-      workoutDetails: z.string().describe('Details of the workout.'),
-      pointsDelta: z.number().describe('Points added/removed. Default is 100.'),
-      category: z.enum(['explosiveness', 'strength', 'recovery']).describe('Type of workout performance.'),
+      workoutDetails: z.string(),
+      pointsDelta: z.number(),
+      category: z.enum(['explosiveness', 'strength', 'recovery']),
     }),
     outputSchema: z.string(),
   },
@@ -103,18 +123,12 @@ const logWorkoutTool = ai.defineTool(
     const { firestore } = initializeFirebase();
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotalEquity = (current?.visceralFatPoints || 0) + input.pointsDelta;
-    
-    // 1. Update Core Vitals
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotalEquity });
-    
-    // 2. Add Detailed Activity Log
     await healthService.logActivity(firestore, input.userId, {
       category: input.category,
       content: `Asset Injection: ${input.workoutDetails}`,
       metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotalEquity}`],
     });
-
-    // 3. Add to History Chart Array
     await healthService.recordEquityEvent(firestore, input.userId, {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       gain: input.pointsDelta,
@@ -122,25 +136,7 @@ const logWorkoutTool = ai.defineTool(
       detail: input.workoutDetails,
       equity: newTotalEquity
     });
-
-    return `Equity recalibrated. New portfolio value: ${newTotalEquity} Visceral Fat Points.`;
-  }
-);
-
-const queryHistoryTool = ai.defineTool(
-  {
-    name: 'query_history',
-    description: 'Performs a search on previous workout logs to identify trends in performance.',
-    inputSchema: z.object({
-      userId: z.string(),
-      query: z.string().describe('What the user is looking for.'),
-      category: z.enum(['explosiveness', 'strength', 'food', 'recovery']).optional(),
-    }),
-    outputSchema: z.array(z.any()),
-  },
-  async (input) => {
-    const { firestore } = initializeFirebase();
-    return await healthService.queryLogs(firestore, input.userId, input.category);
+    return `Equity recalibrated. New portfolio value: ${newTotalEquity}.`;
   }
 );
 
@@ -150,38 +146,31 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
-  tools: [getUserContextTool, updateScheduleTool, logNutritionTool, logWorkoutTool, queryHistoryTool],
+  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool],
   prompt: `
   YOU ARE THE CHIEF FITNESS OFFICER (CFO). 
   TONE: Sarcastic, data-driven, financial metaphor heavy. 
   
   CURRENT DAY: {{{currentDay}}}
   USER ID: {{{userId}}}
+  ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
-  LIVE PORTFOLIO FEED:
-  - Current Protein Liquidity: {{{currentHealth.dailyProteinG}}}g
-  - Current Equity (VF Points): {{{currentHealth.visceralFatPoints}}}
-  - Recovery Score: {{{currentHealth.recoveryStatus}}}
-
-  INVENTORY AWARENESS (CORE ASSETS):
-  You must only suggest workouts using these specific assets:
-  - 55lb kettlebell
-  - 25lb kettlebell
-  - 50lb ruck
-  - Pull-up rings
-  - Adjustable dumbbells
-  - ATG slant board
-
-  OPERATING PRINCIPLES:
-  1. ALWAYS use 'get_user_context' at the start of a session if you haven't yet.
-  2. If the user asks "What's the play today?", identify today's scheduled activity and suggest a specific workout tailored to their INVENTORY.
-  3. Use 'update_schedule' if the user cancels or changes an activity.
-  4. Your responses should be short, punchy, and include a "Market Update" summary.
-  5. **CRITICAL: NEVER show JSON blocks, technical code, or internal tool call parameters in your final response.** The user is a client; they should only see your character-driven conversational message and market update. Do not explain *how* you are logging the data, just confirm it is audited and secured.
-  6. DO NOT roast the user for 0g protein if the LIVE PORTFOLIO FEED shows they are solvent (>100g).
+  {{#if currentHealth.onboardingComplete}}
+  OPERATING PRINCIPLES (ACTIVE MANAGEMENT):
+  - Use 'get_user_context' to see schedule/assets.
+  - Audit workouts and food.
+  - Suggest workouts based on available inventory.
+  {{else}}
+  DISCOVERY AUDIT (DAY 1) PROTOCOL:
+  - If the user is brand new (history is empty), introduce yourself as the "new consultant hired to audit visceral fat and protein solvency."
+  - Ask: "What are we working with? What's your current routine and what gear do you have in the warehouse (home gym)?"
+  - Ask: "What's the 'North Star'? Give me your protein and fat reduction targets."
+  - ONCE you have the schedule, equipment, and goals, use 'update_preferences' to store them.
+  - THEN use 'complete_onboarding' to unlock the ledger.
+  - Finish with: "Solid baseline. Now, let's look at today's ledger. What have we 'deposited' in terms of movement so far?"
+  {{/if}}
 
   Message from Client: {{{message}}}
-  {{#if photoDataUri}}Visual Asset Audit Attached: {{media url=photoDataUri}}{{/if}}
   `,
 });
 

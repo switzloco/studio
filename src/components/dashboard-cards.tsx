@@ -1,9 +1,10 @@
+
 'use client';
 
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Target, Zap, DollarSign, Briefcase, Loader2 } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, Lock } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
 
 interface DashboardCardsProps {
@@ -27,16 +28,27 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />
         ))}
       </div>
-      <div className="h-24 bg-muted animate-pulse rounded-xl" />
     </div>
   );
 
-  // Use default values to prevent NaN progress bars
+  if (!data.onboardingComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center space-y-4">
+        <div className="p-4 bg-muted rounded-full">
+          <Lock className="w-12 h-12 text-muted-foreground opacity-50" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-lg font-black tracking-tight">Portfolio Under Audit</h2>
+          <p className="text-sm text-muted-foreground">The CFO is currently performing a discovery audit. Please complete the onboarding conversation in the Coach tab to unlock your live ledger.</p>
+        </div>
+      </div>
+    );
+  }
+
   const dailyProteinG = data.dailyProteinG || 0;
   const visceralFatPoints = data.visceralFatPoints || 0;
-  
-  const proteinGoal = 150; // Standard CFO target
-  const fatPointsGoal = 3000; // Standard CFO target
+  const proteinGoal = 150; 
+  const fatPointsGoal = 3000; 
 
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
@@ -63,11 +75,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 <span className="text-[10px] font-bold text-muted-foreground">{dailyProteinG}g / {proteinGoal}g</span>
               </div>
               <Progress value={proteinProgress} className="h-2 bg-purple-50" />
-            </div>
-            <div className="text-right shrink-0">
-              <p className={`text-[10px] font-black uppercase ${dailyProteinG >= 110 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {dailyProteinG >= 110 ? 'Solvent' : 'Debt Alert'}
-              </p>
             </div>
           </CardContent>
         </Card>
