@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -88,34 +89,36 @@ export default function Home() {
           </div>
         </div>
         
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted">
-              {isAuditing ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Settings className="w-5 h-5 text-muted-foreground" />}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            {user?.isAnonymous && (
-              <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3">
-                <Cloud className="w-4 h-4" />
-                <span>Save My Portfolio</span>
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Run Internal Audit</span>
-            </DropdownMenuItem>
-            {!user?.isAnonymous && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out
+        <div className="flex items-center gap-2">
+           <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted">
+                {isAuditing ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Settings className="w-5 h-5 text-muted-foreground" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {user?.isAnonymous && (
+                <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3">
+                  <Cloud className="w-4 h-4" />
+                  <span>Save My Portfolio</span>
                 </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              )}
+              <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3">
+                <ShieldCheck className="w-4 h-4" />
+                <span>Run Internal Audit</span>
+              </DropdownMenuItem>
+              {!user?.isAnonymous && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
@@ -125,7 +128,7 @@ export default function Home() {
               <ChatInterface />
             </TabsContent>
             <TabsContent value="daily" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
-              <DashboardCards data={healthData} isLoading={isHealthLoading} />
+              <DashboardCards data={healthData} isLoading={isHealthLoading || isUserLoading} />
             </TabsContent>
             <TabsContent value="history" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
               <HistoryView />

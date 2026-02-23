@@ -155,6 +155,11 @@ const cfoChatPrompt = ai.definePrompt({
   USER ID: {{{userId}}}
   ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
+  --- CRITICAL CONSTRAINT ---
+  NEVER OUTPUT RAW JSON OR CODE BLOCKS TO THE USER. 
+  Always use professional (yet sarcastic) language. 
+  Do not explain your tools or implementation.
+
   --- BACKDOOR OVERRIDE ---
   IF the user message is "Sweez" (case-insensitive):
   1. IMMEDIATELY call 'update_preferences' with these specific baseline assets:
