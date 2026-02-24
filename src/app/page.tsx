@@ -6,7 +6,7 @@ import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
 import { PreferencesView } from '@/components/preferences-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2 } from 'lucide-react';
+import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
-import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWithPopup } from 'firebase/auth';
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
@@ -29,25 +29,43 @@ export default function Home() {
   const db = useFirestore();
   const { toast } = useToast();
   const [isAuditing, setIsAuditing] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc(userDocRef);
 
-  // Auto-login logic
-  useEffect(() => {
-    if (!isUserLoading && !user) {
-      signInAnonymously(auth).catch(console.error);
-    }
-  }, [user, isUserLoading, auth]);
-
   // Data Initialization logic: Ensure the user's "Portfolio" exists in Firestore
   useEffect(() => {
     if (user && db) {
-      // Trigger "get or create" for profile and preferences
       healthService.getHealthSummary(db, user.uid);
       healthService.getUserPreferences(db, user.uid);
     }
   }, [user, db]);
+
+  const handleAnonymousLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      await signInAnonymously(auth);
+      toast({ title: "Quick Entry Authorized", description: "Orientation briefing initiated." });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Access Denied", description: e.message });
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      toast({ title: "Portfolio Secured", description: "Identity verified. Full ledger access granted." });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Verification Failed", description: e.message });
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const handleUpgradeAccount = async () => {
     if (!user) return;
@@ -76,6 +94,77 @@ export default function Home() {
     setIsAuditing(false);
   };
 
+  // 1. LANDING / AUTH GATEWAY
+  if (!user && !isUserLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6 relative overflow-hidden">
+        {/* Background Accents */}
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/5 rounded-full blur-3xl" />
+        
+        <div className="max-w-md w-full space-y-10 text-center relative z-10">
+          <div className="space-y-6">
+            <div className="mx-auto p-5 bg-primary text-white w-fit rounded-[2rem] shadow-2xl rotate-3 hover:rotate-0 transition-transform duration-500">
+              <Briefcase className="w-10 h-10" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-5xl font-black tracking-tighter italic uppercase text-foreground leading-none">The CFO</h1>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.4em]">Chief Fitness Officer</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-lg font-medium text-muted-foreground leading-relaxed px-4">
+              Your body is a high-stakes portfolio. We've been hired to audit your visceral fat and protein solvency.
+            </p>
+            <div className="h-1 w-12 bg-primary/20 mx-auto rounded-full" />
+          </div>
+
+          <div className="grid gap-4 px-2">
+            <Button 
+              className="h-16 rounded-2xl text-base font-black uppercase tracking-widest shadow-xl group" 
+              onClick={handleGoogleLogin}
+              disabled={isLoggingIn}
+            >
+              {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                <>
+                  Secure Portfolio Entry
+                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
+            </Button>
+            <Button 
+              variant="outline" 
+              className="h-16 rounded-2xl text-xs font-black uppercase tracking-widest border-2" 
+              onClick={handleAnonymousLogin}
+              disabled={isLoggingIn}
+            >
+              Quick Audit (Anonymous)
+            </Button>
+          </div>
+
+          <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-40">
+            Strict Data Solvency • encrypted Audit Trails • No Garbage Data
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. LOADING STATE
+  if (isUserLoading || (user && !healthData && isHealthLoading)) {
+    return (
+      <div className="h-screen bg-background flex flex-col items-center justify-center space-y-6">
+        <Loader2 className="w-12 h-12 text-primary animate-spin" />
+        <div className="text-center space-y-1">
+          <p className="text-[12px] font-black uppercase tracking-[0.3em] text-muted-foreground">Initializing Terminal</p>
+          <p className="text-xs font-bold text-primary italic">Syncing Portfolio Assets...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. MAIN TERMINAL INTERFACE
   return (
     <div className="flex flex-col h-screen max-w-5xl mx-auto bg-background shadow-2xl overflow-hidden border-x">
       <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
@@ -85,7 +174,9 @@ export default function Home() {
           </div>
           <div>
             <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">The CFO</h1>
-            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">Chief Fitness Officer • v2.0</p>
+            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">
+              {healthData?.onboardingComplete ? 'Active Portfolio' : 'Discovery Audit'}
+            </p>
           </div>
         </div>
         
@@ -100,22 +191,18 @@ export default function Home() {
               {user?.isAnonymous && (
                 <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3">
                   <Cloud className="w-4 h-4" />
-                  <span>Save My Portfolio</span>
+                  <span>Secure Account</span>
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3">
                 <ShieldCheck className="w-4 h-4" />
                 <span>Run Internal Audit</span>
               </DropdownMenuItem>
-              {!user?.isAnonymous && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign Out
-                  </DropdownMenuItem>
-                </>
-              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -128,7 +215,7 @@ export default function Home() {
               <ChatInterface />
             </TabsContent>
             <TabsContent value="daily" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
-              <DashboardCards data={healthData} isLoading={isHealthLoading || isUserLoading} />
+              <DashboardCards data={healthData} isLoading={isHealthLoading} />
             </TabsContent>
             <TabsContent value="history" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
               <HistoryView />

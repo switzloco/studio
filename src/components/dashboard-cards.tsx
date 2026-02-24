@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -48,7 +49,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         <div className="space-y-4">
           <h2 className="text-2xl font-black tracking-tight">Portfolio Discovery</h2>
           <p className="text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
-            Opening your terminal... The CFO is initializing your personal ledger in the secure vault. This process ensures your assets are properly allocated before the first audit.
+            The CFO is initializing your personal ledger. This secure handshake ensures your assets are properly allocated before the first audit begins.
           </p>
         </div>
         <div className="flex items-center gap-3 text-primary">
@@ -75,9 +76,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed font-medium">
             The CFO is currently performing a <span className="font-bold text-foreground underline decoration-primary decoration-4 underline-offset-8">Discovery Audit</span>. 
             <br/><br/>
-            Switch to the <span className="font-bold text-primary italic uppercase tracking-tighter">COACH</span> tab and complete the briefing to unlock your performance metrics and high-stakes dashboard.
+            Complete your onboarding in the <span className="font-bold text-primary italic uppercase tracking-tighter">COACH</span> tab to unlock high-stakes performance metrics and your live dashboard.
           </p>
         </div>
+        
         <Card className="bg-card border-dashed border-2 p-8 mt-6 w-full max-w-2xl shadow-none">
           <p className="text-[12px] font-black text-muted-foreground uppercase text-left mb-5 tracking-[0.2em]">Audit Requirements:</p>
           <ul className="text-sm sm:text-base font-black text-left space-y-5">
