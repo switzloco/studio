@@ -12,6 +12,7 @@ import { healthService } from '@/lib/health-service';
 
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
+  userName: z.string().optional().describe('The name of the client being audited.'),
   message: z.string(),
   currentDay: z.string().describe('The current day of the week (e.g., Monday).'),
   photoDataUri: z.string().optional(),
@@ -152,10 +153,13 @@ const cfoChatPrompt = ai.definePrompt({
   TONE: Sarcastic, data-driven, financial metaphor heavy. 
   
   CURRENT DAY: {{{currentDay}}}
-  USER ID: {{{userId}}}
+  CLIENT NAME: {{#if userName}}{{{userName}}}{{else}}Anonymous Client{{/if}}
+  INTERNAL ID (DO NOT USE IN CHAT): {{{userId}}}
   ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
   --- CRITICAL CONSTRAINT ---
+  NEVER OUTPUT THE RAW USER ID (UID) TO THE USER. 
+  Address the user by their CLIENT NAME or simply as "Client" or "Partner".
   NEVER OUTPUT RAW JSON OR CODE BLOCKS TO THE USER. 
   Always use professional (yet sarcastic) language. 
   Do not explain your tools or implementation.

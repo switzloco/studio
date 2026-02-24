@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -78,7 +79,8 @@ export function ChatInterface() {
       messages.map(m => ({ role: m.role, content: m.content })), 
       sanitizedHealth,
       userImage || undefined,
-      user.uid
+      user.uid,
+      user.displayName || undefined
     );
 
     if (result.success && result.response) {

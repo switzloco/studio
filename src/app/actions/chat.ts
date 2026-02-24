@@ -1,3 +1,4 @@
+
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
@@ -12,7 +13,8 @@ export async function sendChatMessage(
   chatHistory: { role: 'user' | 'model', content: string }[],
   currentHealth: any,
   photoDataUri?: string,
-  userId?: string
+  userId?: string,
+  userName?: string
 ) {
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
@@ -22,6 +24,7 @@ export async function sendChatMessage(
 
     const response = await personalizedAICoaching({
       userId,
+      userName,
       message,
       currentDay,
       photoDataUri,
