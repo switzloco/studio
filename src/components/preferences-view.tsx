@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint } from "lucide-react";
 import { useUser, useFirestore } from '@/firebase';
 import { healthService, UserPreferences } from '@/lib/health-service';
 import { useToast } from '@/hooks/use-toast';
@@ -186,6 +186,25 @@ export function PreferencesView() {
                     className="h-10 text-sm font-black bg-white/50 border-muted-foreground/10"
                   />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Internal Audit / Database Reference Section */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 border-dashed border-2">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <Fingerprint className="w-4 h-4" />
+                Database Ref (Internal Audit)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-black text-muted-foreground tracking-widest px-1">Portfolio UID</Label>
+                <div className="p-3 bg-muted/30 rounded-lg font-mono text-[10px] text-muted-foreground break-all border border-dashed select-all cursor-copy">
+                  {user?.uid || "UNAUTHORIZED_ACCESS"}
+                </div>
+                <p className="text-[9px] text-muted-foreground italic px-1 mt-2">Use this ID to locate your document in the Firebase Console under /users/.</p>
               </div>
             </CardContent>
           </Card>
