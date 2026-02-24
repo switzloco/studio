@@ -42,6 +42,22 @@ export function ChatInterface() {
     }
   }, [messages, isLoading]);
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setSelectedImage(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
   const handleSend = async () => {
     if (!user || (!input.trim() && !selectedImage) || isLoading) return;
 
@@ -127,6 +143,7 @@ export function ChatInterface() {
             value={input} 
             onChange={(e) => setInput(e.target.value)} 
             onKeyDown={(e) => e.key === 'Enter' && handleSend()} 
+            onPaste={handlePaste}
             className="flex-1 rounded-full border-muted bg-white/50"
             disabled={isLoading}
           />
