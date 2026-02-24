@@ -5,16 +5,18 @@ import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
 import { PreferencesView } from '@/components/preferences-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight } from 'lucide-react';
+import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWithPopup } from 'firebase/auth';
 import { doc } from 'firebase/firestore';
@@ -174,26 +176,47 @@ export default function Home() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+           {!user?.isAnonymous && (
+             <div className="hidden md:flex flex-col items-end mr-1">
+               <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">Verified Identity</p>
+               <p className="text-xs font-bold text-foreground truncate max-w-[150px]">{user?.displayName || user?.email}</p>
+             </div>
+           )}
+
            <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted">
-                {isAuditing ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Settings className="w-5 h-5 text-muted-foreground" />}
+              <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted relative overflow-hidden h-10 w-10 border-2 border-primary/20 p-0">
+                {isAuditing ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                ) : (
+                  <Avatar className="h-full w-full">
+                    <AvatarImage src={user?.photoURL || undefined} />
+                    <AvatarFallback className="bg-secondary text-primary font-black text-xs">
+                      {user?.displayName?.charAt(0) || user?.email?.charAt(0) || <UserIcon className="w-4 h-4" />}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="flex flex-col gap-1 p-3">
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Portfolio Owner</span>
+                <span className="text-sm font-bold text-foreground truncate">{user?.displayName || user?.email || 'Anonymous Auditor'}</span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               {user?.isAnonymous && (
-                <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3">
+                <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3 cursor-pointer">
                   <Cloud className="w-4 h-4" />
-                  <span>Secure Account</span>
+                  <span>Secure Portfolio (Google)</span>
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3">
+              <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3 cursor-pointer">
                 <ShieldCheck className="w-4 h-4" />
                 <span>Run Internal Audit</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3">
+              <DropdownMenuItem onClick={() => signOut(auth)} className="text-destructive font-bold uppercase text-xs p-3 cursor-pointer">
                 <LogOut className="w-4 h-4 mr-2" />
                 Sign Out
               </DropdownMenuItem>
