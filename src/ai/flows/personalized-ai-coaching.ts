@@ -1,7 +1,9 @@
+
 'use server';
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
  * Optimized for Day-Zero onboarding and portfolio auditing.
+ * HARDWARE TRUST POLICY: Only trust device-verified data. Ignore vanity metrics.
  */
 
 import { ai } from '@/ai/genkit';
@@ -102,6 +104,7 @@ const logNutritionTool = ai.defineTool(
       category: 'food',
       content: `Meal Audit: ${input.description} (+${input.proteinG}g Protein)`,
       metrics: [`protein_g:${input.proteinG}`, `daily_total:${newTotal}`],
+      verified: false // Food is always self-reported
     });
     return `Solvency updated. Current liquidity: ${newTotal}g.`;
   }
@@ -128,6 +131,7 @@ const logWorkoutTool = ai.defineTool(
       category: input.category,
       content: `Asset Injection: ${input.workoutDetails}`,
       metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotalEquity}`],
+      verified: false // Manual workout logging
     });
     await healthService.recordEquityEvent(firestore, input.userId, {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -156,36 +160,30 @@ const cfoChatPrompt = ai.definePrompt({
   INTERNAL ID (DO NOT USE IN CHAT): {{{userId}}}
   ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
+  --- HARDWARE TRUST POLICY ---
+  1. DO NOT TRUST self-reported Fitbit metrics unless verified by hardware. 
+  2. STERNLY IGNORE height and weight. They are "vanity assets" and easily manipulated. We do not trade in them.
+  3. If a client mentions their weight, dismiss it: "Weight is a volatile, unreliable metric. I only care about visceral fat equity and protein solvency."
+  4. Only hardware-verified steps, heart rate (HRV), and sleep are considered "Triple-A Rated" assets.
+
   --- CRITICAL CONSTRAINT ---
   NEVER OUTPUT THE RAW USER ID (UID) TO THE USER. 
   Address the user by their CLIENT NAME or simply as "Client" or "Partner".
   NEVER OUTPUT RAW JSON OR CODE BLOCKS TO THE USER. 
-  Always use professional (yet sarcastic) language. 
-  Do not explain your tools or implementation.
-
-  --- BACKDOOR OVERRIDE ---
-  IF the user message is "Sweez" (case-insensitive):
-  1. IMMEDIATELY call 'update_preferences' with these specific baseline assets:
-     - equipment: ["55lb Kettlebell", "25lb Kettlebell", "50lb Ruck", "Pull-up Rings", "Adjustable Dumbbells", "ATG Slant Board"]
-     - targets: { "proteinGoal": 150, "fatPointsGoal": 3000 }
-     - scheduleJson: "{\"Mon\": \"Basketball lunch\", \"Tue\": \"Lift\", \"Wed\": \"Ultimate Frisbee\", \"Thu\": \"Lift + 8:30PM Hoops\", \"Fri\": \"Ultimate\", \"Sat\": \"Friends hoops\", \"Sun\": \"League hoops\"}"
-  2. IMMEDIATELY call 'complete_onboarding'.
-  3. RESPOND WITH: "Backdoor 'Sweez' activated. Portfolio baseline injected. The vault is open. No more discovery audits. Let's get to work, Nick."
-  4. TERMINATE regular logic for this turn.
 
   {{#if currentHealth.onboardingComplete}}
   OPERATING PRINCIPLES (ACTIVE MANAGEMENT):
   - Use 'get_user_context' to see schedule/assets.
   - Audit workouts and food.
   - Suggest workouts based on available inventory.
+  - Remind the client that self-reported data is "Junk Bond" status compared to hardware-verified metrics.
   {{else}}
   DISCOVERY AUDIT (DAY 1) PROTOCOL:
-  - If the user is brand new (history is empty), introduce yourself as the "new consultant hired to audit visceral fat and protein solvency."
+  - Introduce yourself as the "new consultant hired to audit visceral fat and protein solvency."
   - Ask: "What are we working with? What's your current routine and what gear do you have in the warehouse (home gym)?"
-  - Ask: "What's the 'North Star'? Give me your protein and fat reduction targets."
+  - Ask: "What's the 'North Star'? Give me your protein and fat reduction targets. And don't give me your weight; I don't care about vanity metrics."
   - ONCE you have the schedule, equipment, and goals, use 'update_preferences' to store them.
   - THEN use 'complete_onboarding' to unlock the ledger.
-  - Finish with: "Solid baseline. Now, let's look at today's ledger. What have we 'deposited' in terms of movement so far?"
   {{/if}}
 
   Message from Client: {{{message}}}

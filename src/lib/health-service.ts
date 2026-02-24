@@ -1,3 +1,4 @@
+
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 /**
@@ -19,6 +20,7 @@ export interface HealthLog {
   category: 'explosiveness' | 'strength' | 'food' | 'recovery' | 'health_sync';
   content: string;
   metrics: string[];
+  verified?: boolean;
 }
 
 export interface HealthData {
@@ -35,6 +37,7 @@ export interface HealthData {
   isAnonymous: boolean;
   onboardingDay: number;
   onboardingComplete: boolean;
+  isDeviceVerified: boolean;
 }
 
 export interface UserPreferences {
@@ -69,6 +72,7 @@ export const healthService = {
       isAnonymous: true,
       onboardingDay: 1,
       onboardingComplete: false,
+      isDeviceVerified: false,
       createdAt: serverTimestamp(),
     };
     await setDoc(docRef, initialData);

@@ -1,19 +1,23 @@
+
 /**
  * @fileOverview Mock Fitbit service for "Day 1" of the CFO audit.
- * In a production environment, this would handle OAuth2 exchange and cloud-to-cloud sync.
+ * Now includes verification sources to distinguish between hardware and manual data.
  */
+
+export interface FitbitMetric {
+  value: number;
+  source: 'device' | 'manual';
+}
 
 export interface FitbitSyncResult {
   success: boolean;
-  steps: number;
-  sleep: number;
-  hrv: number;
+  steps: FitbitMetric;
+  sleep: FitbitMetric;
+  hrv: FitbitMetric;
+  isVerified: boolean;
 }
 
 export const fitbitService = {
-  /**
-   * Generates the OAuth2 Authorization URL for Fitbit.
-   */
   getAuthUrl(): string {
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
     const redirectUri = typeof window !== 'undefined' ? `${window.location.origin}/api/auth/fitbit/callback` : '';
@@ -22,17 +26,17 @@ export const fitbitService = {
   },
 
   /**
-   * Mock sync for Day-Zero onboarding.
+   * Mock sync returns 'device' source for verification auditing.
    */
   async syncDayOneData(): Promise<FitbitSyncResult> {
-    // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1500));
     
     return {
       success: true,
-      steps: 8432,
-      sleep: 7.2,
-      hrv: 62
+      steps: { value: 8432, source: 'device' },
+      sleep: { value: 7.2, source: 'device' },
+      hrv: { value: 62, source: 'device' },
+      isVerified: true
     };
   }
 };

@@ -30,6 +30,10 @@
         "onboardingComplete": {
           "type": "boolean",
           "description": "Whether the user has finished the discovery audit."
+        },
+        "isDeviceVerified": {
+          "type": "boolean",
+          "description": "Whether the current health metrics are verified by a hardware device."
         }
       },
       "required": [
@@ -75,7 +79,8 @@
         "timestamp": { "type": "string", "format": "date-time" },
         "category": { "type": "string" },
         "content": { "type": "string" },
-        "metrics": { "type": "array", "items": { "type": "string" } }
+        "metrics": { "type": "array", "items": { "type": "string" } },
+        "verified": { "type": "boolean" }
       },
       "required": ["id", "userId", "timestamp", "category", "content", "metrics"]
     }
