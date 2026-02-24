@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -6,7 +5,7 @@ import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
 import { PreferencesView } from '@/components/preferences-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, Lock } from 'lucide-react';
+import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -34,7 +33,6 @@ export default function Home() {
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc(userDocRef);
 
-  // Data Initialization logic: Ensure the user's "Portfolio" exists in Firestore
   useEffect(() => {
     if (user && db) {
       healthService.getHealthSummary(db, user.uid);
@@ -94,11 +92,9 @@ export default function Home() {
     setIsAuditing(false);
   };
 
-  // 1. LANDING / AUTH GATEWAY
   if (!user && !isUserLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6 relative overflow-hidden">
-        {/* Background Accents */}
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/5 rounded-full blur-3xl" />
         
@@ -144,14 +140,13 @@ export default function Home() {
           </div>
 
           <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-40">
-            Strict Data Solvency • encrypted Audit Trails • No Garbage Data
+            Strict Data Solvency • Encrypted Audit Trails • No Garbage Data
           </p>
         </div>
       </div>
     );
   }
 
-  // 2. LOADING STATE
   if (isUserLoading || (user && !healthData && isHealthLoading)) {
     return (
       <div className="h-screen bg-background flex flex-col items-center justify-center space-y-6">
@@ -164,9 +159,8 @@ export default function Home() {
     );
   }
 
-  // 3. MAIN TERMINAL INTERFACE
   return (
-    <div className="flex flex-col h-screen max-w-5xl mx-auto bg-background shadow-2xl overflow-hidden border-x">
+    <div className="flex flex-col h-screen w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl overflow-hidden md:border-x">
       <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary text-white rounded-xl shadow-md">
