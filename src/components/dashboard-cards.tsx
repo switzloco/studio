@@ -1,10 +1,14 @@
+
 'use client';
 
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert, CloudLightning, ShieldCheck } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
+import { fitbitService } from '@/lib/fitbit-service';
+import { useUser } from '@/firebase';
 
 interface DashboardCardsProps {
   data: HealthData | null;
@@ -12,6 +16,8 @@ interface DashboardCardsProps {
 }
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
+  const { user } = useUser();
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-full space-y-6 p-6 md:p-12 lg:p-16 bg-background">
@@ -90,8 +96,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               ESTABLISH WEEKLY PERFORMANCE ROUTINE
             </li>
             <li className="flex items-center gap-4 text-muted-foreground">
-              <div className="w-3 h-3 bg-primary shrink-0 rounded-full" />
-              INITIAL VISCERAL FAT BENCHMARK
+              <div className={`w-3 h-3 ${data.isDeviceVerified ? 'bg-emerald-500' : 'bg-orange-400 animate-pulse'} shrink-0 rounded-full`} />
+              HARDWARE VERIFICATION (FITBIT)
             </li>
           </ul>
         </Card>
@@ -107,6 +113,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
+  const handleConnectFitbit = () => {
+    if (!user) return;
+    window.location.href = fitbitService.getAuthUrl(user.uid);
+  };
+
   return (
     <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
       <div className="space-y-6">
@@ -117,6 +128,26 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             <span className="text-[12px] font-bold text-emerald-600 uppercase">Active Session</span>
           </div>
         </div>
+
+        {!data.isDeviceVerified && (
+          <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
+             <CardContent className="p-4 flex items-center justify-between gap-4">
+               <div className="flex items-center gap-3">
+                 <div className="p-2 bg-orange-100 rounded-lg">
+                   <ShieldAlert className="w-5 h-5 text-orange-600" />
+                 </div>
+                 <div>
+                   <p className="text-xs font-black uppercase tracking-tight text-orange-800">Unverified Metrics Detected</p>
+                   <p className="text-[10px] font-bold text-orange-700/70">Connect hardware to authorize a "Triple-A Rated" audit.</p>
+                 </div>
+               </div>
+               <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                 Connect Fitbit
+                 <CloudLightning className="w-3 h-3 ml-2" />
+               </Button>
+             </CardContent>
+          </Card>
+        )}
         
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
           <CardContent className="p-6 sm:p-10 flex items-center gap-8">
@@ -137,8 +168,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
-              <div className="p-3 bg-orange-100 rounded-xl w-fit mb-4 shadow-sm">
-                <Zap className="w-6 h-6 text-orange-600" />
+              <div className="flex justify-between items-start mb-4">
+                <div className="p-3 bg-orange-100 rounded-xl shadow-sm">
+                  <Zap className="w-6 h-6 text-orange-600" />
+                </div>
+                {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Steps Inventory</p>
               <h4 className="text-4xl font-black italic">{(data.steps || 0).toLocaleString()}</h4>
@@ -148,8 +182,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
-              <div className="p-3 bg-blue-100 rounded-xl w-fit mb-4 shadow-sm">
-                <Target className="w-6 h-6 text-blue-600" />
+              <div className="flex justify-between items-start mb-4">
+                <div className="p-3 bg-blue-100 rounded-xl shadow-sm">
+                  <Target className="w-6 h-6 text-blue-600" />
+                </div>
+                {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Recovery Audit</p>
               <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.recoveryStatus || 'MEDIUM'}</h4>

@@ -1,7 +1,7 @@
 
 /**
- * @fileOverview Mock Fitbit service for "Day 1" of the CFO audit.
- * Now includes verification sources to distinguish between hardware and manual data.
+ * @fileOverview Fitbit service for the CFO audit.
+ * Manages hardware verification and cloud-to-cloud synchronization.
  */
 
 export interface FitbitMetric {
@@ -18,15 +18,24 @@ export interface FitbitSyncResult {
 }
 
 export const fitbitService = {
-  getAuthUrl(): string {
+  /**
+   * Generates the authorization URL for the client.
+   * @param userId The ID of the portfolio to link.
+   */
+  getAuthUrl(userId: string): string {
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
-    const redirectUri = typeof window !== 'undefined' ? `${window.location.origin}/api/auth/fitbit/callback` : '';
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
+    const redirectUri = `${origin}/api/auth/fitbit/callback`;
     const scope = 'activity heartrate sleep profile';
-    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+    
+    // We pass userId in the 'state' parameter to maintain audit trail during callback
+    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${userId}`;
   },
 
   /**
    * Mock sync returns 'device' source for verification auditing.
+   * Day 1: Returns simulated hardware data.
+   * Day 2: Will fetch from Fitbit Web API.
    */
   async syncDayOneData(): Promise<FitbitSyncResult> {
     await new Promise(resolve => setTimeout(resolve, 1500));
