@@ -3,7 +3,8 @@
 /**
  * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
  * Optimized for Day-Zero onboarding and portfolio auditing.
- * HARDWARE TRUST POLICY: Only trust device-verified data. Ignore vanity metrics.
+ * HARDWARE TRUST POLICY: Only trust device-verified data for core solvency (Steps/HRV/Sleep).
+ * VANITY POLICY: Accept self-reported height/weight/exercise as volatile secondary assets.
  */
 
 import { ai } from '@/ai/genkit';
@@ -43,6 +44,33 @@ const getUserContextTool = ai.defineTool(
   async (input) => {
     const { firestore } = initializeFirebase();
     return await healthService.getUserPreferences(firestore, input.userId);
+  }
+);
+
+const logVanityMetricsTool = ai.defineTool(
+  {
+    name: 'log_vanity_metrics',
+    description: 'Updates self-reported (unverified) height and weight in the user ledger.',
+    inputSchema: z.object({
+      userId: z.string(),
+      heightCm: z.number().optional(),
+      weightKg: z.number().optional(),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const { firestore } = initializeFirebase();
+    const updates: any = {};
+    if (input.heightCm) updates.heightCm = input.heightCm;
+    if (input.weightKg) updates.weightKg = input.weightKg;
+    await healthService.updateHealthData(firestore, input.userId, updates);
+    await healthService.logActivity(firestore, input.userId, {
+      category: 'vanity_audit',
+      content: `Self-Reported Asset Audit: ${input.heightCm ? `Height: ${input.heightCm}cm ` : ''}${input.weightKg ? `Weight: ${input.weightKg}kg` : ''}`,
+      metrics: [input.heightCm ? `height:${input.heightCm}` : '', input.weightKg ? `weight:${input.weightKg}` : ''].filter(Boolean),
+      verified: false
+    });
+    return "Vanity metrics recorded. Audit status: UNVERIFIED / SECONDARY.";
   }
 );
 
@@ -104,7 +132,7 @@ const logNutritionTool = ai.defineTool(
       category: 'food',
       content: `Meal Audit: ${input.description} (+${input.proteinG}g Protein)`,
       metrics: [`protein_g:${input.proteinG}`, `daily_total:${newTotal}`],
-      verified: false // Food is always self-reported
+      verified: false 
     });
     return `Solvency updated. Current liquidity: ${newTotal}g.`;
   }
@@ -129,9 +157,9 @@ const logWorkoutTool = ai.defineTool(
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotalEquity });
     await healthService.logActivity(firestore, input.userId, {
       category: input.category,
-      content: `Asset Injection: ${input.workoutDetails}`,
+      content: `Asset Injection (Self-Reported): ${input.workoutDetails}`,
       metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotalEquity}`],
-      verified: false // Manual workout logging
+      verified: false 
     });
     await healthService.recordEquityEvent(firestore, input.userId, {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -150,7 +178,7 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool],
+  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool, logVanityMetricsTool],
   prompt: `
   YOU ARE THE CHIEF FITNESS OFFICER (CFO). 
   TONE: Sarcastic, data-driven, financial metaphor heavy. 
@@ -161,10 +189,14 @@ const cfoChatPrompt = ai.definePrompt({
   ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
   --- HARDWARE TRUST POLICY ---
-  1. DO NOT TRUST self-reported Fitbit metrics unless verified by hardware. 
-  2. STERNLY IGNORE height and weight. They are "vanity assets" and easily manipulated. We do not trade in them.
-  3. If a client mentions their weight, dismiss it: "Weight is a volatile, unreliable metric. I only care about visceral fat equity and protein solvency."
-  4. Only hardware-verified steps, heart rate (HRV), and sleep are considered "Triple-A Rated" assets.
+  1. ONLY TRUST steps, heart rate (HRV), and sleep if they come from the Fitbit "Triple-A Rated" device.
+  2. Fitbit is ONLY for these three metrics. We DO NOT use Fitbit for height or weight.
+  
+  --- VANITY & SELF-REPORT POLICY ---
+  1. We ACCEPT self-reported height and weight if provided in chat. Use 'log_vanity_metrics'.
+  2. We ACCEPT self-reported exercise (movement deposits). Use 'log_workout'.
+  3. Acknowledge these as "volatile assets" or "unverified equity" compared to hardware data. 
+  4. If a client gives height/weight, record it but remind them: "Recording vanity assets. Note that these are easily manipulated and hold lower portfolio rating than hardware evidence."
 
   --- CRITICAL CONSTRAINT ---
   NEVER OUTPUT THE RAW USER ID (UID) TO THE USER. 
@@ -174,14 +206,14 @@ const cfoChatPrompt = ai.definePrompt({
   {{#if currentHealth.onboardingComplete}}
   OPERATING PRINCIPLES (ACTIVE MANAGEMENT):
   - Use 'get_user_context' to see schedule/assets.
-  - Audit workouts and food.
-  - Suggest workouts based on available inventory.
+  - Audit workouts, food, and vanity metrics.
   - Remind the client that self-reported data is "Junk Bond" status compared to hardware-verified metrics.
   {{else}}
   DISCOVERY AUDIT (DAY 1) PROTOCOL:
   - Introduce yourself as the "new consultant hired to audit visceral fat and protein solvency."
-  - Ask: "What are we working with? What's your current routine and what gear do you have in the warehouse (home gym)?"
-  - Ask: "What's the 'North Star'? Give me your protein and fat reduction targets. And don't give me your weight; I don't care about vanity metrics."
+  - Ask: "What are we working with? What's your gear in the warehouse (home gym)?"
+  - Ask: "What's the gauntlet? (Weekly routine)"
+  - Ask: "What are the quarterly targets? (Protein and Fat goals)"
   - ONCE you have the schedule, equipment, and goals, use 'update_preferences' to store them.
   - THEN use 'complete_onboarding' to unlock the ledger.
   {{/if}}

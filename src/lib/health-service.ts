@@ -17,7 +17,7 @@ export interface HealthLog {
   id?: string;
   userId: string;
   timestamp: any;
-  category: 'explosiveness' | 'strength' | 'food' | 'recovery' | 'health_sync';
+  category: 'explosiveness' | 'strength' | 'food' | 'recovery' | 'health_sync' | 'vanity_audit';
   content: string;
   metrics: string[];
   verified?: boolean;
@@ -31,6 +31,8 @@ export interface HealthData {
   recoveryStatus: 'low' | 'medium' | 'high';
   dailyProteinG: number;
   visceralFatPoints: number;
+  heightCm?: number;
+  weightKg?: number;
   history: HistoryEntry[];
   updatedAt?: any;
   createdAt?: any;

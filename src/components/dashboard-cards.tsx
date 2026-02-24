@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert, CloudLightning, ShieldCheck } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler } from "lucide-react";
 import { HealthData } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { useUser } from '@/firebase';
@@ -165,7 +165,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
               <div className="flex justify-between items-start mb-4">
@@ -194,14 +194,26 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300 lg:col-span-1 hidden lg:block">
+          {/* Vanity Metrics Grid */}
+          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
               <div className="p-3 bg-emerald-100 rounded-xl w-fit mb-4 shadow-sm">
-                <Target className="w-6 h-6 text-emerald-600" />
+                <Scale className="w-6 h-6 text-emerald-600" />
               </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Portfolio Day</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.onboardingDay || 1}</h4>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Portfolio Weight</p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.weightKg ? `${data.weightKg}kg` : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-emerald-200 rounded-full" />
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300 hidden lg:block">
+            <CardContent className="p-6 sm:p-10">
+              <div className="p-3 bg-indigo-100 rounded-xl w-fit mb-4 shadow-sm">
+                <Ruler className="w-6 h-6 text-indigo-600" />
+              </div>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Height Asset</p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.heightCm ? `${data.heightCm}cm` : 'N/A'}</h4>
+              <div className="mt-4 h-1 w-12 bg-indigo-200 rounded-full" />
             </CardContent>
           </Card>
         </div>

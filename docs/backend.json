@@ -16,6 +16,14 @@
         "dailyProteinG": {
           "type": "number"
         },
+        "heightCm": {
+          "type": "number",
+          "description": "Self-reported height. Secondary asset."
+        },
+        "weightKg": {
+          "type": "number",
+          "description": "Self-reported weight. Volatile asset."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
