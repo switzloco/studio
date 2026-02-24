@@ -1,4 +1,3 @@
-
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 /**
@@ -8,7 +7,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, lim
 export interface HistoryEntry {
   date: string;
   gain: number;
-  status: 'Bullish' | 'Stable' | 'Correction';
+  status: 'Bullish' | 'Stable' | 'Correction' | 'Bullish Entry';
   detail: string;
   equity: number;
 }
