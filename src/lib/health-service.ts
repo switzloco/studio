@@ -1,5 +1,5 @@
 
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp } from 'firebase/firestore';
 
 /**
  * @fileOverview Health service for managing fitness portfolio data in Firestore.
@@ -16,7 +16,7 @@ export interface HistoryEntry {
 export interface HealthLog {
   id?: string;
   userId: string;
-  timestamp: any;
+  timestamp: FieldValue | Timestamp;
   category: 'explosiveness' | 'strength' | 'food' | 'recovery' | 'health_sync' | 'vanity_audit';
   content: string;
   metrics: string[];
@@ -34,8 +34,8 @@ export interface HealthData {
   heightCm?: number;
   weightKg?: number;
   history: HistoryEntry[];
-  updatedAt?: any;
-  createdAt?: any;
+  updatedAt?: FieldValue | Timestamp;
+  createdAt?: FieldValue | Timestamp;
   isAnonymous: boolean;
   onboardingDay: number;
   onboardingComplete: boolean;

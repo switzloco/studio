@@ -102,7 +102,12 @@ const updatePreferencesTool = ai.defineTool(
     const { firestore } = initializeFirebase();
     const updates: Partial<UserPreferences> = {};
     if (input.equipment) updates.equipment = input.equipment;
-    if (input.targets) updates.targets = input.targets;
+    if (input.targets) {
+      const { proteinGoal, fatPointsGoal } = input.targets;
+      if (proteinGoal !== undefined && fatPointsGoal !== undefined) {
+        updates.targets = { proteinGoal, fatPointsGoal };
+      }
+    }
     if (input.scheduleJson) updates.weeklySchedule = input.scheduleJson;
     
     await healthService.updateUserPreferences(firestore, input.userId, updates);

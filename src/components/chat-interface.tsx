@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,6 +11,7 @@ import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
+import { HealthData } from '@/lib/health-service';
 
 interface Message {
   role: 'user' | 'model';
@@ -34,7 +36,7 @@ export function ChatInterface() {
   const { toast } = useToast();
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
-  const { data: healthData } = useDoc(userDocRef);
+  const { data: healthData } = useDoc<HealthData>(userDocRef);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -102,7 +104,7 @@ export function ChatInterface() {
                 <span className="text-[10px] font-bold text-muted-foreground uppercase">{m.role === 'model' ? 'The CFO' : 'User'}</span>
               </div>
               <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}>
-                {m.image && <img src={m.image} alt="Audit" className="mb-2 rounded-lg border w-full h-auto" />}
+                {m.image && <Image src={m.image} alt="Audit" width={400} height={300} className="mb-2 rounded-lg border w-full h-auto" unoptimized />}
                 {m.content}
               </div>
             </div>
@@ -122,7 +124,7 @@ export function ChatInterface() {
       <div className="p-4 glass-morphism border-t shadow-2xl safe-area-bottom">
         {selectedImage && (
           <div className="mb-4 relative w-24 h-24 rounded-xl overflow-hidden border-2 border-primary">
-            <img src={selectedImage} alt="Preview" className="w-full h-full object-cover" />
+            <Image src={selectedImage} alt="Preview" width={96} height={96} className="w-full h-full object-cover" unoptimized />
             <Button size="icon" variant="destructive" className="absolute top-1 right-1 w-6 h-6 rounded-full" onClick={() => setSelectedImage(null)}>
               <X className="w-3 h-3" />
             </Button>
