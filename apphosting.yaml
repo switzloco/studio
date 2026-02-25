@@ -2,6 +2,15 @@
 # https://firebase.google.com/docs/app-hosting/configure
 
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+  # --- SCALING CONFIGURATION ---
+  # minInstances: Minimum number of instances kept warm at all times.
+  # Cost implication: Each warm instance incurs idle Cloud Run charges (~$0.00002/vCPU-second).
+  # Set to 0 for lowest cost (cold starts on low traffic); set to 1+ to eliminate cold starts.
+  minInstances: 0
+
+  # maxInstances: Hard ceiling on horizontal scaling under load.
+  # Cost implication: Cloud Run bills per request and per instance-hour.
+  # At maxInstances: 10, a sustained traffic spike can incur up to 10x the baseline cost.
+  # Each instance uses the memory/CPU defined in your Cloud Run service config.
+  # Recommended: start at 3-5 for production, increase after load testing.
+  maxInstances: 10
