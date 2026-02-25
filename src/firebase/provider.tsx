@@ -1,6 +1,6 @@
 'use client';
 
-import React, { DependencyList, createContext, useContext, ReactNode, useMemo, useState, useEffect } from 'react';
+import React, { DependencyList, createContext, useContext, ReactNode, useMemo, useState, useEffect, useRef } from 'react';
 import { FirebaseApp } from 'firebase/app';
 import { Firestore } from 'firebase/firestore';
 import { Auth, User, onAuthStateChanged } from 'firebase/auth';
@@ -61,20 +61,17 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
   firestore,
   auth,
 }) => {
-  const [userAuthState, setUserAuthState] = useState<UserAuthState>({
+  const [userAuthState, setUserAuthState] = useState<UserAuthState>(() => ({
     user: null,
-    isUserLoading: true, // Start loading until first auth event
-    userError: null,
-  });
+    isUserLoading: !!auth, // Only loading if auth is provided
+    userError: auth ? null : new Error("Auth service not provided."),
+  }));
 
   // Effect to subscribe to Firebase auth state changes
   useEffect(() => {
     if (!auth) { // If no Auth service instance, cannot determine user state
-      setUserAuthState({ user: null, isUserLoading: false, userError: new Error("Auth service not provided.") });
       return;
     }
-
-    setUserAuthState({ user: null, isUserLoading: true, userError: null }); // Reset on auth instance change
 
     const unsubscribe = onAuthStateChanged(
       auth,
@@ -157,11 +154,24 @@ export const useFirebaseApp = (): FirebaseApp => {
 type MemoFirebase <T> = T & {__memo?: boolean};
 
 export function useMemoFirebase<T>(factory: () => T, deps: DependencyList): T | (MemoFirebase<T>) {
-  const memoized = useMemo(factory, deps);
-  
+  const valueRef = useRef<T | undefined>(undefined);
+  const depsRef = useRef<DependencyList | undefined>(undefined);
+
+  const depsChanged =
+    depsRef.current === undefined ||
+    deps.length !== depsRef.current.length ||
+    deps.some((dep, i) => !Object.is(dep, depsRef.current![i]));
+
+  if (depsChanged) {
+    valueRef.current = factory();
+    depsRef.current = deps;
+  }
+
+  const memoized = valueRef.current as T;
+
   if(typeof memoized !== 'object' || memoized === null) return memoized;
   (memoized as MemoFirebase<T>).__memo = true;
-  
+
   return memoized;
 }
 

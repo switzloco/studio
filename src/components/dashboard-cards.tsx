@@ -138,7 +138,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                  </div>
                  <div>
                    <p className="text-xs font-black uppercase tracking-tight text-orange-800">Unverified Metrics Detected</p>
-                   <p className="text-[10px] font-bold text-orange-700/70">Connect hardware to authorize a "Triple-A Rated" audit.</p>
+                   <p className="text-[10px] font-bold text-orange-700/70">Connect hardware to authorize a &quot;Triple-A Rated&quot; audit.</p>
                  </div>
                </div>
                <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">

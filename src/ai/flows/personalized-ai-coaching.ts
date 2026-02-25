@@ -9,7 +9,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { initializeFirebase } from '@/firebase/sdk';
-import { healthService } from '@/lib/health-service';
+import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
 
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
@@ -58,8 +58,13 @@ const logVanityMetricsTool = ai.defineTool(
     outputSchema: z.string(),
   },
   async (input) => {
+    const validated = z.object({
+      heightCm: z.number().min(50, 'Height must be at least 50cm').max(300, 'Height cannot exceed 300cm').optional(),
+      weightKg: z.number().min(20, 'Weight must be at least 20kg').max(500, 'Weight cannot exceed 500kg').optional(),
+    }).safeParse({ heightCm: input.heightCm, weightKg: input.weightKg });
+    if (!validated.success) throw new Error(validated.error.errors[0].message);
     const { firestore } = initializeFirebase();
-    const updates: any = {};
+    const updates: Partial<HealthData> = {};
     if (input.heightCm) updates.heightCm = input.heightCm;
     if (input.weightKg) updates.weightKg = input.weightKg;
     await healthService.updateHealthData(firestore, input.userId, updates);
@@ -86,10 +91,23 @@ const updatePreferencesTool = ai.defineTool(
     outputSchema: z.string(),
   },
   async (input) => {
+    const validated = z.object({
+      equipment: z.array(z.string().min(1)).optional(),
+      targets: z.object({
+        proteinGoal: z.number().positive().optional(),
+        fatPointsGoal: z.number().positive().optional(),
+      }).optional(),
+    }).safeParse({ equipment: input.equipment, targets: input.targets });
+    if (!validated.success) throw new Error(validated.error.errors[0].message);
     const { firestore } = initializeFirebase();
-    const updates: any = {};
+    const updates: Partial<UserPreferences> = {};
     if (input.equipment) updates.equipment = input.equipment;
-    if (input.targets) updates.targets = input.targets;
+    if (input.targets) {
+      const { proteinGoal, fatPointsGoal } = input.targets;
+      if (proteinGoal !== undefined && fatPointsGoal !== undefined) {
+        updates.targets = { proteinGoal, fatPointsGoal };
+      }
+    }
     if (input.scheduleJson) updates.weeklySchedule = input.scheduleJson;
     
     await healthService.updateUserPreferences(firestore, input.userId, updates);
@@ -123,6 +141,11 @@ const logNutritionTool = ai.defineTool(
     outputSchema: z.string(),
   },
   async (input) => {
+    const validated = z.object({
+      proteinG: z.number().positive().max(500, 'Single meal protein cannot exceed 500g — data rejected as implausible'),
+      description: z.string().min(1),
+    }).safeParse({ proteinG: input.proteinG, description: input.description });
+    if (!validated.success) throw new Error(validated.error.errors[0].message);
     const { firestore } = initializeFirebase();
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotal = (current?.dailyProteinG || 0) + input.proteinG;
@@ -150,6 +173,11 @@ const logWorkoutTool = ai.defineTool(
     outputSchema: z.string(),
   },
   async (input) => {
+    const validated = z.object({
+      pointsDelta: z.number().min(-500, 'Points delta cannot be less than -500').max(500, 'Points delta cannot exceed 500'),
+      workoutDetails: z.string().min(1, 'Workout details cannot be empty'),
+    }).safeParse({ pointsDelta: input.pointsDelta, workoutDetails: input.workoutDetails });
+    if (!validated.success) throw new Error(validated.error.errors[0].message);
     const { firestore } = initializeFirebase();
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotalEquity = (current?.visceralFatPoints || 0) + input.pointsDelta;

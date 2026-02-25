@@ -22,7 +22,7 @@ import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWi
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
-import { healthService } from '@/lib/health-service';
+import { healthService, HealthData } from '@/lib/health-service';
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
@@ -33,7 +33,7 @@ export default function Home() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
-  const { data: healthData, isLoading: isHealthLoading } = useDoc(userDocRef);
+  const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
 
   useEffect(() => {
     if (user && db) {
@@ -113,7 +113,7 @@ export default function Home() {
 
           <div className="space-y-4">
             <p className="text-lg font-medium text-muted-foreground leading-relaxed px-4">
-              Your body is a high-stakes portfolio. We've been hired to audit your visceral fat and protein solvency.
+              Your body is a high-stakes portfolio. We&apos;ve been hired to audit your visceral fat and protein solvency.
             </p>
             <div className="h-1 w-12 bg-primary/20 mx-auto rounded-full" />
           </div>

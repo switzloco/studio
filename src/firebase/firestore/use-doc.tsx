@@ -1,6 +1,6 @@
 'use client';
-    
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useRef } from 'react';
 import {
   DocumentReference,
   onSnapshot,
@@ -27,7 +27,7 @@ export interface UseDocResult<T> {
 /**
  * React hook to subscribe to a single Firestore document in real-time.
  * Handles nullable references.
- * 
+ *
  * IMPORTANT! YOU MUST MEMOIZE the inputted memoizedTargetRefOrQuery or BAD THINGS WILL HAPPEN
  * use useMemo to memoize it per React guidence.  Also make sure that it's dependencies are stable
  * references
@@ -38,7 +38,7 @@ export interface UseDocResult<T> {
  * The Firestore DocumentReference. Waits if null/undefined.
  * @returns {UseDocResult<T>} Object with data, isLoading, error.
  */
-export function useDoc<T = any>(
+export function useDoc<T = DocumentData>(
   memoizedDocRef: DocumentReference<DocumentData> | null | undefined,
 ): UseDocResult<T> {
   type StateDataType = WithId<T> | null;
@@ -46,14 +46,16 @@ export function useDoc<T = any>(
   const [data, setData] = useState<StateDataType>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<FirestoreError | Error | null>(null);
+  const isNullRef = useRef(!memoizedDocRef);
 
   useEffect(() => {
     if (!memoizedDocRef) {
-      setData(null);
-      setIsLoading(false);
-      setError(null);
+      if (!isNullRef.current) {
+        isNullRef.current = true;
+      }
       return;
     }
+    isNullRef.current = false;
 
     setIsLoading(true);
     setError(null);
@@ -71,7 +73,7 @@ export function useDoc<T = any>(
         setError(null); // Clear any previous error on successful snapshot (even if doc doesn't exist)
         setIsLoading(false);
       },
-      (error: FirestoreError) => {
+      (err: FirestoreError) => {
         const contextualError = new FirestorePermissionError({
           operation: 'get',
           path: memoizedDocRef.path,
@@ -88,6 +90,10 @@ export function useDoc<T = any>(
 
     return () => unsubscribe();
   }, [memoizedDocRef]); // Re-run if the memoizedDocRef changes.
+
+  if (!memoizedDocRef) {
+    return { data: null, isLoading: false, error: null };
+  }
 
   return { data, isLoading, error };
 }

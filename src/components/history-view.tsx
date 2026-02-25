@@ -6,7 +6,8 @@ import { Briefcase, BarChart3, TrendingUp, AlertCircle, Loader2, ArrowRight, His
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Area, AreaChart, CartesianGrid, XAxis, ResponsiveContainer } from "recharts";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
-import { doc, collection, query, orderBy, limit } from 'firebase/firestore';
+import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { HealthData, HealthLog } from '@/lib/health-service';
 
 export function HistoryView() {
   const { user } = useUser();
@@ -14,7 +15,7 @@ export function HistoryView() {
 
   // 1. Fetch High-Level Equity Summary (for the chart)
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
-  const { data: healthData, isLoading: isHealthLoading } = useDoc(userDocRef);
+  const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
 
   // 2. Fetch Detailed Audit Logs (for the transaction list)
   const logsQuery = useMemoFirebase(() => user ? query(
@@ -22,7 +23,7 @@ export function HistoryView() {
     orderBy('timestamp', 'desc'),
     limit(15)
   ) : null, [db, user]);
-  const { data: logs, isLoading: isLogsLoading } = useCollection(logsQuery);
+  const { data: logs, isLoading: isLogsLoading } = useCollection<HealthLog>(logsQuery);
 
   const history = healthData?.history || [];
   const chartData = [...history].map(entry => ({ 
@@ -117,7 +118,7 @@ export function HistoryView() {
                     <div>
                       <div className="flex items-center gap-3 mb-1">
                         <p className="text-sm font-black italic">
-                          {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Pending...'}
+                          {log.timestamp instanceof Timestamp ? log.timestamp.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Pending...'}
                         </p>
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full tracking-tighter ${log.category === 'food' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
                           {log.category}
