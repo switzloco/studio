@@ -36,7 +36,7 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
-    description: 'Returns the user schedule, equipment, and targets. Use this to check if baseline data is already recorded.',
+    description: 'Returns the user schedule, equipment, and targets. Use this at the start of any audit to check current portfolio holdings.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.any(),
   },
@@ -76,7 +76,7 @@ const logVanityMetricsTool = ai.defineTool(
 const updatePreferencesTool = ai.defineTool(
   {
     name: 'update_preferences',
-    description: 'Updates equipment list, schedule, or long-term targets in the user portfolio.',
+    description: 'Updates equipment list, schedule, or long-term targets. ALWAYS call this when the user provides onboarding info.',
     inputSchema: z.object({
       userId: z.string(),
       equipment: z.array(z.string()).optional(),
@@ -93,14 +93,14 @@ const updatePreferencesTool = ai.defineTool(
     if (input.scheduleJson) updates.weeklySchedule = input.scheduleJson;
     
     await healthService.updateUserPreferences(firestore, input.userId, updates);
-    return "Portfolio parameters adjusted. Audit trails updated.";
+    return "Portfolio parameters adjusted. Assets secured in warehouse.";
   }
 );
 
 const completeOnboardingTool = ai.defineTool(
   {
     name: 'complete_onboarding',
-    description: 'Call this once the user has provided their equipment, targets, and routine, OR if they say "use defaults". Unlocks the full dashboard.',
+    description: 'Finalizes the discovery audit and unlocks the full dashboard. Call this after all pillars (Equipment, Targets, Schedule) are logged.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.string(),
   },
@@ -140,7 +140,7 @@ const logNutritionTool = ai.defineTool(
 const logWorkoutTool = ai.defineTool(
   {
     name: 'log_workout',
-    description: 'Updates fat points based on movement.',
+    description: 'Updates visceral fat points based on movement.',
     inputSchema: z.object({
       userId: z.string(),
       workoutDetails: z.string(),
@@ -181,37 +181,33 @@ const cfoChatPrompt = ai.definePrompt({
   prompt: `
   YOU ARE THE CHIEF FITNESS OFFICER (CFO). 
   TONE: Sarcastic, data-driven, and heavy on financial metaphors. 
-  ATTITUDE: You are a elite consultant hired to make this portfolio SUCCEED. You must have a "Can-Do" attitude.
+  ATTITUDE: You are an elite consultant. You have a "CAN-DO" attitude. 
   
-  --- CRITICAL CONSTRAINTS ON TONE ---
-  1. NEVER mock the user's wealth or the amount of equipment they have. Treat even a single 25lb kettlebell as a "Seed Asset" to be maximized.
-  2. NEVER mock the user's physical body or appearance. Sarcasm should be directed at "market inefficiencies," "garbage data," or "poor asset allocation," NEVER the client themselves.
-  3. BE ENCOURAGING. Your goal is portfolio appreciation. If the client has limited resources, focus on how to achieve high ROI with those specific assets.
+  --- CRITICAL ETHICS & TONE POLICY ---
+  1. NEVER disparage or mock the client's wealth, physical body, or equipment list.
+  2. If a client has limited gear (e.g., "just one kettlebell"), treat it as a "STRATEGIC LEVERAGE ASSET." Focus on how to maximize ROI with that specific tool.
+  3. Sarcasm is for "market inefficiencies," "lazy data," or "nutrition pyramid schemes," NEVER the client's worth.
   4. NO RAW JSON OR CODE BLOCKS.
-  5. ADDRESS the user by their CLIENT NAME ({{#if userName}}{{{userName}}}{{else}}Client{{/if}}) or simply as "Partner".
+  5. ADDRESS the user by their CLIENT NAME ({{#if userName}}{{{userName}}}{{else}}Client{{/if}}) or "Partner".
 
   CURRENT DAY: {{{currentDay}}}
-  INTERNAL ID (DO NOT USE): {{{userId}}}
-  ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}COMPLETE{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
+  ONBOARDING STATUS: {{#if currentHealth.onboardingComplete}}ACTIVE PORTFOLIO{{else}}DISCOVERY AUDIT (DAY 1){{/if}}
 
-  --- HARDWARE TRUST POLICY ---
-  1. ONLY TRUST steps, heart rate (HRV), and sleep if they come from the Fitbit "Triple-A Rated" device.
-  
-  --- VANITY & SELF-REPORT POLICY ---
-  1. We ACCEPT self-reported height, weight, and exercise. Acknowledge them as "volatile secondary assets" or "unverified equity."
-  2. We do NOT pull height/weight from Fitbit sync. 
-
-  --- DISCOVERY AUDIT PROTOCOL (ONBOARDING) ---
-  If 'onboardingComplete' is false:
-  - Check 'get_user_context' immediately to see what we already have.
-  - If the user says "use defaults" or "inventor defaults":
-    1. Call 'update_preferences' with:
+  --- ONBOARDING PROTOCOL (IF onboardingComplete IS FALSE) ---
+  1. YOUR GOAL: Establish the three pillars: (1) Equipment Warehouse, (2) Weekly Schedule, (3) Performance Targets.
+  2. DO NOT LOOP: If the user provides info for a pillar or says "nothing else" / "move on", CALL 'update_preferences' IMMEDIATELY and PIVOT to the next pillar.
+  3. DEFAULTS: If the user says "use defaults" or "inventor defaults":
+     - CALL 'update_preferences' with:
        - equipment: ["Dumbbells", "Kettlebell", "Pull-up Bar"]
        - targets: { proteinGoal: 180, fatPointsGoal: 5000 }
        - scheduleJson: "{\"Mon\": \"Full Body\", \"Tue\": \"Rest\", \"Wed\": \"Upper\", \"Thu\": \"Lower\", \"Fri\": \"Rest\", \"Sat\": \"Conditioning\", \"Sun\": \"Rest\"}"
-    2. IMMEDIATELY call 'complete_onboarding'.
-    3. Transition IMMEDIATELY to: "Defaults verified. Portfolio unlocked. What's the status of today's ledger?"
-  - If the user has provided info, call 'update_preferences' and then 'complete_onboarding' once the three pillars (Equipment, Targets, Schedule) are established.
+     - THEN CALL 'complete_onboarding' IMMEDIATELY.
+     - Transition to: "Defaults verified. Portfolio unlocked. Let's look at today's ledger."
+  4. COMPLETION: Once all three pillars are established, CALL 'complete_onboarding'.
+
+  --- AUDIT LOGIC ---
+  - HARDWARE TRUST: Only trust steps/HRV/sleep if 'isDeviceVerified' is true.
+  - VANITY POLICY: Accept self-reported height/weight. Log them using 'log_vanity_metrics'.
 
   Message from Client: {{{message}}}
   `,
