@@ -37,7 +37,7 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
-    description: 'Returns the user schedule, equipment, and targets. Use this to understand what assets we are working with.',
+    description: 'Returns the user schedule, equipment, and targets. Use this to check if baseline data is already recorded.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.any(),
   },
@@ -101,7 +101,7 @@ const updatePreferencesTool = ai.defineTool(
 const completeOnboardingTool = ai.defineTool(
   {
     name: 'complete_onboarding',
-    description: 'Call this once the user has provided their equipment, targets, and routine. Unlocks the full dashboard.',
+    description: 'Call this once the user has provided their equipment, targets, and routine, OR if they say "use defaults". Unlocks the full dashboard.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.string(),
   },
@@ -196,27 +196,30 @@ const cfoChatPrompt = ai.definePrompt({
   1. We ACCEPT self-reported height and weight if provided in chat. Use 'log_vanity_metrics'.
   2. We ACCEPT self-reported exercise (movement deposits). Use 'log_workout'.
   3. Acknowledge these as "volatile assets" or "unverified equity" compared to hardware data. 
-  4. If a client gives height/weight, record it but remind them: "Recording vanity assets. Note that these are easily manipulated and hold lower portfolio rating than hardware evidence."
 
   --- CRITICAL CONSTRAINT ---
   NEVER OUTPUT THE RAW USER ID (UID) TO THE USER. 
   Address the user by their CLIENT NAME or simply as "Client" or "Partner".
   NEVER OUTPUT RAW JSON OR CODE BLOCKS TO THE USER. 
 
-  {{#if currentHealth.onboardingComplete}}
-  OPERATING PRINCIPLES (ACTIVE MANAGEMENT):
-  - Use 'get_user_context' to see schedule/assets.
+  --- DISCOVERY AUDIT PROTOCOL (ONBOARDING) ---
+  If 'onboardingComplete' is false:
+  - Check 'get_user_context' to see if baseline parameters exist.
+  - If the user says "use defaults" or "inventor defaults":
+    1. Call 'update_preferences' with:
+       - equipment: ["Dumbbells", "Kettlebell", "Pull-up Bar"]
+       - targets: { proteinGoal: 180, fatPointsGoal: 5000 }
+       - scheduleJson: "{\"Mon\": \"Full Body\", \"Tue\": \"Rest\", \"Wed\": \"Upper\", \"Thu\": \"Lower\", \"Fri\": \"Rest\", \"Sat\": \"Conditioning\", \"Sun\": \"Rest\"}"
+    2. THEN call 'complete_onboarding'.
+    3. Transition IMMEDIATELY to: "Defaults verified. Portfolio unlocked. What's the status of today's ledger?"
+  - Otherwise, ask for missing assets one-by-one: Warehouse (gear), Gauntlet (schedule), and Targets (goals).
+  - ONCE you have the context, use 'update_preferences' and 'complete_onboarding'.
+
+  --- ACTIVE MANAGEMENT PROTOCOL ---
+  If 'onboardingComplete' is true:
+  - Use 'get_user_context' to see current schedule/assets.
   - Audit workouts, food, and vanity metrics.
-  - Remind the client that self-reported data is "Junk Bond" status compared to hardware-verified metrics.
-  {{else}}
-  DISCOVERY AUDIT (DAY 1) PROTOCOL:
-  - Introduce yourself as the "new consultant hired to audit visceral fat and protein solvency."
-  - Ask: "What are we working with? What's your gear in the warehouse (home gym)?"
-  - Ask: "What's the gauntlet? (Weekly routine)"
-  - Ask: "What are the quarterly targets? (Protein and Fat goals)"
-  - ONCE you have the schedule, equipment, and goals, use 'update_preferences' to store them.
-  - THEN use 'complete_onboarding' to unlock the ledger.
-  {{/if}}
+  - Treat self-reported data as "Unverified" but record it.
 
   Message from Client: {{{message}}}
   `,
