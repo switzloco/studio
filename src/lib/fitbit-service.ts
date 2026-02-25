@@ -33,6 +33,51 @@ export const fitbitService = {
   },
 
   /**
+   * Exchanges an authorization code for access tokens via the Fitbit API.
+   * Falls back to mock mode if credentials are absent (dev/test environments).
+   * @param code The authorization code from the OAuth callback.
+   * @param redirectUri The redirect URI used during authorization.
+   */
+  async exchangeCodeForTokens(
+    code: string,
+    redirectUri: string
+  ): Promise<{ accessToken: string; fitbitUserId: string } | null> {
+    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    const clientSecret = process.env.FITBIT_CLIENT_SECRET;
+
+    // If credentials are absent, run in dev/mock mode with a clear warning
+    if (!clientId || clientSecret === undefined) {
+      console.warn('[FitbitService] Missing FITBIT_CLIENT_SECRET — running in mock mode. Set env vars for production.');
+      return { accessToken: 'mock_token', fitbitUserId: 'mock_fitbit_user' };
+    }
+
+    // Real Fitbit token exchange (PKCE not required for confidential clients)
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const params = new URLSearchParams({
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    });
+
+    const response = await fetch('https://api.fitbit.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      console.error('[FitbitService] Token exchange failed:', response.status, await response.text());
+      return null;
+    }
+
+    const data = await response.json() as { access_token: string; user_id: string };
+    return { accessToken: data.access_token, fitbitUserId: data.user_id };
+  },
+
+  /**
    * Mock sync returns 'device' source for verification auditing.
    * Day 1: Returns simulated hardware data.
    * Day 2: Will fetch from Fitbit Web API.
