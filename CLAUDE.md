@@ -13,7 +13,7 @@ npm run typecheck    # TypeScript type checking (tsc --noEmit)
 npm run lint         # ESLint via Next.js
 ```
 
-No test framework is configured in this project.
+Test framework: Vitest. Run with `npm run test` / `npm run test:watch` / `npm run test:coverage`.
 
 ## Architecture
 
@@ -41,9 +41,13 @@ No test framework is configured in this project.
 ```
 
 ### AI Coaching (`src/ai/flows/personalized-ai-coaching.ts`)
-The Genkit flow defines 6 LLM-callable tools:
+The Genkit flow defines 8 LLM-callable tools:
 - `get_user_context` / `update_preferences` / `complete_onboarding`
 - `log_nutrition` / `log_workout` / `log_vanity_metrics`
+- `nutrition_lookup` — USDA FoodData Central API (free, authoritative macros; falls back to `DEMO_KEY`)
+- `web_search` — Serper.dev Google Search (fitness research, supplements, programming)
+
+**Research policy:** The LLM is instructed to call `nutrition_lookup` proactively whenever a food is mentioned, and fall back to `web_search` if USDA has no match. Macro values are never guessed.
 
 **Data trust policy:** Only accept steps/HRV/sleep data when `isDeviceVerified=true` (Fitbit OAuth). Self-reported exercise, height, and weight are always accepted.
 
@@ -60,6 +64,8 @@ The Genkit flow defines 6 LLM-callable tools:
 ### Environment Variables
 - `GOOGLE_GENAI_API_KEY` — Required for Genkit/Gemini
 - `NEXT_PUBLIC_FITBIT_CLIENT_ID` — Fitbit OAuth (optional, has mock fallback)
+- `SERPER_API_KEY` — Serper.dev key for `web_search` tool (optional; tool throws a clear error if missing)
+- `USDA_FOOD_API_KEY` — USDA FoodData Central key for `nutrition_lookup` (optional; falls back to `DEMO_KEY` at 100 req/hr)
 - Firebase config is hardcoded in `src/firebase/config.ts`
 
 ### Build Notes

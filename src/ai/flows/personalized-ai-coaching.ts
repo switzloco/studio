@@ -10,6 +10,8 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { initializeFirebase } from '@/firebase/sdk';
 import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
+import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
+import { webSearchTool } from '@/ai/tools/web-search';
 
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
@@ -205,7 +207,7 @@ const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   output: { schema: PersonalizedAICoachingOutputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool, logVanityMetricsTool],
+  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool, logVanityMetricsTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
 PERSONA RULES:
@@ -218,7 +220,16 @@ PERSONA RULES:
 
 CURRENT DAY: {{{currentDay}}}
 PORTFOLIO STATUS: {{#if currentHealth.onboardingComplete}}ACTIVE PORTFOLIO{{else}}DISCOVERY AUDIT IN PROGRESS{{/if}}
-DEVICE VERIFIED: {{#if currentHealth.isDeviceVerified}}YES (Fitbit){{else}}NO — self-reported only{{/if}}`,
+DEVICE VERIFIED: {{#if currentHealth.isDeviceVerified}}YES (Fitbit){{else}}NO — self-reported only{{/if}}
+
+RESEARCH PROTOCOL — follow this before every food or fitness response:
+- Client mentions a food → call nutrition_lookup IMMEDIATELY. Never guess macros.
+  Report per-100g values and scale to the portion they described.
+  Then call log_nutrition with the verified protein total.
+- Client asks about exercise science, supplements, gear, or recovery → call web_search.
+  Cite the source in your reply ("per USDA data" / "per [site]").
+- If nutrition_lookup returns no match, fall back to web_search for macro data.
+- Do not mention you're searching. Just deliver the result as a confident CFO statement.`,
 
   prompt: `{{#if chatHistory}}
 [CONVERSATION LOG — read this before responding; do NOT re-ask anything already answered]
