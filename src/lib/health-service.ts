@@ -51,6 +51,13 @@ export interface UserPreferences {
   };
 }
 
+export interface FitbitCredentials {
+  accessToken: string;
+  refreshToken: string;
+  fitbitUserId: string;
+  expiresAt: number; // Unix ms timestamp
+}
+
 export const healthService = {
   async getHealthSummary(db: Firestore, userId: string): Promise<HealthData | null> {
     const docRef = doc(db, 'users', userId);
@@ -119,6 +126,17 @@ export const healthService = {
   async updateUserPreferences(db: Firestore, userId: string, updates: Partial<UserPreferences>): Promise<void> {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
     await setDoc(docRef, updates, { merge: true });
+  },
+
+  async saveFitbitCredentials(db: Firestore, userId: string, creds: FitbitCredentials): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'fitbit_tokens');
+    await setDoc(docRef, creds);
+  },
+
+  async getFitbitCredentials(db: Firestore, userId: string): Promise<FitbitCredentials | null> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'fitbit_tokens');
+    const snap = await getDoc(docRef);
+    return snap.exists() ? (snap.data() as FitbitCredentials) : null;
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>) {
