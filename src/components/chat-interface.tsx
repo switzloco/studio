@@ -22,12 +22,8 @@ interface Message {
 export function ChatInterface() {
   const { user } = useUser();
   const db = useFirestore();
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      role: 'model', 
-      content: "I'm your new Chief Fitness Officer. I've been hired to audit your visceral fat and protein solvency. Let's start the discovery audit: What are we working with in terms of equipment and your current weekly routine?" 
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [initialMessageSet, setInitialMessageSet] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -37,6 +33,17 @@ export function ChatInterface() {
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
+
+  // Set the correct opening message once we know the user's onboarding state
+  useEffect(() => {
+    if (initialMessageSet || healthData === undefined) return;
+    const firstName = user?.displayName?.split(' ')[0] || 'Partner';
+    const content = healthData?.onboardingComplete
+      ? `Portfolio's live, ${firstName}. What are we logging today — protein or movement?`
+      : "I'm your new Chief Fitness Officer. I've been hired to audit your visceral fat and protein solvency. Let's start the discovery audit: What are we working with in terms of equipment and your current weekly routine?";
+    setMessages([{ role: 'model', content }]);
+    setInitialMessageSet(true);
+  }, [healthData, initialMessageSet, user]);
 
   // Auto-scroll to bottom
   useEffect(() => {

@@ -34,7 +34,8 @@ export async function sendChatMessage(
 
     return { success: true, response: response.response };
   } catch (error: any) {
-    console.error("CFO Audit Interrupted:", error);
-    return { success: false, error: "The CFO is reviewing other portfolios. Market is closed." };
+    const detail = error?.message ?? String(error);
+    console.error("CFO Audit Interrupted:", detail);
+    return { success: false, error: `Audit Failed: ${detail}` };
   }
 }
