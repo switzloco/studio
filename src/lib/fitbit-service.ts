@@ -48,7 +48,10 @@ export const fitbitService = {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
     const redirectUri = `${origin}/api/auth/fitbit/callback`;
     const scope = 'activity heartrate sleep profile';
-    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${userId}`;
+    // Encode both userId and the exact redirectUri in state so the callback
+    // uses the identical redirect_uri for the token exchange (prevents mismatch).
+    const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri }));
+    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`;
   },
 
   /**
