@@ -40,7 +40,7 @@ export const adminHealthService = {
 
   async updateHealthData(db: Firestore, userId: string, updates: Partial<HealthData>): Promise<void> {
     const docRef = db.doc(`users/${userId}`);
-    await docRef.update({ ...updates, updatedAt: FieldValue.serverTimestamp() });
+    await docRef.set({ ...updates, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   },
 
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
