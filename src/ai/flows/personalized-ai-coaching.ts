@@ -8,8 +8,9 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import { initializeFirebase } from '@/firebase/sdk';
-import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
+import { getAdminFirestore } from '@/firebase/admin';
+import { adminHealthService as healthService } from '@/lib/health-service-admin';
+import type { HealthData, UserPreferences } from '@/lib/health-service';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { webSearchTool } from '@/ai/tools/web-search';
 
@@ -43,7 +44,7 @@ const getUserContextTool = ai.defineTool(
     outputSchema: z.any(),
   },
   async (input) => {
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     return await healthService.getUserPreferences(firestore, input.userId);
   }
 );
@@ -65,7 +66,7 @@ const logVanityMetricsTool = ai.defineTool(
       weightKg: z.number().min(20, 'Weight must be at least 20kg').max(500, 'Weight cannot exceed 500kg').optional(),
     }).safeParse({ heightCm: input.heightCm, weightKg: input.weightKg });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     const updates: Partial<HealthData> = {};
     if (input.heightCm) updates.heightCm = input.heightCm;
     if (input.weightKg) updates.weightKg = input.weightKg;
@@ -101,7 +102,7 @@ const updatePreferencesTool = ai.defineTool(
       }).optional(),
     }).safeParse({ equipment: input.equipment, targets: input.targets });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     const updates: Partial<UserPreferences> = {};
     if (input.equipment) updates.equipment = input.equipment;
     if (input.targets) {
@@ -125,7 +126,7 @@ const completeOnboardingTool = ai.defineTool(
     outputSchema: z.string(),
   },
   async (input) => {
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     await healthService.updateHealthData(firestore, input.userId, { onboardingComplete: true });
     return "Onboarding complete. Dashboard unlocked. Portfolio now in active management.";
   }
@@ -148,7 +149,7 @@ const logNutritionTool = ai.defineTool(
       description: z.string().min(1),
     }).safeParse({ proteinG: input.proteinG, description: input.description });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotal = (current?.dailyProteinG || 0) + input.proteinG;
     await healthService.updateHealthData(firestore, input.userId, { dailyProteinG: newTotal });
@@ -180,7 +181,7 @@ const logWorkoutTool = ai.defineTool(
       workoutDetails: z.string().min(1, 'Workout details cannot be empty'),
     }).safeParse({ pointsDelta: input.pointsDelta, workoutDetails: input.workoutDetails });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
-    const { firestore } = initializeFirebase();
+    const firestore = getAdminFirestore();
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotalEquity = (current?.visceralFatPoints || 0) + input.pointsDelta;
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotalEquity });
