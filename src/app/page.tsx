@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChatInterface } from '@/components/chat-interface';
 import { DashboardCards } from '@/components/dashboard-cards';
 import { HistoryView } from '@/components/history-view';
@@ -23,6 +23,7 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
+import { syncFitbitData } from '@/app/actions/fitbit';
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
@@ -31,6 +32,7 @@ export default function Home() {
   const { toast } = useToast();
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const hasSyncedFitbit = useRef(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
@@ -41,6 +43,26 @@ export default function Home() {
       healthService.getUserPreferences(db, user.uid);
     }
   }, [user, db]);
+
+  // Sync Fitbit data once per session on load for verified users.
+  useEffect(() => {
+    if (user && healthData?.isDeviceVerified && !hasSyncedFitbit.current) {
+      hasSyncedFitbit.current = true;
+      syncFitbitData(user.uid).catch(console.error);
+    }
+  }, [user, healthData?.isDeviceVerified]);
+
+  // Show toast for Fitbit OAuth callback result.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('fitbit_sync') === 'success') {
+      toast({ title: 'Fitbit Linked', description: 'Hardware verified. Device data is now trusted.' });
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('error')?.startsWith('fitbit_')) {
+      toast({ variant: 'destructive', title: 'Fitbit Link Failed', description: 'Check your Fitbit credentials and try again.' });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const handleAnonymousLogin = async () => {
     setIsLoggingIn(true);
