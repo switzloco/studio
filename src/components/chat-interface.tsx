@@ -23,7 +23,7 @@ export function ChatInterface() {
   const { user } = useUser();
   const db = useFirestore();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [initialMessageSet, setInitialMessageSet] = useState(false);
+  const [initDone, setInitDone] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -34,16 +34,33 @@ export function ChatInterface() {
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
 
-  // Set the correct opening message once we know the user's onboarding state
+  // Send a hidden __init__ message to let the AI greet based on profile state
   useEffect(() => {
-    if (initialMessageSet || healthData === undefined) return;
-    const firstName = user?.displayName?.split(' ')[0] || 'Partner';
-    const content = healthData?.onboardingComplete
-      ? `Portfolio's live, ${firstName}. What are we logging today — protein or movement?`
-      : "I'm your new Chief Fitness Officer. I've been hired to audit your visceral fat and protein solvency. Let's start the discovery audit: What are we working with in terms of equipment and your current weekly routine?";
-    setMessages([{ role: 'model', content }]);
-    setInitialMessageSet(true);
-  }, [healthData, initialMessageSet, user]);
+    if (initDone || healthData === undefined || !user) return;
+    setInitDone(true);
+
+    const runInit = async () => {
+      setIsLoading(true);
+      const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
+      const result = await sendChatMessage(
+        '__init__',
+        [],
+        sanitizedHealth,
+        undefined,
+        user.uid,
+        user.displayName || undefined
+      );
+      if (result.success && result.response) {
+        setMessages([{ role: 'model', content: result.response }]);
+      } else {
+        // Fallback if init fails
+        setMessages([{ role: 'model', content: "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?" }]);
+      }
+      setIsLoading(false);
+    };
+
+    runInit();
+  }, [healthData, initDone, user]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -73,19 +90,19 @@ export function ChatInterface() {
 
     const userMessage = input.trim();
     const userImage = selectedImage;
-    
+
     setInput('');
     setSelectedImage(null);
     setMessages(prev => [...prev, { role: 'user', content: userMessage || "Asset Audit Attached", image: userImage || undefined }]);
     setIsLoading(true);
 
-    // CRITICAL FIX: Sanitize healthData for Server Action. 
+    // CRITICAL FIX: Sanitize healthData for Server Action.
     // Firestore Timestamps are not plain objects and cause serialization errors in Server Actions.
     const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
 
     const result = await sendChatMessage(
-      userMessage, 
-      messages.map(m => ({ role: m.role, content: m.content })), 
+      userMessage,
+      messages.map(m => ({ role: m.role, content: m.content })),
       sanitizedHealth,
       userImage || undefined,
       user.uid,
@@ -100,6 +117,12 @@ export function ChatInterface() {
 
     setIsLoading(false);
   };
+
+  // Dynamic placeholder based on whether we have any profile data
+  const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints && healthData.visceralFatPoints > 1250);
+  const placeholder = hasTargets
+    ? "Log a meal, workout, or ask The CFO..."
+    : "Tell me about your goals, equipment, routine...";
 
   return (
     <div className="flex flex-col flex-1 h-0">
@@ -149,11 +172,11 @@ export function ChatInterface() {
           <Button variant="secondary" size="icon" className="rounded-full shrink-0 w-12 h-12" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
             <Camera className="w-5 h-5 text-muted-foreground" />
           </Button>
-          <Input 
-            placeholder="Send message..." 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)} 
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()} 
+          <Input
+            placeholder={placeholder}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             onPaste={handlePaste}
             className="flex-1 rounded-full border-muted bg-white/50"
             disabled={isLoading}

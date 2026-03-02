@@ -11,11 +11,17 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow get, list, create, update, delete: if isOwner(userId);
-      
+
       match /preferences/{prefId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
       match /logs/{logId} {
+        allow get, list, create, update, delete: if isOwner(userId);
+      }
+      match /food_log/{entryId} {
+        allow get, list, create, update, delete: if isOwner(userId);
+      }
+      match /exercise_log/{entryId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
       match /chat_sessions/{chatId} {
