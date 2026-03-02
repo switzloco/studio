@@ -207,7 +207,6 @@ const logWorkoutTool = ai.defineTool(
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  output: { schema: PersonalizedAICoachingOutputSchema },
   tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool, logVanityMetricsTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
@@ -298,6 +297,6 @@ New message from {{{userName}}}: {{{message}}}`,
 });
 
 export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  const { output } = await cfoChatPrompt(input);
-  return output!;
+  const result = await cfoChatPrompt(input);
+  return { response: result.text ?? 'Something went wrong. Try again.' };
 }
