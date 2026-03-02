@@ -109,9 +109,12 @@ export const adminHealthService = {
     const ref = db.collection(`users/${userId}/food_log`);
     let q: FirebaseFirestore.Query = ref;
     if (date) {
-      q = q.where('date', '==', date);
+      // Single-field filter avoids composite index requirement
+      q = q.where('date', '==', date).limit(limitCount);
+    } else {
+      q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
-    const snapshot = await q.orderBy('timestamp', 'desc').limit(limitCount).get();
+    const snapshot = await q.get();
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
   },
 
@@ -127,9 +130,11 @@ export const adminHealthService = {
     const ref = db.collection(`users/${userId}/exercise_log`);
     let q: FirebaseFirestore.Query = ref;
     if (date) {
-      q = q.where('date', '==', date);
+      q = q.where('date', '==', date).limit(limitCount);
+    } else {
+      q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
-    const snapshot = await q.orderBy('timestamp', 'desc').limit(limitCount).get();
+    const snapshot = await q.get();
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
   },
 };

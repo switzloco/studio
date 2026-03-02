@@ -168,7 +168,8 @@ export const healthService = {
     const ref = collection(db, 'users', userId, 'food_log');
     let q;
     if (date) {
-      q = query(ref, where('date', '==', date), orderBy('timestamp', 'desc'), limit(limitCount));
+      // Single-field filter avoids composite index requirement
+      q = query(ref, where('date', '==', date), limit(limitCount));
     } else {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
@@ -188,7 +189,7 @@ export const healthService = {
     const ref = collection(db, 'users', userId, 'exercise_log');
     let q;
     if (date) {
-      q = query(ref, where('date', '==', date), orderBy('timestamp', 'desc'), limit(limitCount));
+      q = query(ref, where('date', '==', date), limit(limitCount));
     } else {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
