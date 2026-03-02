@@ -5,10 +5,11 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, Lock, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler } from "lucide-react";
-import { HealthData } from '@/lib/health-service';
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler } from "lucide-react";
+import { HealthData, UserPreferences } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
-import { useUser } from '@/firebase';
+import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { doc } from 'firebase/firestore';
 
 interface DashboardCardsProps {
   data: HealthData | null;
@@ -17,6 +18,14 @@ interface DashboardCardsProps {
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const { user } = useUser();
+  const db = useFirestore();
+
+  // Read targets from user preferences instead of hardcoding
+  const prefsRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
+    [db, user]
+  );
+  const { data: prefs } = useDoc<UserPreferences>(prefsRef);
 
   if (isLoading) {
     return (
@@ -61,54 +70,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     );
   }
 
-  if (!data.onboardingComplete) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full min-h-[600px] p-6 md:p-16 lg:p-24 text-center bg-background space-y-10">
-        <div className="p-8 bg-muted/30 rounded-full relative">
-          <Lock className="w-16 h-16 text-muted-foreground opacity-50" />
-          <div className="absolute -bottom-2 -right-2 bg-primary text-white p-3 rounded-full shadow-2xl ring-4 ring-background">
-            <ShieldAlert className="w-6 h-6" />
-          </div>
-        </div>
-        <div className="space-y-6 w-full">
-          <h2 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tighter uppercase italic text-primary">Portfolio Under Audit</h2>
-          <div className="h-1.5 w-24 bg-primary mx-auto rounded-full" />
-          <p className="text-base sm:text-lg lg:text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed font-medium">
-            The CFO is currently performing a <span className="font-bold text-foreground underline decoration-primary decoration-4 underline-offset-8">Discovery Audit</span>. 
-            <br/><br/>
-            Complete your onboarding in the <span className="font-bold text-primary italic uppercase tracking-tighter">COACH</span> tab to unlock high-stakes performance metrics and your live dashboard.
-          </p>
-        </div>
-        
-        <Card className="bg-card border-dashed border-2 p-8 lg:p-12 mt-6 w-full max-w-4xl shadow-none">
-          <p className="text-[12px] font-black text-muted-foreground uppercase text-left mb-5 tracking-[0.2em]">Audit Requirements:</p>
-          <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 text-sm sm:text-base font-black text-left">
-            <li className="flex items-center gap-4 text-muted-foreground">
-              <div className="w-3 h-3 bg-primary shrink-0 rounded-full" />
-              IDENTIFY PHYSICAL ASSETS (EQUIPMENT)
-            </li>
-            <li className="flex items-center gap-4 text-muted-foreground">
-              <div className="w-3 h-3 bg-primary shrink-0 rounded-full" />
-              SET PROTEIN SOLVENCY TARGETS
-            </li>
-            <li className="flex items-center gap-4 text-muted-foreground">
-              <div className="w-3 h-3 bg-primary shrink-0 rounded-full" />
-              ESTABLISH WEEKLY PERFORMANCE ROUTINE
-            </li>
-            <li className="flex items-center gap-4 text-muted-foreground">
-              <div className={`w-3 h-3 ${data.isDeviceVerified ? 'bg-emerald-500' : 'bg-orange-400 animate-pulse'} shrink-0 rounded-full`} />
-              HARDWARE VERIFICATION (FITBIT)
-            </li>
-          </ul>
-        </Card>
-      </div>
-    );
-  }
-
   const dailyProteinG = data.dailyProteinG || 0;
   const visceralFatPoints = data.visceralFatPoints || 0;
-  const proteinGoal = 150; 
-  const fatPointsGoal = 3000; 
+  const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
+  const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
 
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
@@ -137,8 +102,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                    <ShieldAlert className="w-5 h-5 text-orange-600" />
                  </div>
                  <div>
-                   <p className="text-xs font-black uppercase tracking-tight text-orange-800">Unverified Metrics Detected</p>
-                   <p className="text-[10px] font-bold text-orange-700/70">Connect hardware to authorize a &quot;Triple-A Rated&quot; audit.</p>
+                   <p className="text-xs font-black uppercase tracking-tight text-orange-800">Self-Reported Data</p>
+                   <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and HRV.</p>
                  </div>
                </div>
                <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
@@ -148,7 +113,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
              </CardContent>
           </Card>
         )}
-        
+
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
           <CardContent className="p-6 sm:p-10 flex items-center gap-8">
             <div className="p-6 bg-purple-100 rounded-2xl shrink-0 shadow-sm">
@@ -194,7 +159,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
 
-          {/* Vanity Metrics Grid */}
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
               <div className="p-3 bg-emerald-100 rounded-xl w-fit mb-4 shadow-sm">
@@ -230,7 +194,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <div className="min-w-0">
                 <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-2">Equity Score (VF Points)</p>
                 <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter truncate">
-                  {(visceralFatPoints).toLocaleString()} 
+                  {(visceralFatPoints).toLocaleString()}
                   <span className="text-sm font-normal opacity-60 ml-4">/ {fatPointsGoal.toLocaleString()}</span>
                 </h3>
               </div>

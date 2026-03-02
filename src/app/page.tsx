@@ -193,7 +193,7 @@ export default function Home() {
           <div>
             <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">The CFO</h1>
             <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">
-              {healthData?.onboardingComplete ? 'Active Portfolio' : 'Discovery Audit'}
+              Chief Fitness Officer
             </p>
           </div>
         </div>

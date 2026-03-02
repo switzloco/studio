@@ -1,9 +1,8 @@
 'use server';
 /**
- * @fileOverview This file implements the Genkit flow for the "The CFO" AI coach.
- * Optimized for Day-Zero onboarding and portfolio auditing.
- * HARDWARE TRUST POLICY: Only trust device-verified data for core solvency (Steps/HRV/Sleep).
- * VANITY POLICY: Accept self-reported height/weight/exercise as volatile secondary assets.
+ * @fileOverview Genkit flow for "The CFO" AI coach.
+ * Natural conversational coaching — no rigid onboarding gates.
+ * Persistent memory via profile + structured food/exercise logs.
  */
 
 import { ai } from '@/ai/genkit';
@@ -39,166 +38,267 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
-    description: 'Returns the user schedule, equipment, and targets. Use this at the start of any audit to check current portfolio holdings.',
+    description: 'Returns the user profile, equipment, schedule, targets, and recent food/exercise logs. Call this at the START of every new conversation to load persistent memory.',
     inputSchema: z.object({ userId: z.string() }),
     outputSchema: z.any(),
   },
   async (input) => {
     const firestore = getAdminFirestore();
-    return await healthService.getUserPreferences(firestore, input.userId);
-  }
-);
-
-const logVanityMetricsTool = ai.defineTool(
-  {
-    name: 'log_vanity_metrics',
-    description: 'Updates self-reported (unverified) height and weight in the user ledger.',
-    inputSchema: z.object({
-      userId: z.string(),
-      heightCm: z.number().optional(),
-      weightKg: z.number().optional(),
-    }),
-    outputSchema: z.string(),
-  },
-  async (input) => {
-    const validated = z.object({
-      heightCm: z.number().min(50, 'Height must be at least 50cm').max(300, 'Height cannot exceed 300cm').optional(),
-      weightKg: z.number().min(20, 'Weight must be at least 20kg').max(500, 'Weight cannot exceed 500kg').optional(),
-    }).safeParse({ heightCm: input.heightCm, weightKg: input.weightKg });
-    if (!validated.success) throw new Error(validated.error.errors[0].message);
-    const firestore = getAdminFirestore();
-    const updates: Partial<HealthData> = {};
-    if (input.heightCm) updates.heightCm = input.heightCm;
-    if (input.weightKg) updates.weightKg = input.weightKg;
-    await healthService.updateHealthData(firestore, input.userId, updates);
-    await healthService.logActivity(firestore, input.userId, {
-      category: 'vanity_audit',
-      content: `Self-Reported Asset Audit: ${input.heightCm ? `Height: ${input.heightCm}cm ` : ''}${input.weightKg ? `Weight: ${input.weightKg}kg` : ''}`,
-      metrics: [input.heightCm ? `height:${input.heightCm}` : '', input.weightKg ? `weight:${input.weightKg}` : ''].filter(Boolean),
-      verified: false
-    });
-    return "Vanity metrics recorded. Audit status: UNVERIFIED / SECONDARY.";
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const [prefs, health, recentFood, recentExercise] = await Promise.all([
+      healthService.getUserPreferences(firestore, input.userId),
+      healthService.getHealthSummary(firestore, input.userId),
+      healthService.queryFoodLog(firestore, input.userId, today, 10),
+      healthService.queryExerciseLog(firestore, input.userId, today, 10),
+    ]);
+    return {
+      preferences: prefs,
+      health: {
+        dailyProteinG: health?.dailyProteinG ?? 0,
+        visceralFatPoints: health?.visceralFatPoints ?? 0,
+        isDeviceVerified: health?.isDeviceVerified ?? false,
+        steps: health?.steps ?? 0,
+        weightKg: health?.weightKg,
+        heightCm: health?.heightCm,
+      },
+      todaysFoodLog: recentFood,
+      todaysExerciseLog: recentExercise,
+    };
   }
 );
 
 const updatePreferencesTool = ai.defineTool(
   {
     name: 'update_preferences',
-    description: 'Updates equipment list, schedule, or long-term targets. ALWAYS call this when the user provides onboarding info.',
+    description: 'Saves equipment, schedule, targets, or profile info (height, weight, goals, etc.) to persistent storage. Call this silently whenever the user shares personal info.',
     inputSchema: z.object({
       userId: z.string(),
       equipment: z.array(z.string()).optional(),
       targets: z.object({ proteinGoal: z.number().optional(), fatPointsGoal: z.number().optional() }).optional(),
       scheduleJson: z.string().optional(),
+      profile: z.object({
+        heightCm: z.number().optional(),
+        weightKg: z.number().optional(),
+        age: z.number().optional(),
+        activityLevel: z.enum(['sedentary', 'light', 'moderate', 'active']).optional(),
+        goals: z.array(z.string()).optional(),
+        injuries: z.array(z.string()).optional(),
+        dietaryRestrictions: z.array(z.string()).optional(),
+        lastConversationSummary: z.string().optional(),
+      }).optional(),
     }),
     outputSchema: z.string(),
   },
   async (input) => {
-    const validated = z.object({
-      equipment: z.array(z.string().min(1)).optional(),
-      targets: z.object({
-        proteinGoal: z.number().positive().optional(),
-        fatPointsGoal: z.number().positive().optional(),
-      }).optional(),
-    }).safeParse({ equipment: input.equipment, targets: input.targets });
-    if (!validated.success) throw new Error(validated.error.errors[0].message);
     const firestore = getAdminFirestore();
     const updates: Partial<UserPreferences> = {};
     if (input.equipment) updates.equipment = input.equipment;
     if (input.targets) {
       const { proteinGoal, fatPointsGoal } = input.targets;
-      if (proteinGoal !== undefined && fatPointsGoal !== undefined) {
-        updates.targets = { proteinGoal, fatPointsGoal };
+      if (proteinGoal !== undefined || fatPointsGoal !== undefined) {
+        // Merge with existing targets
+        const existing = await healthService.getUserPreferences(firestore, input.userId);
+        updates.targets = {
+          proteinGoal: proteinGoal ?? existing?.targets?.proteinGoal ?? 150,
+          fatPointsGoal: fatPointsGoal ?? existing?.targets?.fatPointsGoal ?? 3000,
+        };
       }
     }
     if (input.scheduleJson) updates.weeklySchedule = input.scheduleJson;
-    
+    if (input.profile) {
+      // Merge profile fields
+      const existing = await healthService.getUserPreferences(firestore, input.userId);
+      updates.profile = { ...(existing?.profile ?? {}), ...input.profile };
+    }
+
     await healthService.updateUserPreferences(firestore, input.userId, updates);
-    return "Portfolio parameters adjusted. Assets secured in warehouse.";
+
+    // Also update vanity metrics on the main health doc if provided
+    if (input.profile?.heightCm || input.profile?.weightKg) {
+      const healthUpdates: Partial<HealthData> = {};
+      if (input.profile.heightCm) healthUpdates.heightCm = input.profile.heightCm;
+      if (input.profile.weightKg) healthUpdates.weightKg = input.profile.weightKg;
+      await healthService.updateHealthData(firestore, input.userId, healthUpdates);
+    }
+
+    return "Preferences saved.";
   }
 );
 
-const completeOnboardingTool = ai.defineTool(
+const logFoodTool = ai.defineTool(
   {
-    name: 'complete_onboarding',
-    description: 'Finalizes the discovery audit and unlocks the full dashboard. Call this after all pillars (Equipment, Targets, Schedule) are logged.',
-    inputSchema: z.object({ userId: z.string() }),
-    outputSchema: z.string(),
-  },
-  async (input) => {
-    const firestore = getAdminFirestore();
-    await healthService.updateHealthData(firestore, input.userId, { onboardingComplete: true });
-    return "Onboarding complete. Dashboard unlocked. Portfolio now in active management.";
-  }
-);
-
-const logNutritionTool = ai.defineTool(
-  {
-    name: 'log_nutrition',
-    description: 'Updates the user portfolio with new protein intake.',
+    name: 'log_food',
+    description: 'Logs a food entry with full macro breakdown to the structured food database. Call this after nutrition_lookup verifies the macros.',
     inputSchema: z.object({
       userId: z.string(),
-      proteinG: z.number().describe('Amount of protein in grams.'),
-      description: z.string().describe('Meal summary.'),
+      name: z.string().describe('Food name, e.g. "Chicken breast, grilled"'),
+      portionG: z.number().describe('Portion size in grams'),
+      calories: z.number(),
+      proteinG: z.number(),
+      carbsG: z.number(),
+      fatG: z.number(),
+      fiberG: z.number().optional(),
+      source: z.enum(['usda', 'web_search', 'user_estimate']),
+      meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
     }),
     outputSchema: z.string(),
   },
   async (input) => {
     const validated = z.object({
-      proteinG: z.number().positive().max(500, 'Single meal protein cannot exceed 500g — data rejected as implausible'),
-      description: z.string().min(1),
-    }).safeParse({ proteinG: input.proteinG, description: input.description });
+      proteinG: z.number().min(0).max(500, 'Single meal protein cannot exceed 500g'),
+      name: z.string().min(1),
+    }).safeParse({ proteinG: input.proteinG, name: input.name });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
+
     const firestore = getAdminFirestore();
+    const today = new Date().toISOString().split('T')[0];
+
+    // Write to structured food_log
+    await healthService.logFood(firestore, input.userId, {
+      name: input.name,
+      portionG: input.portionG,
+      calories: input.calories,
+      proteinG: input.proteinG,
+      carbsG: input.carbsG,
+      fatG: input.fatG,
+      fiberG: input.fiberG ?? 0,
+      source: input.source,
+      meal: input.meal,
+      date: today,
+    });
+
+    // Update daily protein counter on user doc
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotal = (current?.dailyProteinG || 0) + input.proteinG;
     await healthService.updateHealthData(firestore, input.userId, { dailyProteinG: newTotal });
+
+    // Also write to legacy logs for backward compat
     await healthService.logActivity(firestore, input.userId, {
       category: 'food',
-      content: `Meal Audit: ${input.description} (+${input.proteinG}g Protein)`,
-      metrics: [`protein_g:${input.proteinG}`, `daily_total:${newTotal}`],
-      verified: false 
+      content: `${input.name} (${input.portionG}g) — ${input.calories} cal, ${input.proteinG}g protein`,
+      metrics: [`protein_g:${input.proteinG}`, `calories:${input.calories}`, `daily_total:${newTotal}`],
+      verified: false,
     });
-    return `Solvency updated. Current liquidity: ${newTotal}g.`;
+
+    return `Logged: ${input.name}. Daily protein total: ${newTotal}g.`;
   }
 );
 
-const logWorkoutTool = ai.defineTool(
+const logExerciseTool = ai.defineTool(
   {
-    name: 'log_workout',
-    description: 'Updates visceral fat points based on movement.',
+    name: 'log_exercise',
+    description: 'Logs an exercise entry to the structured exercise database.',
     inputSchema: z.object({
       userId: z.string(),
-      workoutDetails: z.string(),
-      pointsDelta: z.number(),
-      category: z.enum(['explosiveness', 'strength', 'recovery']),
+      name: z.string().describe('Exercise name, e.g. "Kettlebell swings"'),
+      category: z.enum(['strength', 'conditioning', 'recovery', 'cardio']),
+      sets: z.number().optional(),
+      reps: z.number().optional(),
+      durationMin: z.number().optional(),
+      weightKg: z.number().optional(),
+      estimatedCaloriesBurned: z.number().optional(),
+      pointsDelta: z.number().describe('Visceral fat points earned'),
+      notes: z.string().optional(),
     }),
     outputSchema: z.string(),
   },
   async (input) => {
     const validated = z.object({
-      pointsDelta: z.number().min(-500, 'Points delta cannot be less than -500').max(500, 'Points delta cannot exceed 500'),
-      workoutDetails: z.string().min(1, 'Workout details cannot be empty'),
-    }).safeParse({ pointsDelta: input.pointsDelta, workoutDetails: input.workoutDetails });
+      pointsDelta: z.number().min(-500).max(500),
+      name: z.string().min(1),
+    }).safeParse({ pointsDelta: input.pointsDelta, name: input.name });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
+
     const firestore = getAdminFirestore();
+    const today = new Date().toISOString().split('T')[0];
+
+    // Write to structured exercise_log
+    await healthService.logExercise(firestore, input.userId, {
+      name: input.name,
+      category: input.category,
+      sets: input.sets,
+      reps: input.reps,
+      durationMin: input.durationMin,
+      weightKg: input.weightKg,
+      estimatedCaloriesBurned: input.estimatedCaloriesBurned,
+      pointsDelta: input.pointsDelta,
+      notes: input.notes,
+      date: today,
+    });
+
+    // Update equity on user doc
     const current = await healthService.getHealthSummary(firestore, input.userId);
     const newTotalEquity = (current?.visceralFatPoints || 0) + input.pointsDelta;
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newTotalEquity });
+
+    // Legacy log
     await healthService.logActivity(firestore, input.userId, {
-      category: input.category,
-      content: `Asset Injection (Self-Reported): ${input.workoutDetails}`,
+      category: input.category === 'cardio' ? 'recovery' : input.category === 'conditioning' ? 'explosiveness' : input.category,
+      content: `${input.name}${input.durationMin ? ` (${input.durationMin} min)` : ''}${input.reps ? ` (${input.reps} reps)` : ''} — +${input.pointsDelta} pts`,
       metrics: [`gain:${input.pointsDelta}`, `total_equity:${newTotalEquity}`],
-      verified: false 
+      verified: false,
     });
+
+    // Record equity event for the history chart
     await healthService.recordEquityEvent(firestore, input.userId, {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       gain: input.pointsDelta,
       status: input.pointsDelta >= 0 ? 'Bullish' : 'Correction',
-      detail: input.workoutDetails,
-      equity: newTotalEquity
+      detail: input.name,
+      equity: newTotalEquity,
     });
-    return `Equity recalibrated. New portfolio value: ${newTotalEquity}.`;
+
+    const calorieNote = input.estimatedCaloriesBurned ? ` (~${input.estimatedCaloriesBurned} cal burned)` : '';
+    return `Logged: ${input.name}${calorieNote}. Equity: ${newTotalEquity} pts (+${input.pointsDelta}).`;
+  }
+);
+
+const getRecentLogsTool = ai.defineTool(
+  {
+    name: 'get_recent_logs',
+    description: 'Retrieves recent food and/or exercise logs. Use this to check what the user has logged today or recently.',
+    inputSchema: z.object({
+      userId: z.string(),
+      type: z.enum(['food', 'exercise', 'all']),
+      days: z.number().optional().describe('Number of days to look back, default 1 (today only)'),
+    }),
+    outputSchema: z.any(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+    const daysBack = input.days ?? 1;
+    const results: any = {};
+
+    // Build date list
+    const dates: string[] = [];
+    for (let i = 0; i < daysBack; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    if (input.type === 'food' || input.type === 'all') {
+      const foodLogs: any[] = [];
+      for (const date of dates) {
+        const entries = await healthService.queryFoodLog(firestore, input.userId, date, 20);
+        foodLogs.push(...entries);
+      }
+      results.foodLog = foodLogs;
+      results.dailyProteinTotal = foodLogs.reduce((sum, e) => sum + (e.proteinG || 0), 0);
+      results.dailyCalorieTotal = foodLogs.reduce((sum, e) => sum + (e.calories || 0), 0);
+    }
+
+    if (input.type === 'exercise' || input.type === 'all') {
+      const exerciseLogs: any[] = [];
+      for (const date of dates) {
+        const entries = await healthService.queryExerciseLog(firestore, input.userId, date, 20);
+        exerciseLogs.push(...entries);
+      }
+      results.exerciseLog = exerciseLogs;
+      results.totalPointsToday = exerciseLogs.reduce((sum, e) => sum + (e.pointsDelta || 0), 0);
+    }
+
+    return results;
   }
 );
 
@@ -207,33 +307,71 @@ const logWorkoutTool = ai.defineTool(
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, completeOnboardingTool, logNutritionTool, logWorkoutTool, logVanityMetricsTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
-- CLIENT_UID: {{{userId}}} ← pass this exact string as "userId" in every tool call
+- CLIENT_UID: {{{userId}}} — pass this exact string as "userId" in every tool call
 - CLIENT_NAME: {{{userName}}}
 
-PERSONA RULES:
-- Sarcasm targets market inefficiencies, lazy data, and nutrition myths — NEVER the client's body or equipment.
-- 1 kettlebell = "strategic leverage asset." Bodyweight = "zero-capex portfolio." Own it.
-- 2–3 sentences per response maximum unless the client asks for detail.
+PERSONA:
+- 2-3 sentences per response unless the client asks for detail.
 - Ask exactly ONE question per turn. Never stack questions.
-- Address the client as {{{userName}}} or "Partner." Never "Client."
+- Address the client as {{{userName}}} or "Partner."
 - No bullet dumps, no raw JSON, no code blocks, no asterisk formatting.
+- Financial metaphors: protein = liquidity/assets, visceral fat = liabilities, workouts = equity injections, rest = capital preservation.
+- Sarcasm targets market inefficiencies and nutrition myths, NEVER the client's body or equipment.
 
 CURRENT DAY: {{{currentDay}}}
-PORTFOLIO STATUS: {{#if currentHealth.onboardingComplete}}ACTIVE PORTFOLIO{{else}}DISCOVERY AUDIT IN PROGRESS{{/if}}
-DEVICE VERIFIED: {{#if currentHealth.isDeviceVerified}}YES (Fitbit){{else}}NO — self-reported only{{/if}}
 
-RESEARCH PROTOCOL — follow this before every food or fitness response:
-- Client mentions a food → call nutrition_lookup IMMEDIATELY. Never guess macros.
-  Report per-100g values and scale to the portion they described.
-  Then call log_nutrition with the verified protein total.
-- Client asks about exercise science, supplements, gear, or recovery → call web_search.
-  Cite the source in your reply ("per USDA data" / "per [site]").
+MEMORY PROTOCOL:
+Call get_user_context at the START of every new conversation to load the user's profile, equipment, targets, and recent logs.
+- NEVER re-ask something already stored in their profile or preferences.
+- If their profile is sparse (new user), gather information NATURALLY through conversation. Do not interrogate — ask one thing at a time and let the conversation flow.
+- When the user shares info (equipment, goals, schedule, weight, height, dietary restrictions), save it immediately via update_preferences. Do not announce you are saving.
+- Reference stored info naturally: "You mentioned the kettlebell last time" or "Your Thursday basketball night is coming up."
+
+INIT PROTOCOL:
+If the user message is "__init__", this is a new session start. Call get_user_context first, then:
+- If profile is EMPTY (new user): Introduce yourself warmly. "Hi, I'm your new Chief Fitness Officer..." then ask ONE natural question to get started, like "What's the main thing you want to track?"
+- If profile is POPULATED (returning user): Welcome them back and reference something relevant from their profile or recent logs. "Welcome back, Partner. You logged 120g protein yesterday — let's top that today."
+
+CONVERSATION FLOW (new users — gather info naturally, not as a checklist):
+When info is missing, weave questions into natural coaching conversation:
+- What they want to track / their main goal
+- Their weekly exercise routine
+- Equipment they have access to
+- Their target (weight loss, protein goal, etc.)
+Do NOT treat these as a rigid sequence. If the user volunteers multiple pieces of info at once, save them all and move on. If they want to start logging immediately, let them — you can gather profile info over multiple sessions.
+
+When you have enough info to set meaningful targets, save them and start coaching. There is no "onboarding complete" gate.
+
+RESEARCH PROTOCOL:
+- Client mentions a food -> call nutrition_lookup IMMEDIATELY. Never guess macros.
+  Report key macros and scale to the portion. Then call log_food with verified data.
+- Client asks about exercise science, supplements, gear, or recovery -> call web_search.
+  Cite the source in your reply.
 - If nutrition_lookup returns no match, fall back to web_search for macro data.
-- Do not mention you're searching. Just deliver the result as a confident CFO statement.`,
+- Do not mention you are searching. Deliver results as confident CFO statements.
+
+COACHING PROTOCOL:
+- Track protein against their goal. Mention the gap naturally.
+- When they report exercise, estimate calorie burn and log it. Reference their equipment and schedule.
+- If isDeviceVerified is false and the context is right (they mention steps, sleep, HRV), mention Fitbit ONCE per session: "Your step data would be way more reliable with a Fitbit sync. Want to connect one?"
+- Propose a point system tied to their goals. Make it feel custom, not generic.
+
+WORKOUT POINT GUIDE (for logging — self-reported, unverified):
+- Kettlebell swings (45): +15 pts explosiveness
+- Kettlebell swings (100+): +30 pts explosiveness
+- 30-min walk: +10 pts recovery
+- 2-hour bike ride: +50 pts cardio
+- Basketball game: +40 pts conditioning
+- Heavy strength session: +40 pts strength
+- Rest day: 0 pts
+
+GOAL VALIDATION:
+- If user sets an aggressive weight loss goal, validate it once: "That's ambitious — sustainable loss is 1-2 lb/week. I'll design the point system so if you follow it perfectly, you hit your goal with some slack built in."
+- Never shame. Reframe positively.`,
 
   prompt: `{{#if chatHistory}}
 [CONVERSATION LOG — read this before responding; do NOT re-ask anything already answered]
@@ -246,52 +384,7 @@ RESEARCH PROTOCOL — follow this before every food or fitness response:
 LIVE HEALTH SNAPSHOT:
 - Daily protein logged today: {{#if currentHealth.dailyProteinG}}{{currentHealth.dailyProteinG}}g{{else}}0g{{/if}}
 - Visceral fat equity: {{#if currentHealth.visceralFatPoints}}{{currentHealth.visceralFatPoints}} pts{{else}}unknown{{/if}}
-- Onboarding complete: {{#if currentHealth.onboardingComplete}}YES{{else}}NO{{/if}}
-
-{{#unless currentHealth.onboardingComplete}}
-=== ONBOARDING PROTOCOL (ACTIVE) ===
-GOAL: Lock in the three pillars, then call complete_onboarding.
-
-PILLAR CHECKLIST — scan the conversation log above to determine what's already set:
-  [1] EQUIPMENT WAREHOUSE — what gear does the client own?
-  [2] WEEKLY SCHEDULE — what days / workout types?
-  [3] PERFORMANCE TARGETS — protein goal (g/day) + fat loss goal
-
-EXECUTION RULES (follow exactly):
-1. Call get_user_context FIRST so you can see which pillars are already saved.
-2. For each pillar, ask about it once. When the client answers — or says "move on" / "same" / "nothing else" — treat it as DONE. Call update_preferences immediately with whatever they gave you. Do not confirm or recap unless asked.
-3. Advance to the NEXT unset pillar immediately after saving. One question per turn.
-4. If client says "use defaults": call update_preferences with equipment=["Kettlebell"], targets={proteinGoal:170, fatPointsGoal:5000}, scheduleJson='{"Mon":"Full Body","Tue":"Rest","Wed":"Upper","Thu":"Lower","Fri":"Rest","Sat":"Conditioning","Sun":"Rest"}', then call complete_onboarding.
-5. When ALL THREE pillars are saved: call complete_onboarding. Then pivot to device connection (see below).
-
-GOAL VALIDATION — apply silently when logging targets:
-- "Burn 10 oz/day" of fat = ~2,500 kcal/day deficit. Flag once: "That burn rate is a rounding error on physics — sustainable loss is 0.5–1 lb/week. I'll log your 20-lb goal instead, which is the real asset we're protecting." Then log the sensible target.
-- Lean mass of 150 lb + 20 lb to lose implies ~170 lb total bodyweight. Confirm once if the client mentions DEXA.
-- Protein goal 170g/day with sedentary profile: valid, no flag needed.
-
-SEDENTARY PATTERN — detect and reframe, never shame:
-- "45 swings Monday only" = ~2 min active, 1 day/week. Frame: "Your leverage asset is severely under-deployed. We're going to fix that." Recommend adding 2 more sessions as the next move after onboarding is complete.
-
-AFTER complete_onboarding — pivot immediately to:
-"One more unlock: connect a Fitbit or wearable and your equity calculations get device-verified data — steps, HRV, sleep. Want to link one now, or run on self-reported for today?"
-{{else}}
-=== DAILY COACHING PROTOCOL (ACTIVE) ===
-The audit is done. Now we run the portfolio daily.
-
-DAILY LOOP (in order, one question per turn):
-1. If protein today is 0g: ask what they've eaten so far. Log it via log_nutrition.
-2. Ask what movement they've done today. Log it via log_workout.
-3. Compare logged totals vs. targets (call get_user_context for targets if needed).
-4. If isDeviceVerified is false: mention once per session that Fitbit connection upgrades data trust.
-5. Close each turn with the current equity score and protein balance vs. goal.
-
-WORKOUT POINT GUIDE (use when logging — self-reported, unverified):
-- Kettlebell swings (45): +15 pts explosiveness
-- Kettlebell swings (100+): +30 pts explosiveness
-- 30-min walk: +10 pts recovery
-- Heavy strength session: +40 pts strength
-- Rest day: 0 pts
-{{/unless}}
+- Device verified: {{#if currentHealth.isDeviceVerified}}YES (Fitbit){{else}}NO{{/if}}
 
 New message from {{{userName}}}: {{{message}}}`,
 });

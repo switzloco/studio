@@ -1,9 +1,12 @@
 
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, where, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp } from 'firebase/firestore';
+import type { FoodLogEntry, ExerciseLogEntry, UserProfile } from './food-exercise-types';
 
 /**
  * @fileOverview Health service for managing fitness portfolio data in Firestore.
  */
+
+export type { FoodLogEntry, ExerciseLogEntry, UserProfile };
 
 export interface HistoryEntry {
   date: string;
@@ -49,6 +52,7 @@ export interface UserPreferences {
     proteinGoal: number;
     fatPointsGoal: number;
   };
+  profile: UserProfile;
 }
 
 export interface FitbitCredentials {
@@ -117,7 +121,8 @@ export const healthService = {
         "Sun": "Pending Audit"
       }, null, 2),
       equipment: [],
-      targets: { proteinGoal: 150, fatPointsGoal: 3000 }
+      targets: { proteinGoal: 150, fatPointsGoal: 3000 },
+      profile: {}
     };
     await setDoc(docRef, defaultPrefs, { merge: true });
     return defaultPrefs;
@@ -149,5 +154,45 @@ export const healthService = {
     let q = query(logsRef, orderBy('timestamp', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as HealthLog);
+  },
+
+  // --- Structured Food Log ---
+
+  async logFood(db: Firestore, userId: string, entry: Omit<FoodLogEntry, 'timestamp'>): Promise<string> {
+    const ref = collection(db, 'users', userId, 'food_log');
+    const docRef = await addDoc(ref, { ...entry, timestamp: serverTimestamp() });
+    return docRef.id;
+  },
+
+  async queryFoodLog(db: Firestore, userId: string, date?: string, limitCount: number = 20): Promise<FoodLogEntry[]> {
+    const ref = collection(db, 'users', userId, 'food_log');
+    let q;
+    if (date) {
+      q = query(ref, where('date', '==', date), orderBy('timestamp', 'desc'), limit(limitCount));
+    } else {
+      q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
+    }
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
+  },
+
+  // --- Structured Exercise Log ---
+
+  async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
+    const ref = collection(db, 'users', userId, 'exercise_log');
+    const docRef = await addDoc(ref, { ...entry, timestamp: serverTimestamp() });
+    return docRef.id;
+  },
+
+  async queryExerciseLog(db: Firestore, userId: string, date?: string, limitCount: number = 20): Promise<ExerciseLogEntry[]> {
+    const ref = collection(db, 'users', userId, 'exercise_log');
+    let q;
+    if (date) {
+      q = query(ref, where('date', '==', date), orderBy('timestamp', 'desc'), limit(limitCount));
+    } else {
+      q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
+    }
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
   }
 };

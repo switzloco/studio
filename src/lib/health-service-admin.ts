@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials } from './health-service';
+import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -63,6 +64,7 @@ export const adminHealthService = {
       }, null, 2),
       equipment: [],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 },
+      profile: {},
     };
     await docRef.set(defaultPrefs, { merge: true });
     return defaultPrefs;
@@ -93,5 +95,41 @@ export const adminHealthService = {
     const logsRef = db.collection(`users/${userId}/logs`);
     const snapshot = await logsRef.orderBy('timestamp', 'desc').limit(limitCount).get();
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as HealthLog);
+  },
+
+  // --- Structured Food Log ---
+
+  async logFood(db: Firestore, userId: string, entry: Omit<FoodLogEntry, 'timestamp'>): Promise<string> {
+    const ref = db.collection(`users/${userId}/food_log`);
+    const docRef = await ref.add({ ...entry, timestamp: FieldValue.serverTimestamp() });
+    return docRef.id;
+  },
+
+  async queryFoodLog(db: Firestore, userId: string, date?: string, limitCount = 20): Promise<FoodLogEntry[]> {
+    const ref = db.collection(`users/${userId}/food_log`);
+    let q: FirebaseFirestore.Query = ref;
+    if (date) {
+      q = q.where('date', '==', date);
+    }
+    const snapshot = await q.orderBy('timestamp', 'desc').limit(limitCount).get();
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
+  },
+
+  // --- Structured Exercise Log ---
+
+  async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
+    const ref = db.collection(`users/${userId}/exercise_log`);
+    const docRef = await ref.add({ ...entry, timestamp: FieldValue.serverTimestamp() });
+    return docRef.id;
+  },
+
+  async queryExerciseLog(db: Firestore, userId: string, date?: string, limitCount = 20): Promise<ExerciseLogEntry[]> {
+    const ref = db.collection(`users/${userId}/exercise_log`);
+    let q: FirebaseFirestore.Query = ref;
+    if (date) {
+      q = q.where('date', '==', date);
+    }
+    const snapshot = await q.orderBy('timestamp', 'desc').limit(limitCount).get();
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
   },
 };
