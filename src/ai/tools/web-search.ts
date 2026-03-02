@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview Serper.dev web search tool for the CFO AI Coach.
  * Used for fitness research, supplement science, workout programming, and anything

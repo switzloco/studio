@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview USDA FoodData Central lookup tool for the CFO AI Coach.
  * Free, authoritative macro data — no hallucination on common foods.
