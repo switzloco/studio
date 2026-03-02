@@ -6,9 +6,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler } from "lucide-react";
-import { HealthData, UserPreferences } from '@/lib/health-service';
+import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { useToast } from '@/hooks/use-toast';
 import { doc } from 'firebase/firestore';
 
 interface DashboardCardsProps {
@@ -19,6 +20,7 @@ interface DashboardCardsProps {
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
 
   // Read targets from user preferences instead of hardcoding
   const prefsRef = useMemoFirebase(
@@ -78,8 +80,33 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
-  const handleConnectFitbit = () => {
+  const handleConnectFitbit = async () => {
     if (!user) return;
+
+    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    if (!clientId) {
+      // No real Fitbit credentials — run mock handshake locally
+      try {
+        await healthService.saveFitbitCredentials(db, user.uid, {
+          accessToken: 'mock_token',
+          refreshToken: 'mock_refresh',
+          fitbitUserId: 'mock_fitbit_user',
+          expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+        });
+        await healthService.updateHealthData(db, user.uid, {
+          isDeviceVerified: true,
+          steps: 8432,
+          sleepHours: 7.2,
+          hrv: 62,
+        });
+        toast({ title: 'Fitbit Linked (Demo)', description: 'Mock device data loaded. Set NEXT_PUBLIC_FITBIT_CLIENT_ID for real integration.' });
+      } catch (e) {
+        console.error('[Fitbit Mock] Failed:', e);
+        toast({ variant: 'destructive', title: 'Connection Failed', description: 'Could not simulate Fitbit link.' });
+      }
+      return;
+    }
+
     window.location.href = fitbitService.getAuthUrl(user.uid);
   };
 
