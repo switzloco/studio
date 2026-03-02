@@ -10,22 +10,34 @@ import { fitbitService } from '@/lib/fitbit-service';
  * after a successful token exchange with the Fitbit API.
  */
 
+/** Returns the public-facing origin, safe to use in OAuth redirect URIs and browser redirects. */
+function getPublicOrigin(request: NextRequest): string {
+  // Firebase App Hosting (and most proxies) set x-forwarded-proto / x-forwarded-host.
+  const proto = request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol.replace(':', '');
+  const host  = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? request.nextUrl.host;
+  // Env var override for local dev when the dev server binds to 0.0.0.0.
+  return process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const state = searchParams.get('state'); // userId passed via state param
 
+  const origin = getPublicOrigin(request);
+  const appRoot = `${origin}/`;
+
   if (!code) {
-    return NextResponse.redirect(new URL('/?error=fitbit_auth_failed', request.url));
+    return NextResponse.redirect(new URL('?error=fitbit_auth_failed', appRoot));
   }
 
   if (!state) {
     console.error('[FitbitCallback] Missing state parameter — rejecting to prevent anonymous verification');
-    return NextResponse.redirect(new URL('/?error=fitbit_missing_state', request.url));
+    return NextResponse.redirect(new URL('?error=fitbit_missing_state', appRoot));
   }
 
   const userId = state;
-  const redirectUri = `${request.nextUrl.origin}/api/auth/fitbit/callback`;
+  const redirectUri = `${origin}/api/auth/fitbit/callback`;
 
   try {
     const { firestore } = initializeFirebase();
@@ -39,7 +51,7 @@ export async function GET(request: NextRequest) {
         metrics: ['status:rejected', 'source:fitbit'],
         verified: false,
       });
-      return NextResponse.redirect(new URL('/?error=fitbit_token_exchange_failed', request.url));
+      return NextResponse.redirect(new URL('?error=fitbit_token_exchange_failed', appRoot));
     }
 
     // Persist credentials so future syncs can refresh the token without re-auth.
@@ -71,9 +83,9 @@ export async function GET(request: NextRequest) {
       verified: true,
     });
 
-    return NextResponse.redirect(new URL('/?fitbit_sync=success', request.url));
+    return NextResponse.redirect(new URL('?fitbit_sync=success', appRoot));
   } catch (error) {
     console.error('[FitbitCallback] Unexpected error during handshake:', error);
-    return NextResponse.redirect(new URL('/?error=fitbit_sync_error', request.url));
+    return NextResponse.redirect(new URL('?error=fitbit_sync_error', appRoot));
   }
 }
