@@ -40,14 +40,22 @@ function toFitbitDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+class FitbitApiError extends Error {
+  constructor(public status: number, public endpoint: string, message: string) {
+    super(message);
+    this.name = 'FitbitApiError';
+  }
+}
+
 async function fitbitFetch(endpoint: string, accessToken: string): Promise<unknown | null> {
   const res = await fetch(`https://api.fitbit.com${endpoint}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (res.status === 204) return null; // no data for today
   if (!res.ok) {
-    console.error(`[FitbitService] API error ${res.status} for ${endpoint}`);
-    return null;
+    const body = await res.text().catch(() => '');
+    console.error(`[FitbitService] API error ${res.status} for ${endpoint}:`, body);
+    throw new FitbitApiError(res.status, endpoint, `Fitbit API ${res.status} on ${endpoint}: ${body}`);
   }
   return res.json();
 }
@@ -163,6 +171,9 @@ export const fitbitService = {
       };
     }
 
+    // Fetch all three endpoints. Individual endpoints may return null (204 / no
+    // data today) — that's fine and we default to 0. But if a request *throws*
+    // (auth error, rate limit, etc.) we let it propagate so the caller knows.
     const [activitiesData, sleepData, hrvData] = await Promise.all([
       fitbitFetch('/1/user/-/activities/date/today.json', accessToken),
       fitbitFetch('/1.2/user/-/sleep/date/today.json', accessToken),

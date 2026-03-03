@@ -31,14 +31,28 @@ export async function syncFitbitData(userId: string): Promise<{ success: boolean
     accessToken = refreshed.accessToken;
   }
 
-  const result = await fitbitService.syncTodayData(accessToken);
+  let result;
+  try {
+    result = await fitbitService.syncTodayData(accessToken);
+  } catch (error) {
+    console.error('[syncFitbitData] Fitbit API call failed:', error);
+    return { success: false };
+  }
   if (!result.success) return { success: false };
 
-  await adminHealthService.updateHealthData(firestore, userId, {
+  // Build update, deriving recoveryStatus from HRV (same logic as the OAuth callback).
+  const healthUpdate: Record<string, unknown> = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
     hrv: result.hrv.value,
-  });
+  };
+
+  const hrv = result.hrv.value;
+  if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
+  else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
+  else if (hrv > 0) healthUpdate.recoveryStatus = 'low';
+
+  await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
 
   return { success: true };
 }
