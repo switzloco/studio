@@ -159,9 +159,11 @@ export const fitbitService = {
 
   /**
    * Fetches today's steps, sleep, and HRV from the Fitbit Web API.
+   * Uses the provided localDate (YYYY-MM-DD) or 'today'.
    * Returns mock data if the token is the dev mock.
    */
-  async syncTodayData(accessToken: string): Promise<FitbitSyncResult> {
+  async syncTodayData(accessToken: string, localDate?: string): Promise<FitbitSyncResult> {
+    const targetDate = localDate || 'today';
     if (accessToken === 'mock_token') {
       return {
         success: true,
@@ -176,9 +178,9 @@ export const fitbitService = {
     // data today) — that's fine and we default to 0. But if a request *throws*
     // (auth error, rate limit, etc.) we let it propagate so the caller knows.
     const [activitiesData, sleepData, hrvData] = await Promise.all([
-      fitbitFetch('/1/user/-/activities/date/today.json', accessToken),
-      fitbitFetch('/1.2/user/-/sleep/date/today.json', accessToken),
-      fitbitFetch('/1/user/-/hrv/date/today.json', accessToken),
+      fitbitFetch(`/1/user/-/activities/date/${targetDate}.json`, accessToken),
+      fitbitFetch(`/1.2/user/-/sleep/date/${targetDate}.json`, accessToken),
+      fitbitFetch(`/1/user/-/hrv/date/${targetDate}.json`, accessToken),
     ]);
 
     const steps = (activitiesData as any)?.summary?.steps ?? 0;

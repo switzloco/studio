@@ -273,7 +273,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </div>
 
         {/* Charts section */}
-        <DashboardCharts caloriesIn={data.dailyCaloriesIn || 0} caloriesOut={data.dailyCaloriesOut || 2000} />
+        <DashboardCharts caloriesIn={data.dailyCaloriesIn || 0} caloriesOut={data.dailyCaloriesOut || 2000} carbsG={data.dailyCarbsG || 0} />
       </div>
 
       <div className="space-y-4">

@@ -33,6 +33,7 @@ export interface HealthData {
   sleepHours: number;
   recoveryStatus: 'low' | 'medium' | 'high';
   dailyProteinG: number;
+  dailyCarbsG: number;
   dailyCaloriesIn: number;
   dailyCaloriesOut: number;
   visceralFatPoints: number;
@@ -45,6 +46,7 @@ export interface HealthData {
   onboardingDay: number;
   onboardingComplete: boolean;
   isDeviceVerified: boolean;
+  lastActiveDate?: string;
 }
 
 export interface UserPreferences {
@@ -76,6 +78,7 @@ export const healthService = {
       sleepHours: 7,
       recoveryStatus: 'medium',
       dailyProteinG: 0,
+      dailyCarbsG: 0,
       dailyCaloriesIn: 0,
       dailyCaloriesOut: 2000, // Default estimate
       visceralFatPoints: 1250, // Starting equity
@@ -90,6 +93,7 @@ export const healthService = {
       onboardingDay: 1,
       onboardingComplete: false,
       isDeviceVerified: false,
+      lastActiveDate: new Date().toISOString().split('T')[0],
       createdAt: serverTimestamp(),
     };
     await setDoc(docRef, initialData);

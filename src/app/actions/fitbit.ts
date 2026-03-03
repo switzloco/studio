@@ -12,7 +12,7 @@ import { fitbitService } from '@/lib/fitbit-service';
  *
  * Uses Admin SDK — server actions have no client auth context.
  */
-export async function syncFitbitData(userId: string): Promise<{ success: boolean }> {
+export async function syncFitbitData(userId: string, localDate?: string): Promise<{ success: boolean }> {
   const firestore = getAdminFirestore();
 
   const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
@@ -33,7 +33,7 @@ export async function syncFitbitData(userId: string): Promise<{ success: boolean
 
   let result;
   try {
-    result = await fitbitService.syncTodayData(accessToken);
+    result = await fitbitService.syncTodayData(accessToken, localDate);
   } catch (error) {
     console.error('[syncFitbitData] Fitbit API call failed:', error);
     return { success: false };

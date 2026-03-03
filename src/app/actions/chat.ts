@@ -9,12 +9,14 @@ import { initializeFirebase } from '@/firebase/sdk';
  */
 
 export async function sendChatMessage(
-  message: string, 
+  message: string,
   chatHistory: { role: 'user' | 'model', content: string }[],
   currentHealth: any,
   photoDataUri?: string,
   userId?: string,
-  userName?: string
+  userName?: string,
+  localDate?: string,
+  localTime?: string
 ) {
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
@@ -27,6 +29,8 @@ export async function sendChatMessage(
       userName,
       message,
       currentDay,
+      localDate: localDate || new Date().toISOString().split('T')[0],
+      localTime: localTime || new Date().toLocaleTimeString('en-US'),
       photoDataUri,
       chatHistory,
       currentHealth,

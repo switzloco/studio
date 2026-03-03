@@ -8,9 +8,10 @@ import { Flame, BatteryCharging } from 'lucide-react';
 interface DashboardChartsProps {
     caloriesIn: number;
     caloriesOut: number;
+    carbsG: number;
 }
 
-export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000 }: DashboardChartsProps) {
+export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0 }: DashboardChartsProps) {
     const deficit = caloriesIn - caloriesOut;
 
     const calorieData = [
@@ -19,17 +20,24 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000 }: Dashboar
         { name: 'Deficit', value: Math.abs(deficit), color: deficit > 0 ? '#ef4444' : '#3b82f6' } // red if surplus, blue if deficit
     ];
 
-    // Mock intraday data for Glycogen Estimation
-    // A simple curve starting full, dipping midday, and reflecting the deficit at the end
-    const startGlycogen = 100;
-    const endGlycogen = Math.max(10, Math.min(100, startGlycogen + (deficit / 20))); // scale deficit to % //
+    // Real intraday curve estimation based on carbs vs burn
+    // ~500g capacity (400g muscle, 100g liver). Assuming morning start at 80% full if no previous data.
+    const maxGlycogenKcal = 500 * 4; // 2000 kcal capacity
+    const assumedMorningStartKcal = maxGlycogenKcal * 0.8;
+    const workoutBurnKcal = caloriesOut > 2000 ? (caloriesOut - 2000) * 0.7 : 0; // 70% of active burn uses carbs
+    const baseBurnKcal = 2000 * 0.3; // 30% of resting burn uses carbs
+
+    // Estimate end glycogen
+    const netCarbKcal = (carbsG * 4) - workoutBurnKcal - baseBurnKcal;
+    let endGlycogenKcal = Math.max(0, Math.min(maxGlycogenKcal, assumedMorningStartKcal + netCarbKcal));
+    const startGlycogenPct = (assumedMorningStartKcal / maxGlycogenKcal) * 100;
+    const endGlycogenPct = (endGlycogenKcal / maxGlycogenKcal) * 100;
 
     const glycogenData = [
-        { time: '6 AM', level: startGlycogen },
-        { time: '10 AM', level: startGlycogen - 10 },
-        { time: '2 PM', level: Math.max(10, startGlycogen - 40) }, // post workout/midday dip
-        { time: '6 PM', level: Math.max(10, startGlycogen - 30 + (deficit > 0 ? 20 : 0)) }, // post lunch recovery
-        { time: '10 PM', level: endGlycogen },
+        { time: '6 AM', level: startGlycogenPct },
+        { time: '12 PM', level: Math.max(5, startGlycogenPct - 15 + ((carbsG > 100 ? 50 : carbsG) / 500 * 100)) },
+        { time: '6 PM', level: Math.max(5, startGlycogenPct - 25 + ((carbsG > 100 ? 100 : carbsG) / 500 * 100)) },
+        { time: '10 PM', level: endGlycogenPct },
     ];
 
     return (
@@ -116,12 +124,12 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000 }: Dashboar
                     <div className="flex justify-between items-center mt-4">
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Est. Status</p>
-                            <p className="text-lg font-black text-blue-600">{endGlycogen.toFixed(0)}% <span className="text-xs font-medium text-blue-600/60">Full</span></p>
+                            <p className="text-lg font-black text-blue-600">{endGlycogenPct.toFixed(0)}% <span className="text-xs font-medium text-blue-600/60">Full</span></p>
                         </div>
                         <div className="text-center">
-                            <p className="text-[10px] font-black uppercase text-muted-foreground">Trend</p>
-                            <p className={`text-[12px] font-black ${deficit > 0 ? 'text-emerald-500' : 'text-orange-500'} mt-1`}>
-                                {deficit > 0 ? 'REFILLING' : 'DEPLETING'}
+                            <p className="text-[10px] font-black uppercase text-muted-foreground">Calories</p>
+                            <p className={`text-[12px] font-black text-blue-500 mt-1`}>
+                                {endGlycogenKcal.toFixed(0)} <span className="text-[10px] font-medium opacity-60">kcal</span>
                             </p>
                         </div>
                     </div>

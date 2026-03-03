@@ -18,6 +18,8 @@ const PersonalizedAICoachingInputSchema = z.object({
   userName: z.string().optional().describe('The name of the client being audited.'),
   message: z.string(),
   currentDay: z.string().describe('The current day of the week (e.g., Monday).'),
+  localDate: z.string().describe('The current local date string YYYY-MM-DD from the client.'),
+  localTime: z.string().describe('The current local time string from the client.'),
   photoDataUri: z.string().optional(),
   currentHealth: z.any().optional(),
   chatHistory: z.array(z.object({
@@ -39,12 +41,12 @@ const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
     description: 'Returns the user profile, equipment, schedule, targets, and recent food/exercise logs. Call this at the START of every new conversation to load persistent memory.',
-    inputSchema: z.object({ userId: z.string() }),
+    inputSchema: z.object({ userId: z.string(), localDate: z.string() }),
     outputSchema: z.any(),
   },
   async (input) => {
     const firestore = getAdminFirestore();
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = input.localDate;
     const [prefs, health, recentFood, recentExercise] = await Promise.all([
       healthService.getUserPreferences(firestore, input.userId),
       healthService.getHealthSummary(firestore, input.userId),
@@ -140,6 +142,7 @@ const logFoodTool = ai.defineTool(
       fiberG: z.number().optional(),
       source: z.enum(['usda', 'web_search', 'user_estimate']),
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+      localDate: z.string(),
     }),
     outputSchema: z.string(),
   },
@@ -167,20 +170,32 @@ const logFoodTool = ai.defineTool(
       date: today,
     });
 
-    // Update daily protein counter on user doc
+    // Update daily protein, carbs, calories counter on user doc
     const current = await healthService.getHealthSummary(firestore, input.userId);
-    const newTotal = (current?.dailyProteinG || 0) + input.proteinG;
-    await healthService.updateHealthData(firestore, input.userId, { dailyProteinG: newTotal });
+
+    // Check if we need to reset stats (new day)
+    const isNewDay = current?.lastActiveDate !== input.localDate;
+
+    const newProteinTotal = isNewDay ? input.proteinG : (current?.dailyProteinG || 0) + input.proteinG;
+    const newCarbsTotal = isNewDay ? input.carbsG : (current?.dailyCarbsG || 0) + input.carbsG;
+    const newCaloriesTotal = isNewDay ? input.calories : (current?.dailyCaloriesIn || 0) + input.calories;
+
+    await healthService.updateHealthData(firestore, input.userId, {
+      dailyProteinG: newProteinTotal,
+      dailyCarbsG: newCarbsTotal,
+      dailyCaloriesIn: newCaloriesTotal,
+      lastActiveDate: input.localDate,
+    });
 
     // Also write to legacy logs for backward compat
     await healthService.logActivity(firestore, input.userId, {
       category: 'food',
       content: `${input.name} (${input.portionG}g) — ${input.calories} cal, ${input.proteinG}g protein`,
-      metrics: [`protein_g:${input.proteinG}`, `calories:${input.calories}`, `daily_total:${newTotal}`],
+      metrics: [`protein_g:${input.proteinG}`, `calories:${input.calories}`, `daily_total:${newProteinTotal}`],
       verified: false,
     });
 
-    return `Logged: ${input.name}. Daily protein total: ${newTotal}g.`;
+    return `Logged: ${input.name}. Daily totals -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}.`;
   }
 );
 
@@ -199,6 +214,7 @@ const logExerciseTool = ai.defineTool(
       estimatedCaloriesBurned: z.number().optional(),
       pointsDelta: z.number().describe('Visceral fat points earned'),
       notes: z.string().optional(),
+      localDate: z.string(),
     }),
     outputSchema: z.string(),
   },
@@ -210,7 +226,7 @@ const logExerciseTool = ai.defineTool(
     if (!validated.success) throw new Error(validated.error.errors[0].message);
 
     const firestore = getAdminFirestore();
-    const today = new Date().toISOString().split('T')[0];
+    const today = input.localDate;
 
     // Write to structured exercise_log
     await healthService.logExercise(firestore, input.userId, {
@@ -322,10 +338,10 @@ PERSONA:
 - Financial metaphors: protein = liquidity/assets, visceral fat = liabilities, workouts = equity injections, rest = capital preservation.
 - Sarcasm targets market inefficiencies and nutrition myths, NEVER the client's body or equipment.
 
-CURRENT DAY: {{{currentDay}}}
+CURRENT DAY: {{{currentDay}}} ({{localDate}} {{localTime}})
 
 MEMORY PROTOCOL:
-Call get_user_context at the START of every new conversation to load the user's profile, equipment, targets, and recent logs.
+Call get_user_context at the START of every new conversation to load the user's profile, equipment, targets, and recent logs. Remember to pass localDate down exactly as it was given to you.
 - NEVER re-ask something already stored in their profile or preferences.
 - If their profile is sparse (new user), gather information NATURALLY through conversation. Do not interrogate — ask one thing at a time and let the conversation flow.
 - When the user shares info (equipment, goals, schedule, weight, height, dietary restrictions), save it immediately via update_preferences. Do not announce you are saving.
