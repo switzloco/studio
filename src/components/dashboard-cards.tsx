@@ -5,9 +5,10 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw } from "lucide-react";
 import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
+import { syncFitbitData } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { doc } from 'firebase/firestore';
@@ -80,6 +81,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
+  const [isSyncing, setIsSyncing] = React.useState(false);
+
   const handleConnectFitbit = async () => {
     if (!user) return;
 
@@ -110,6 +113,23 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     window.location.href = fitbitService.getAuthUrl(user.uid);
   };
 
+  const handleResync = async () => {
+    if (!user || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const result = await syncFitbitData(user.uid);
+      if (result.success) {
+        toast({ title: 'Sync Complete', description: 'Fitbit data refreshed from your device.' });
+      } else {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not pull latest data. Try reconnecting your Fitbit.' });
+      }
+    } catch {
+      toast({ variant: 'destructive', title: 'Sync Error', description: 'Something went wrong during the sync.' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
       <div className="space-y-6">
@@ -121,7 +141,25 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           </div>
         </div>
 
-        {!data.isDeviceVerified && (
+        {data.isDeviceVerified ? (
+          <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
+             <CardContent className="p-4 flex items-center justify-between gap-4">
+               <div className="flex items-center gap-3">
+                 <div className="p-2 bg-emerald-100 rounded-lg">
+                   <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                 </div>
+                 <div>
+                   <p className="text-xs font-black uppercase tracking-tight text-emerald-800">Fitbit Connected</p>
+                   <p className="text-[10px] font-bold text-emerald-700/70">Device-verified steps, sleep, and HRV.</p>
+                 </div>
+               </div>
+               <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                 {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
+                 Sync Now
+               </Button>
+             </CardContent>
+          </Card>
+        ) : (
           <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
              <CardContent className="p-4 flex items-center justify-between gap-4">
                <div className="flex items-center gap-3">
