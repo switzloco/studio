@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug } from "lucide-react";
 import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData } from '@/app/actions/fitbit';
@@ -129,6 +129,20 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     }
   };
 
+  const handleDisconnectFitbit = async () => {
+    if (!user) return;
+    try {
+      await healthService.deleteFitbitCredentials(db, user.uid);
+      await healthService.updateHealthData(db, user.uid, {
+        isDeviceVerified: false,
+      });
+      toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
+    } catch (e) {
+      console.error('[Fitbit Disconnect] Failed:', e);
+      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect properly.' });
+    }
+  };
+
   return (
     <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
       <div className="space-y-6">
@@ -142,39 +156,45 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
         {data.isDeviceVerified ? (
           <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
-             <CardContent className="p-4 flex items-center justify-between gap-4">
-               <div className="flex items-center gap-3">
-                 <div className="p-2 bg-emerald-100 rounded-lg">
-                   <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                 </div>
-                 <div>
-                   <p className="text-xs font-black uppercase tracking-tight text-emerald-800">Fitbit Connected</p>
-                   <p className="text-[10px] font-bold text-emerald-700/70">Device-verified steps, sleep, and HRV.</p>
-                 </div>
-               </div>
-               <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                 {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                 Sync Now
-               </Button>
-             </CardContent>
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-tight text-emerald-800">Fitbit Connected</p>
+                  <p className="text-[10px] font-bold text-emerald-700/70">Device-verified steps, sleep, and HRV.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                  <Unplug className="w-3 h-3 mr-1.5" />
+                  Reset
+                </Button>
+                <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
+                  Sync Now
+                </Button>
+              </div>
+            </CardContent>
           </Card>
         ) : (
           <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
-             <CardContent className="p-4 flex items-center justify-between gap-4">
-               <div className="flex items-center gap-3">
-                 <div className="p-2 bg-orange-100 rounded-lg">
-                   <ShieldAlert className="w-5 h-5 text-orange-600" />
-                 </div>
-                 <div>
-                   <p className="text-xs font-black uppercase tracking-tight text-orange-800">Self-Reported Data</p>
-                   <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and HRV.</p>
-                 </div>
-               </div>
-               <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                 Connect Fitbit
-                 <CloudLightning className="w-3 h-3 ml-2" />
-               </Button>
-             </CardContent>
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-orange-100 rounded-lg">
+                  <ShieldAlert className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-tight text-orange-800">Self-Reported Data</p>
+                  <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and HRV.</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                Connect Fitbit
+                <CloudLightning className="w-3 h-3 ml-2" />
+              </Button>
+            </CardContent>
           </Card>
         )}
 

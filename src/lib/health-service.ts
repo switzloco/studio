@@ -1,5 +1,5 @@
 
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, where, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, where, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp, deleteDoc } from 'firebase/firestore';
 import type { FoodLogEntry, ExerciseLogEntry, UserProfile } from './food-exercise-types';
 
 /**
@@ -67,7 +67,7 @@ export const healthService = {
     const docRef = doc(db, 'users', userId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return docSnap.data() as HealthData;
-    
+
     const initialData: HealthData = {
       steps: 0,
       hrv: 50,
@@ -109,7 +109,7 @@ export const healthService = {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return docSnap.data() as UserPreferences;
-    
+
     const defaultPrefs: UserPreferences = {
       weeklySchedule: JSON.stringify({
         "Mon": "Pending Audit",
@@ -142,6 +142,11 @@ export const healthService = {
     const docRef = doc(db, 'users', userId, 'preferences', 'fitbit_tokens');
     const snap = await getDoc(docRef);
     return snap.exists() ? (snap.data() as FitbitCredentials) : null;
+  },
+
+  async deleteFitbitCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'fitbit_tokens');
+    await deleteDoc(docRef);
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>) {
