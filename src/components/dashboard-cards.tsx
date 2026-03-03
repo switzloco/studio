@@ -185,10 +185,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <DollarSign className="w-10 h-10 text-accent" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-end mb-4">
+              <div className="flex justify-between items-end mb-1">
                 <p className="text-base font-black text-foreground uppercase tracking-tight">Protein Liquidity</p>
                 <span className="text-sm font-black text-muted-foreground">{dailyProteinG}g <span className="opacity-50">/</span> {proteinGoal}g</span>
               </div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-3">Daily protein intake toward your goal. Tell the CFO what you ate to log it.</p>
               <Progress value={proteinProgress} className="h-4 bg-purple-50" />
               <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Solvency Status: {proteinProgress >= 100 ? 'BULLISH' : 'PENDING DEPOSIT'}</p>
             </div>
@@ -204,7 +205,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </div>
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Steps Inventory</p>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
               <h4 className="text-4xl font-black italic">{(data.steps || 0).toLocaleString()}</h4>
               <div className="mt-4 h-1 w-12 bg-orange-200 rounded-full" />
             </CardContent>
@@ -218,7 +220,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </div>
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Recovery Audit</p>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({data.hrv || 0}ms)</p>
               <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.recoveryStatus || 'MEDIUM'}</h4>
               <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
             </CardContent>
@@ -229,7 +232,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <div className="p-3 bg-emerald-100 rounded-xl w-fit mb-4 shadow-sm">
                 <Scale className="w-6 h-6 text-emerald-600" />
               </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Portfolio Weight</p>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Portfolio Weight</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Body weight</p>
               <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.weightKg ? `${data.weightKg}kg` : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-emerald-200 rounded-full" />
             </CardContent>
@@ -240,7 +244,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <div className="p-3 bg-indigo-100 rounded-xl w-fit mb-4 shadow-sm">
                 <Ruler className="w-6 h-6 text-indigo-600" />
               </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-2">Height Asset</p>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Height Asset</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Used for BMI calculations</p>
               <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.heightCm ? `${data.heightCm}cm` : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-indigo-200 rounded-full" />
             </CardContent>
@@ -257,7 +262,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 <Briefcase className="w-10 h-10 text-white" />
               </div>
               <div className="min-w-0">
-                <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-2">Equity Score (VF Points)</p>
+                <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Equity Score (VF Points)</p>
+                <p className="text-[10px] font-medium opacity-50 mb-2">Visceral fat reduction progress. Grows as you hit protein, activity, and sleep goals.</p>
                 <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter truncate">
                   {(visceralFatPoints).toLocaleString()}
                   <span className="text-sm font-normal opacity-60 ml-4">/ {fatPointsGoal.toLocaleString()}</span>
