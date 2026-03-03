@@ -29,6 +29,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user]
   );
   const { data: prefs } = useDoc<UserPreferences>(prefsRef);
+  const [isSyncing, setIsSyncing] = React.useState(false);
 
   if (isLoading) {
     return (
@@ -80,8 +81,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
-
-  const [isSyncing, setIsSyncing] = React.useState(false);
 
   const handleConnectFitbit = async () => {
     if (!user) return;
