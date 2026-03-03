@@ -47,6 +47,10 @@ export async function syncFitbitData(userId: string): Promise<{ success: boolean
     hrv: result.hrv.value,
   };
 
+  if (result.caloriesOut?.value) {
+    healthUpdate.dailyCaloriesOut = result.caloriesOut.value;
+  }
+
   const hrv = result.hrv.value;
   if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
   else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';

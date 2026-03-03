@@ -21,6 +21,8 @@ export const adminHealthService = {
       sleepHours: 7,
       recoveryStatus: 'medium' as const,
       dailyProteinG: 0,
+      dailyCaloriesIn: 0,
+      dailyCaloriesOut: 2000,
       visceralFatPoints: 1250,
       history: [{
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),

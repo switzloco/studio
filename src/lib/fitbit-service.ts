@@ -17,6 +17,7 @@ export interface FitbitSyncResult {
   steps: FitbitMetric;
   sleep: FitbitMetric;
   hrv: FitbitMetric;
+  caloriesOut?: FitbitMetric;
   isVerified: boolean;
 }
 
@@ -181,14 +182,16 @@ export const fitbitService = {
     ]);
 
     const steps = (activitiesData as any)?.summary?.steps ?? 0;
+    const caloriesOut = (activitiesData as any)?.summary?.caloriesOut ?? 0;
     const totalMinutesAsleep = (sleepData as any)?.summary?.totalMinutesAsleep ?? 0;
     const dailyRmssd = (hrvData as any)?.hrv?.[0]?.value?.dailyRmssd ?? 0;
 
     return {
       success: true,
-      steps:  { value: steps, source: 'device' },
-      sleep:  { value: totalMinutesAsleep / 60, source: 'device' },
-      hrv:    { value: Math.round(dailyRmssd), source: 'device' },
+      steps: { value: steps, source: 'device' },
+      sleep: { value: totalMinutesAsleep / 60, source: 'device' },
+      hrv: { value: Math.round(dailyRmssd), source: 'device' },
+      caloriesOut: { value: caloriesOut, source: 'device' },
       isVerified: true,
     };
   },
@@ -266,11 +269,19 @@ export const fitbitService = {
     const weightKg = profile?.weight ? parseFloat(profile.weight) : undefined;
     const heightCm = profile?.height ? parseFloat(profile.height) : undefined;
 
+    // Mock calories logic on initial
+    let bestCalories = 0;
+    const activitiesDataInitial = await fitbitFetch(`/1/user/-/activities/date/${endDate}.json`, accessToken).catch(() => null);
+    if (activitiesDataInitial) {
+      bestCalories = (activitiesDataInitial as any)?.summary?.caloriesOut ?? 0;
+    }
+
     return {
       success: true,
       steps: { value: bestSteps, source: 'device' },
       sleep: { value: bestSleepMinutes / 60, source: 'device' },
       hrv: { value: bestHrv, source: 'device' },
+      caloriesOut: { value: bestCalories, source: 'device' },
       weightKg,
       heightCm,
       dataDate,

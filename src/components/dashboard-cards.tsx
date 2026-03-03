@@ -10,6 +10,7 @@ import { HealthData, UserPreferences, healthService } from '@/lib/health-service
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { DashboardCharts } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc } from 'firebase/firestore';
 
@@ -270,6 +271,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Charts section */}
+        <DashboardCharts caloriesIn={data.dailyCaloriesIn || 0} caloriesOut={data.dailyCaloriesOut || 2000} />
       </div>
 
       <div className="space-y-4">

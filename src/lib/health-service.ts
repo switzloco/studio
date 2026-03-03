@@ -33,6 +33,8 @@ export interface HealthData {
   sleepHours: number;
   recoveryStatus: 'low' | 'medium' | 'high';
   dailyProteinG: number;
+  dailyCaloriesIn: number;
+  dailyCaloriesOut: number;
   visceralFatPoints: number;
   heightCm?: number;
   weightKg?: number;
@@ -74,6 +76,8 @@ export const healthService = {
       sleepHours: 7,
       recoveryStatus: 'medium',
       dailyProteinG: 0,
+      dailyCaloriesIn: 0,
+      dailyCaloriesOut: 2000, // Default estimate
       visceralFatPoints: 1250, // Starting equity
       history: [{
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
