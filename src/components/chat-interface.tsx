@@ -42,6 +42,7 @@ export function ChatInterface() {
     const runInit = async () => {
       setIsLoading(true);
       const now = new Date();
+      const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
       const result = await sendChatMessage(
         '__init__',
         [],

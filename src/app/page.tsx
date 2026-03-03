@@ -62,7 +62,7 @@ export default function Home() {
       toast({ variant: 'destructive', title: 'Fitbit Link Failed', description: 'Check your Fitbit credentials and try again.' });
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, []);
+  }, [toast]);
 
   const handleAnonymousLogin = async () => {
     setIsLoggingIn(true);
@@ -104,7 +104,7 @@ export default function Home() {
     if (!user) return;
     setIsAuditing(true);
     toast({ title: "Audit Initialized", description: "Running CFO diagnostic suite..." });
-    
+
     await runInternalAudit(db, user.uid, (test, success, message) => {
       toast({
         variant: success ? "default" : "destructive",
@@ -112,7 +112,7 @@ export default function Home() {
         description: message
       });
     });
-    
+
     setIsAuditing(false);
   };
 
@@ -121,7 +121,7 @@ export default function Home() {
       <div className="min-h-screen bg-background flex items-center justify-center p-6 relative overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/5 rounded-full blur-3xl" />
-        
+
         <div className="max-w-md w-full space-y-10 text-center relative z-10">
           <div className="space-y-6">
             <div className="mx-auto p-5 bg-primary text-white w-fit rounded-[2rem] shadow-2xl rotate-3 hover:rotate-0 transition-transform duration-500">
@@ -141,8 +141,8 @@ export default function Home() {
           </div>
 
           <div className="grid gap-4 px-2">
-            <Button 
-              className="h-16 rounded-2xl text-base font-black uppercase tracking-widest shadow-xl group" 
+            <Button
+              className="h-16 rounded-2xl text-base font-black uppercase tracking-widest shadow-xl group"
               onClick={handleGoogleLogin}
               disabled={isLoggingIn}
             >
@@ -153,9 +153,9 @@ export default function Home() {
                 </>
               )}
             </Button>
-            <Button 
-              variant="outline" 
-              className="h-16 rounded-2xl text-xs font-black uppercase tracking-widest border-2" 
+            <Button
+              variant="outline"
+              className="h-16 rounded-2xl text-xs font-black uppercase tracking-widest border-2"
               onClick={handleAnonymousLogin}
               disabled={isLoggingIn}
             >
@@ -197,16 +197,16 @@ export default function Home() {
             </p>
           </div>
         </div>
-        
-        <div className="flex items-center gap-4">
-           {!user?.isAnonymous && (
-             <div className="hidden md:flex flex-col items-end mr-1">
-               <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">Verified Identity</p>
-               <p className="text-xs font-bold text-foreground truncate max-w-[150px]">{user?.displayName || user?.email}</p>
-             </div>
-           )}
 
-           <DropdownMenu>
+        <div className="flex items-center gap-4">
+          {!user?.isAnonymous && (
+            <div className="hidden md:flex flex-col items-end mr-1">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">Verified Identity</p>
+              <p className="text-xs font-bold text-foreground truncate max-w-[150px]">{user?.displayName || user?.email}</p>
+            </div>
+          )}
+
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted relative overflow-hidden h-10 w-10 border-2 border-primary/20 p-0">
                 {isAuditing ? (
