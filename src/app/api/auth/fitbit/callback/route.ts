@@ -73,21 +73,32 @@ export async function GET(request: NextRequest) {
     // Persist credentials so future syncs can refresh the token without re-auth.
     await adminHealthService.saveFitbitCredentials(firestore, userId, creds);
 
-    // Fetch today's actual device data immediately.
-    const syncResult = await fitbitService.syncTodayData(creds.accessToken);
+    // Initial sync: pull last 7 days of data + profile so the dashboard
+    // has real numbers even if the device hasn't synced today yet.
+    const syncResult = await fitbitService.syncInitialData(creds.accessToken);
 
-    // Write verified device metrics and flip the trust flag.
-    await adminHealthService.updateHealthData(firestore, userId, {
+    // Build the health data update — include weight/height from profile if available.
+    const healthUpdate: Record<string, unknown> = {
       isDeviceVerified: true,
       onboardingDay: 1,
       steps: syncResult.steps.value,
       sleepHours: syncResult.sleep.value,
       hrv: syncResult.hrv.value,
-    });
+    };
+    if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
+    if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
 
+    // Derive recovery status from HRV.
+    if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
+    else if (syncResult.hrv.value >= 30) healthUpdate.recoveryStatus = 'medium';
+    else if (syncResult.hrv.value > 0) healthUpdate.recoveryStatus = 'low';
+
+    await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+
+    const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
     await adminHealthService.logActivity(firestore, userId, {
       category: 'health_sync',
-      content: `Hardware Audit Successful: Fitbit linked. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.`,
+      content: `Hardware Audit Successful: Fitbit linked${datePart}. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.${syncResult.weightKg ? ` Weight: ${syncResult.weightKg}kg.` : ''}`,
       metrics: [
         'status:verified',
         'source:fitbit',
@@ -95,6 +106,8 @@ export async function GET(request: NextRequest) {
         `steps:${syncResult.steps.value}`,
         `sleep_h:${syncResult.sleep.value.toFixed(1)}`,
         `hrv:${syncResult.hrv.value}`,
+        ...(syncResult.weightKg ? [`weight_kg:${syncResult.weightKg}`] : []),
+        ...(syncResult.heightCm ? [`height_cm:${syncResult.heightCm}`] : []),
       ],
       verified: true,
     });
