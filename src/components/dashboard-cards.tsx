@@ -75,7 +75,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     );
   }
 
-  const dailyProteinG = data.dailyProteinG || 0;
+  const now = new Date();
+  const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+  const isNewDay = data.lastActiveDate !== localDate;
+
+  const dailyProteinG = isNewDay ? 0 : (data.dailyProteinG || 0);
+  const dailyCaloriesIn = isNewDay ? 0 : (data.dailyCaloriesIn || 0);
+  const dailyCarbsG = isNewDay ? 0 : (data.dailyCarbsG || 0);
+  const dailyCaloriesOut = isNewDay ? 2000 : (data.dailyCaloriesOut || 2000); // Wait, Fitbit sync handles caloriesOut updates, but initially default to 2000
+
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
   const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
@@ -273,7 +281,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </div>
 
         {/* Charts section */}
-        <DashboardCharts caloriesIn={data.dailyCaloriesIn || 0} caloriesOut={data.dailyCaloriesOut || 2000} carbsG={data.dailyCarbsG || 0} />
+        <DashboardCharts caloriesIn={dailyCaloriesIn} caloriesOut={dailyCaloriesOut} carbsG={dailyCarbsG} />
       </div>
 
       <div className="space-y-4">

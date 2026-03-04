@@ -47,7 +47,7 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     hrv: result.hrv.value,
   };
 
-  if (result.caloriesOut?.value) {
+  if (result.caloriesOut && result.caloriesOut.value > 0) {
     healthUpdate.dailyCaloriesOut = result.caloriesOut.value;
   }
 

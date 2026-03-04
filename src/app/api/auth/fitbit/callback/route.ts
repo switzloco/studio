@@ -17,7 +17,7 @@ import { fitbitService } from '@/lib/fitbit-service';
 function getPublicOrigin(request: NextRequest): string {
   // Firebase App Hosting (and most proxies) set x-forwarded-proto / x-forwarded-host.
   const proto = request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol.replace(':', '');
-  const host  = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? request.nextUrl.host;
+  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? request.nextUrl.host;
   // Env var override for local dev when the dev server binds to 0.0.0.0.
   return process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
 }
@@ -87,6 +87,9 @@ export async function GET(request: NextRequest) {
     };
     if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
     if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
+    if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
+      healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
+    }
 
     // Derive recovery status from HRV.
     if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
