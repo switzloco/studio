@@ -1,12 +1,10 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/firebase/admin';
+import { syncFitbitData, SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { fitbitService } from '@/lib/fitbit-service';
-import { SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
 
 /**
- * @fileOverview Cron endpoint that syncs Fitbit data for all connected users.
+ * @fileOverview Cron endpoint that syncs Fitbit data for ALL connected users.
  *
  * Designed to be called every 6 hours by an external scheduler (Cloud Scheduler,
  * cron-job.org, GitHub Actions, etc.).
@@ -18,6 +16,10 @@ import { SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
  */
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes max for serverless execution
+
+/** Process users in parallel batches of this size. */
+const BATCH_SIZE = 5;
 
 export async function GET(request: NextRequest) {
   // --- Auth gate ---
@@ -36,91 +38,59 @@ export async function GET(request: NextRequest) {
 
   const firestore = getAdminFirestore();
 
-  // Find all users with stored Fitbit tokens via a collection-group query
-  // on the "preferences" sub-collection where the doc id is "fitbit_tokens".
-  // Since Firestore doesn't support collection-group queries on specific doc
-  // ids elegantly, we iterate all user docs that have isDeviceVerified = true.
+  // Query all users who have connected Fitbit.
   const usersSnapshot = await firestore
     .collection('users')
     .where('isDeviceVerified', '==', true)
     .get();
 
   const now = Date.now();
-  const results: { userId: string; success: boolean; skipped?: boolean }[] = [];
+  const results: { userId: string; status: 'synced' | 'skipped' | 'failed' }[] = [];
 
+  // Filter to only users that are stale (no sync within the interval).
+  const staleUsers: string[] = [];
   for (const userDoc of usersSnapshot.docs) {
     const userId = userDoc.id;
+    const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
+    if (!creds) {
+      results.push({ userId, status: 'failed' });
+      continue;
+    }
+    if (creds.lastSyncedAt && now - creds.lastSyncedAt < SYNC_INTERVAL_MS) {
+      results.push({ userId, status: 'skipped' });
+      continue;
+    }
+    staleUsers.push(userId);
+  }
 
-    try {
-      const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
-      if (!creds) {
-        results.push({ userId, success: false });
-        continue;
-      }
+  // Process stale users in parallel batches.
+  for (let i = 0; i < staleUsers.length; i += BATCH_SIZE) {
+    const batch = staleUsers.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (userId) => {
+        const { success } = await syncFitbitData(userId);
+        return { userId, success };
+      }),
+    );
 
-      // Skip if synced recently (within the interval).
-      if (creds.lastSyncedAt && now - creds.lastSyncedAt < SYNC_INTERVAL_MS) {
-        results.push({ userId, success: true, skipped: true });
-        continue;
-      }
-
-      // Refresh token if near expiry.
-      let accessToken = creds.accessToken;
-      const fiveMinutes = 5 * 60 * 1000;
-      if (now + fiveMinutes >= creds.expiresAt) {
-        const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
-        if (!refreshed) {
-          console.error(`[CronSync] Token refresh failed for user ${userId}`);
-          results.push({ userId, success: false });
-          continue;
-        }
-        await adminHealthService.saveFitbitCredentials(firestore, userId, {
-          ...refreshed,
-          fitbitUserId: creds.fitbitUserId,
-          lastSyncedAt: creds.lastSyncedAt,
+    for (const result of batchResults) {
+      if (result.status === 'fulfilled') {
+        results.push({
+          userId: result.value.userId,
+          status: result.value.success ? 'synced' : 'failed',
         });
-        accessToken = refreshed.accessToken;
+      } else {
+        // Promise rejected — extract userId from the batch by index.
+        const idx = batchResults.indexOf(result);
+        results.push({ userId: batch[idx], status: 'failed' });
+        console.error(`[CronSync] Unexpected error for user ${batch[idx]}:`, result.reason);
       }
-
-      // Fetch today's data.
-      const syncResult = await fitbitService.syncTodayData(accessToken);
-
-      if (syncResult.success) {
-        const healthUpdate: Record<string, unknown> = {
-          steps: syncResult.steps.value,
-          sleepHours: syncResult.sleep.value,
-          hrv: syncResult.hrv.value,
-        };
-        if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-          healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
-        }
-        const hrv = syncResult.hrv.value;
-        if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
-        else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
-        else if (hrv > 0) healthUpdate.recoveryStatus = 'low';
-
-        await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
-
-        // Stamp lastSyncedAt.
-        const latestCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
-        if (latestCreds) {
-          await adminHealthService.saveFitbitCredentials(firestore, userId, {
-            ...latestCreds,
-            lastSyncedAt: Date.now(),
-          });
-        }
-      }
-
-      results.push({ userId, success: syncResult.success });
-    } catch (error) {
-      console.error(`[CronSync] Failed for user ${userId}:`, error);
-      results.push({ userId, success: false });
     }
   }
 
-  const synced = results.filter(r => r.success && !r.skipped).length;
-  const skipped = results.filter(r => r.skipped).length;
-  const failed = results.filter(r => !r.success).length;
+  const synced = results.filter(r => r.status === 'synced').length;
+  const skipped = results.filter(r => r.status === 'skipped').length;
+  const failed = results.filter(r => r.status === 'failed').length;
 
   return NextResponse.json({
     ok: true,
