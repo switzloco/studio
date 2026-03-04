@@ -64,6 +64,7 @@ export interface FitbitCredentials {
   refreshToken: string;
   fitbitUserId: string;
   expiresAt: number; // Unix ms timestamp
+  lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
 }
 
 export const healthService = {

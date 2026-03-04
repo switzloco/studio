@@ -23,7 +23,7 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
-import { syncFitbitData } from '@/app/actions/fitbit';
+import { syncFitbitData, getFitbitLastSyncedAt, SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
@@ -44,12 +44,23 @@ export default function Home() {
     }
   }, [user, db]);
 
-  // Sync Fitbit data once per session on load for verified users.
+  // Sync Fitbit data on load if the last sync was more than 6 hours ago
+  // (or if we've never synced). Runs once per session.
   useEffect(() => {
-    if (user && healthData?.isDeviceVerified && !hasSyncedFitbit.current) {
-      hasSyncedFitbit.current = true;
-      syncFitbitData(user.uid).catch(console.error);
-    }
+    if (!user || !healthData?.isDeviceVerified || hasSyncedFitbit.current) return;
+    hasSyncedFitbit.current = true;
+
+    (async () => {
+      try {
+        const lastSynced = await getFitbitLastSyncedAt(user.uid);
+        const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
+        if (stale) {
+          await syncFitbitData(user.uid);
+        }
+      } catch (e) {
+        console.error('[AutoSync] Failed:', e);
+      }
+    })();
   }, [user, healthData?.isDeviceVerified]);
 
   // Show toast for Fitbit OAuth callback result.

@@ -6,13 +6,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug } from "lucide-react";
-import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
+import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { DashboardCharts } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc } from 'firebase/firestore';
+
+function formatTimeAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 interface DashboardCardsProps {
   data: HealthData | null;
@@ -30,6 +41,14 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user]
   );
   const { data: prefs } = useDoc<UserPreferences>(prefsRef);
+
+  // Read Fitbit credentials to show lastSyncedAt in the UI.
+  const fitbitTokensRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'fitbit_tokens') : null,
+    [db, user]
+  );
+  const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
+
   const [isSyncing, setIsSyncing] = React.useState(false);
 
   if (isLoading) {
@@ -172,7 +191,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </div>
                 <div>
                   <p className="text-xs font-black uppercase tracking-tight text-emerald-800">Fitbit Connected</p>
-                  <p className="text-[10px] font-bold text-emerald-700/70">Device-verified steps, sleep, and HRV.</p>
+                  <p className="text-[10px] font-bold text-emerald-700/70">
+                    {fitbitCreds?.lastSyncedAt
+                      ? `Last synced ${formatTimeAgo(fitbitCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
+                      : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
