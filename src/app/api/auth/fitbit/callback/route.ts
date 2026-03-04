@@ -71,7 +71,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Persist credentials so future syncs can refresh the token without re-auth.
-    await adminHealthService.saveFitbitCredentials(firestore, userId, creds);
+    await adminHealthService.saveFitbitCredentials(firestore, userId, {
+      ...creds,
+      lastSyncedAt: Date.now(),
+    });
 
     // Initial sync: pull last 7 days of data + profile so the dashboard
     // has real numbers even if the device hasn't synced today yet.
