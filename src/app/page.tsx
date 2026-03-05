@@ -23,7 +23,10 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
-import { syncFitbitData, getFitbitLastSyncedAt, SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
+import { syncFitbitData, getFitbitLastSyncedAt } from '@/app/actions/fitbit';
+
+/** Must match SYNC_INTERVAL_MS in fitbit-sync.ts — 6 hours. */
+const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export default function Home() {
   const { user, isUserLoading } = useUser();
