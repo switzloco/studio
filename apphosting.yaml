@@ -1,6 +1,14 @@
 # Settings to manage and configure a Firebase App Hosting backend.
 # https://firebase.google.com/docs/app-hosting/configure
 
+# Secrets injected into the Cloud Run container at runtime.
+# Store the value first: firebase apphosting:secrets:set CRON_SECRET
+env:
+  - variable: CRON_SECRET
+    secret: CRON_SECRET
+    availability:
+      - runtime
+
 runConfig:
   # --- SCALING CONFIGURATION ---
   # minInstances: Minimum number of instances kept warm at all times.

@@ -58,7 +58,8 @@ export default function Home() {
         const lastSynced = await getFitbitLastSyncedAt(user.uid);
         const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
         if (stale) {
-          await syncFitbitData(user.uid);
+          const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
+          await syncFitbitData(user.uid, localDate);
         }
       } catch (e) {
         console.error('[AutoSync] Failed:', e);
