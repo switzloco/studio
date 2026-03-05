@@ -12,11 +12,15 @@ export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
  *
  * Uses Admin SDK — has no client auth context.
  */
-export async function syncFitbitData(userId: string, localDate?: string): Promise<{ success: boolean }> {
+export type SyncResult =
+  | { success: true }
+  | { success: false; reason: 'no_credentials' | 'token_refresh_failed' | 'api_failed' | 'write_failed' };
+
+export async function syncFitbitData(userId: string, localDate?: string): Promise<SyncResult> {
   const firestore = getAdminFirestore();
 
   const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
-  if (!creds) return { success: false };
+  if (!creds) return { success: false, reason: 'no_credentials' };
 
   // Refresh token if within 5 minutes of expiry.
   let accessToken = creds.accessToken;
@@ -29,9 +33,12 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
       refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
     } catch (error) {
       console.error('[syncFitbitData] Token refresh threw an unexpected error:', error);
-      return { success: false };
+      return { success: false, reason: 'token_refresh_failed' };
     }
-    if (!refreshed) return { success: false };
+    if (!refreshed) {
+      console.error('[syncFitbitData] Token refresh returned null — token may be revoked. Reconnect Fitbit.');
+      return { success: false, reason: 'token_refresh_failed' };
+    }
     latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
     await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
     accessToken = refreshed.accessToken;
@@ -42,15 +49,18 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     result = await fitbitService.syncTodayData(accessToken, localDate);
   } catch (error) {
     console.error('[syncFitbitData] Fitbit API call failed:', error);
-    return { success: false };
+    return { success: false, reason: 'api_failed' };
   }
-  if (!result.success) return { success: false };
+  if (!result.success) return { success: false, reason: 'api_failed' };
 
   // Build update, deriving recoveryStatus from HRV (same logic as the OAuth callback).
+  // Always set lastActiveDate so the dashboard's isNewDay check doesn't reset Fitbit-sourced metrics.
+  const today = localDate || new Date().toISOString().split('T')[0];
   const healthUpdate: Record<string, unknown> = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
     hrv: result.hrv.value,
+    lastActiveDate: today,
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
@@ -71,7 +81,7 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     });
   } catch (error) {
     console.error('[syncFitbitData] Firestore write failed after sync:', error);
-    return { success: false };
+    return { success: false, reason: 'write_failed' };
   }
 
   return { success: true };

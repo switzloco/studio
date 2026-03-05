@@ -41,25 +41,30 @@ export function ChatInterface() {
 
     const runInit = async () => {
       setIsLoading(true);
-      const now = new Date();
-      const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
-      const result = await sendChatMessage(
-        '__init__',
-        [],
-        sanitizedHealth,
-        undefined,
-        user.uid,
-        user.displayName || undefined,
-        now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
-        now.toLocaleTimeString('en-US')
-      );
-      if (result.success && result.response) {
-        setMessages([{ role: 'model', content: result.response }]);
-      } else {
-        // Fallback if init fails
+      try {
+        const now = new Date();
+        const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
+        const result = await sendChatMessage(
+          '__init__',
+          [],
+          sanitizedHealth,
+          undefined,
+          user.uid,
+          user.displayName || undefined,
+          now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
+          now.toLocaleTimeString('en-US')
+        );
+        if (result.success && result.response) {
+          setMessages([{ role: 'model', content: result.response }]);
+        } else {
+          setMessages([{ role: 'model', content: "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?" }]);
+        }
+      } catch (e) {
+        console.error('[ChatInit] sendChatMessage threw:', e);
         setMessages([{ role: 'model', content: "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?" }]);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     runInit();
@@ -104,24 +109,28 @@ export function ChatInterface() {
     const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
 
     const now = new Date();
-    const result = await sendChatMessage(
-      userMessage,
-      messages.map(m => ({ role: m.role, content: m.content })),
-      sanitizedHealth,
-      userImage || undefined,
-      user.uid,
-      user.displayName || undefined,
-      now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
-      now.toLocaleTimeString('en-US')
-    );
-
-    if (result.success && result.response) {
-      setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
-    } else {
-      toast({ variant: "destructive", title: "Audit Failed", description: result.error });
+    try {
+      const result = await sendChatMessage(
+        userMessage,
+        messages.map(m => ({ role: m.role, content: m.content })),
+        sanitizedHealth,
+        userImage || undefined,
+        user.uid,
+        user.displayName || undefined,
+        now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
+        now.toLocaleTimeString('en-US')
+      );
+      if (result.success && result.response) {
+        setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
+      } else {
+        toast({ variant: "destructive", title: "Audit Failed", description: result.error });
+      }
+    } catch (e) {
+      console.error('[ChatSend] sendChatMessage threw:', e);
+      toast({ variant: "destructive", title: "Audit Failed", description: "The CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   // Dynamic placeholder based on whether we have any profile data
