@@ -3,7 +3,8 @@
 
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { syncFitbitData as _syncFitbitData, SyncResult } from '@/lib/fitbit-sync';
+import { syncFitbitData as _syncFitbitData } from '@/lib/fitbit-sync';
+import type { SyncResult } from '@/lib/fitbit-sync';
 
 export type { SyncResult };
 

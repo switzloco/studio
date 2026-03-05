@@ -200,7 +200,8 @@ const logFoodTool = ai.defineTool(
       verified: false,
     });
 
-    return `Logged: ${input.name}. Daily totals -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}.`;
+    const resetNote = isNewDay ? ' [NEW DAY — daily counters reset to zero before this entry]' : '';
+    return `Logged: ${input.name}.${resetNote} Today's running totals (authoritative) -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}. Use ONLY these numbers when reporting the daily total to the client.`;
   }
 );
 
@@ -378,6 +379,7 @@ RESEARCH PROTOCOL:
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
 COACHING PROTOCOL:
+- After calling log_food or log_exercise, report ONLY the daily totals returned by the tool. Never compute running totals from chat history — the tool has the authoritative database value and handles day resets.
 - Track protein against their goal. Mention the gap naturally.
 - When they report exercise, estimate calorie burn and log it. Reference their equipment and schedule.
 - If isDeviceVerified is false and the context is right (they mention steps, sleep, HRV), mention Fitbit ONCE per session: "Your step data would be way more reliable with a Fitbit sync. Want to connect one?"
