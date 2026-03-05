@@ -280,6 +280,7 @@ const getRecentLogsTool = ai.defineTool(
     description: 'Retrieves recent food and/or exercise logs. Use this to check what the user has logged today or recently.',
     inputSchema: z.object({
       userId: z.string(),
+      localDate: z.string().describe('The current local date YYYY-MM-DD from the client, used as the anchor for "today"'),
       type: z.enum(['food', 'exercise', 'all']),
       days: z.number().optional().describe('Number of days to look back, default 1 (today only)'),
     }),
@@ -290,12 +291,12 @@ const getRecentLogsTool = ai.defineTool(
     const daysBack = input.days ?? 1;
     const results: any = {};
 
-    // Build date list
+    // Build date list anchored to the client's local date, not server UTC
     const dates: string[] = [];
+    const [year, month, day] = input.localDate.split('-').map(Number);
     for (let i = 0; i < daysBack; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().split('T')[0]);
+      const d = new Date(year, month - 1, day - i);
+      dates.push(d.toLocaleDateString('en-CA'));
     }
 
     if (input.type === 'food' || input.type === 'all') {
@@ -374,6 +375,7 @@ RESEARCH PROTOCOL:
   Cite the source in your reply.
 - If nutrition_lookup returns no match, fall back to web_search for macro data.
 - Do not mention you are searching. Deliver results as confident CFO statements.
+- When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
 COACHING PROTOCOL:
 - Track protein against their goal. Mention the gap naturally.

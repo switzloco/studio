@@ -147,7 +147,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     setIsSyncing(true);
     let result: SyncResult | null = null;
     try {
-      result = await syncFitbitData(user.uid);
+      const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
+      result = await syncFitbitData(user.uid, localDate);
     } catch (e) {
       console.error('[handleResync] syncFitbitData threw:', e);
     } finally {
