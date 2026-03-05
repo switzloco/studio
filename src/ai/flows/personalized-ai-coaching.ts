@@ -53,10 +53,15 @@ const getUserContextTool = ai.defineTool(
       healthService.queryFoodLog(firestore, input.userId, today, 10),
       healthService.queryExerciseLog(firestore, input.userId, today, 10),
     ]);
+    // Apply the same isNewDay guard the dashboard uses so the AI never sees
+    // yesterday's logged intake as today's data.
+    const isNewDay = health?.lastActiveDate !== today;
     return {
       preferences: prefs,
       health: {
-        dailyProteinG: health?.dailyProteinG ?? 0,
+        dailyProteinG: isNewDay ? 0 : (health?.dailyProteinG ?? 0),
+        dailyCaloriesIn: isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0),
+        dailyCarbsG: isNewDay ? 0 : (health?.dailyCarbsG ?? 0),
         visceralFatPoints: health?.visceralFatPoints ?? 0,
         isDeviceVerified: health?.isDeviceVerified ?? false,
         steps: health?.steps ?? 0,

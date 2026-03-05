@@ -27,16 +27,25 @@ export async function sendChatMessage(
     // Get current day of the week for the AI context
     const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
 
+    const resolvedDate = localDate || new Date().toISOString().split('T')[0];
+
+    // Zero out daily user-logged intake if it's a new day, matching the
+    // dashboard's isNewDay guard so the AI never sees yesterday's protein/calories.
+    const isNewDay = currentHealth?.lastActiveDate !== resolvedDate;
+    const sanitizedHealth = isNewDay
+      ? { ...currentHealth, dailyProteinG: 0, dailyCaloriesIn: 0, dailyCarbsG: 0 }
+      : currentHealth;
+
     const aiPromise = personalizedAICoaching({
       userId,
       userName,
       message,
       currentDay,
-      localDate: localDate || new Date().toISOString().split('T')[0],
+      localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
       photoDataUri,
       chatHistory,
-      currentHealth,
+      currentHealth: sanitizedHealth,
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
