@@ -20,15 +20,14 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
 
   // Refresh token if within 5 minutes of expiry.
   let accessToken = creds.accessToken;
+  // Track the latest credentials so the final lastSyncedAt stamp doesn't need a re-fetch.
+  let latestCreds = creds;
   const fiveMinutes = 5 * 60 * 1000;
   if (Date.now() + fiveMinutes >= creds.expiresAt) {
     const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
     if (!refreshed) return { success: false };
-    await adminHealthService.saveFitbitCredentials(firestore, userId, {
-      ...refreshed,
-      fitbitUserId: creds.fitbitUserId,
-      lastSyncedAt: creds.lastSyncedAt,
-    });
+    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
+    await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
     accessToken = refreshed.accessToken;
   }
 
@@ -60,13 +59,11 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
 
   // Stamp lastSyncedAt so cron and client know when we last pulled.
-  const updatedCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
-  if (updatedCreds) {
-    await adminHealthService.saveFitbitCredentials(firestore, userId, {
-      ...updatedCreds,
-      lastSyncedAt: Date.now(),
-    });
-  }
+  // Use latestCreds (already in memory) to avoid an unnecessary Firestore re-fetch.
+  await adminHealthService.saveFitbitCredentials(firestore, userId, {
+    ...latestCreds,
+    lastSyncedAt: Date.now(),
+  });
 
   return { success: true };
 }
