@@ -163,7 +163,8 @@ export const fitbitService = {
    * Returns mock data if the token is the dev mock.
    */
   async syncTodayData(accessToken: string, localDate?: string): Promise<FitbitSyncResult> {
-    const targetDate = localDate || 'today';
+    // Fitbit API requires YYYY-MM-DD — it does NOT accept 'today' as a keyword.
+    const targetDate = localDate || new Date().toISOString().split('T')[0];
     if (accessToken === 'mock_token') {
       return {
         success: true,
