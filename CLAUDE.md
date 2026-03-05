@@ -72,3 +72,19 @@ The Genkit flow defines 8 LLM-callable tools:
 - `next.config.ts` ignores TypeScript and ESLint errors during builds
 - Server action body size limit is 20MB (for health data payloads)
 - Deployed via Firebase App Hosting (`apphosting.yaml`, max 1 instance)
+
+## Pre-Commit Rules for Claude Code
+
+**Always run `npm run build` before committing and pushing.** The build catches errors that TypeScript alone misses, including:
+- `'use server'` files exporting non-async-function values (constants, types at runtime, etc.)
+- Next.js App Router violations
+- Missing or misconfigured server actions
+
+`npm run typecheck` alone is NOT sufficient — Next.js semantic errors only surface during `npm run build`.
+
+### `'use server'` file rules
+Files with `'use server'` may ONLY export `async function`s. Never export:
+- Constants (`export const X = ...`)
+- Plain objects or arrays
+- Type-only exports at runtime (use `export type { T }` which is erased, not `export { T }`)
+
