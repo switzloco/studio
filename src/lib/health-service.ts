@@ -195,7 +195,11 @@ export const healthService = {
 
   async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
     const ref = collection(db, 'users', userId, 'exercise_log');
-    const docRef = await addDoc(ref, { ...entry, timestamp: serverTimestamp() });
+    // Strip undefined fields — Firestore rejects documents containing undefined values.
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await addDoc(ref, clean);
     return docRef.id;
   },
 
