@@ -54,10 +54,13 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   if (!result.success) return { success: false, reason: 'api_failed' };
 
   // Build update, deriving recoveryStatus from HRV (same logic as the OAuth callback).
+  // Always set lastActiveDate so the dashboard's isNewDay check doesn't reset Fitbit-sourced metrics.
+  const today = localDate || new Date().toISOString().split('T')[0];
   const healthUpdate: Record<string, unknown> = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
     hrv: result.hrv.value,
+    lastActiveDate: today,
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {

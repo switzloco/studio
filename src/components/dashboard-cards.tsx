@@ -98,10 +98,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
   const isNewDay = data.lastActiveDate !== localDate;
 
+  // User-logged intake resets on a new day (nothing eaten yet).
   const dailyProteinG = isNewDay ? 0 : (data.dailyProteinG || 0);
   const dailyCaloriesIn = isNewDay ? 0 : (data.dailyCaloriesIn || 0);
   const dailyCarbsG = isNewDay ? 0 : (data.dailyCarbsG || 0);
-  const dailyCaloriesOut = isNewDay ? 2000 : (data.dailyCaloriesOut || 2000); // Wait, Fitbit sync handles caloriesOut updates, but initially default to 2000
+  // Fitbit calorie burn is device-sourced — use it whenever available, even on a new day.
+  const dailyCaloriesOut = data.dailyCaloriesOut || 2000;
 
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
