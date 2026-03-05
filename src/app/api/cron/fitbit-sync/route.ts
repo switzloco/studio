@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/firebase/admin';
-import { syncFitbitData, SYNC_INTERVAL_MS } from '@/app/actions/fitbit';
+import { syncFitbitData, SYNC_INTERVAL_MS } from '@/lib/fitbit-sync';
 import { adminHealthService } from '@/lib/health-service-admin';
 
 /**
