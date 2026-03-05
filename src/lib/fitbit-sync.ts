@@ -24,7 +24,13 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   let latestCreds = creds;
   const fiveMinutes = 5 * 60 * 1000;
   if (Date.now() + fiveMinutes >= creds.expiresAt) {
-    const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+    let refreshed;
+    try {
+      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+    } catch (error) {
+      console.error('[syncFitbitData] Token refresh threw an unexpected error:', error);
+      return { success: false };
+    }
     if (!refreshed) return { success: false };
     latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
     await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
@@ -56,14 +62,17 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
   else if (hrv > 0) healthUpdate.recoveryStatus = 'low';
 
-  await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
-
-  // Stamp lastSyncedAt so cron and client know when we last pulled.
-  // Use latestCreds (already in memory) to avoid an unnecessary Firestore re-fetch.
-  await adminHealthService.saveFitbitCredentials(firestore, userId, {
-    ...latestCreds,
-    lastSyncedAt: Date.now(),
-  });
+  try {
+    await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+    // Stamp lastSyncedAt — reuse latestCreds (already in memory) to avoid a redundant re-fetch.
+    await adminHealthService.saveFitbitCredentials(firestore, userId, {
+      ...latestCreds,
+      lastSyncedAt: Date.now(),
+    });
+  } catch (error) {
+    console.error('[syncFitbitData] Firestore write failed after sync:', error);
+    return { success: false };
+  }
 
   return { success: true };
 }
