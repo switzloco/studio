@@ -325,28 +325,49 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
       <div className="space-y-4">
         <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Long-Term Portfolio</h2>
-        <Card className="border-none shadow-xl overflow-hidden bg-primary text-white group cursor-default">
-          <CardContent className="p-8 md:p-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-            <div className="flex items-center gap-6 min-w-0">
-              <div className="p-5 bg-white/10 rounded-2xl shrink-0 group-hover:bg-white/20 transition-colors">
-                <Briefcase className="w-10 h-10 text-white" />
+        {visceralFatPoints === 0 ? (
+          <Card className="border-none shadow-xl overflow-hidden bg-primary text-white cursor-default">
+            <CardContent className="p-8 md:p-12 flex flex-col gap-6">
+              <div className="flex items-center gap-5">
+                <div className="p-5 bg-white/10 rounded-2xl shrink-0">
+                  <Briefcase className="w-10 h-10 text-white" />
+                </div>
+                <div>
+                  <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Your Scoring System</p>
+                  <p className="text-base font-black">Coming online after your first session</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Equity Score (VF Points)</p>
-                <p className="text-[10px] font-medium opacity-50 mb-2">Visceral fat reduction progress. Grows as you hit protein, activity, and sleep goals.</p>
-                <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter truncate">
-                  {(visceralFatPoints).toLocaleString()}
-                  <span className="text-sm font-normal opacity-60 ml-4">/ {fatPointsGoal.toLocaleString()}</span>
-                </h3>
+              <div className="space-y-3 text-sm font-medium opacity-80 leading-relaxed">
+                <p>The CFO builds a <span className="font-black text-white">custom daily point system</span> tuned to your goals. Every workout, protein target hit, and good night of sleep earns points.</p>
+                <p>The score compounds over time — turning the fuzzy question <span className="italic">"am I actually making progress?"</span> into a number you can track and beat.</p>
+                <p className="opacity-60 text-[11px] uppercase tracking-widest font-black">Chat with the CFO to calibrate your system →</p>
               </div>
-            </div>
-            <div className="text-right shrink-0 bg-white/10 p-4 px-8 rounded-2xl backdrop-blur-md">
-              <p className="text-3xl font-black text-emerald-300 italic">{fatProgress.toFixed(1)}%</p>
-              <p className="text-[10px] font-black uppercase opacity-60">Audit Completion</p>
-            </div>
-          </CardContent>
-          <Progress value={fatProgress} className="h-2.5 rounded-none bg-white/10" />
-        </Card>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-none shadow-xl overflow-hidden bg-primary text-white group cursor-default">
+            <CardContent className="p-8 md:p-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+              <div className="flex items-center gap-6 min-w-0">
+                <div className="p-5 bg-white/10 rounded-2xl shrink-0 group-hover:bg-white/20 transition-colors">
+                  <Briefcase className="w-10 h-10 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Equity Score (VF Points)</p>
+                  <p className="text-[10px] font-medium opacity-50 mb-2">Visceral fat reduction progress. Grows as you hit protein, activity, and sleep goals.</p>
+                  <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter truncate">
+                    {(visceralFatPoints).toLocaleString()}
+                    <span className="text-sm font-normal opacity-60 ml-4">/ {fatPointsGoal.toLocaleString()}</span>
+                  </h3>
+                </div>
+              </div>
+              <div className="text-right shrink-0 bg-white/10 p-4 px-8 rounded-2xl backdrop-blur-md">
+                <p className="text-3xl font-black text-emerald-300 italic">{fatProgress.toFixed(1)}%</p>
+                <p className="text-[10px] font-black uppercase opacity-60">Audit Completion</p>
+              </div>
+            </CardContent>
+            <Progress value={fatProgress} className="h-2.5 rounded-none bg-white/10" />
+          </Card>
+        )}
       </div>
     </div>
   );
