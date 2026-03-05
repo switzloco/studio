@@ -213,7 +213,7 @@ const logExerciseTool = ai.defineTool(
       userId: z.string(),
       name: z.string().describe('Exercise name, e.g. "Kettlebell swings"'),
       category: z.enum(['strength', 'conditioning', 'recovery', 'cardio']),
-      sets: z.number().optional(),
+      sets: z.number().optional().describe('Number of sets. Default to 1 when the user mentions a rep count without specifying sets (e.g. "25 swings" = sets:1, reps:25).'),
       reps: z.number().optional(),
       durationMin: z.number().optional(),
       weightKg: z.number().optional(),
