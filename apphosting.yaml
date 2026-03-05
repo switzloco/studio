@@ -7,7 +7,7 @@ env:
   - variable: CRON_SECRET
     secret: CRON_SECRET
     availability:
-      - runtime
+      - RUNTIME
 
 runConfig:
   # --- SCALING CONFIGURATION ---
