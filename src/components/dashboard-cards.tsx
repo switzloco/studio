@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
-import { syncFitbitData } from '@/app/actions/fitbit';
+import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { DashboardCharts } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
@@ -143,17 +143,30 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const handleResync = async () => {
     if (!user || isSyncing) return;
     setIsSyncing(true);
+    let result: SyncResult | null = null;
     try {
-      const result = await syncFitbitData(user.uid);
-      if (result.success) {
-        toast({ title: 'Sync Complete', description: 'Fitbit data refreshed from your device.' });
-      } else {
-        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not pull latest data. Try reconnecting your Fitbit.' });
-      }
-    } catch {
-      toast({ variant: 'destructive', title: 'Sync Error', description: 'Something went wrong during the sync.' });
+      result = await syncFitbitData(user.uid);
+    } catch (e) {
+      console.error('[handleResync] syncFitbitData threw:', e);
     } finally {
       setIsSyncing(false);
+    }
+    if (!result) {
+      toast({ variant: 'destructive', title: 'Sync Error', description: 'Unexpected error — check server logs.' });
+    } else if (result.success) {
+      toast({ title: 'Sync Complete', description: 'Fitbit data refreshed from your device.' });
+    } else {
+      const descriptions: Record<string, string> = {
+        no_credentials: 'No Fitbit credentials found. Reconnect your Fitbit.',
+        token_refresh_failed: 'Token expired and could not be refreshed. Reconnect your Fitbit.',
+        api_failed: 'Fitbit API returned an error. Check server logs.',
+        write_failed: 'Data fetched but Firestore write failed. Check server logs.',
+      };
+      toast({
+        variant: 'destructive',
+        title: 'Sync Failed',
+        description: descriptions[result.reason] ?? 'Could not pull latest data.',
+      });
     }
   };
 
