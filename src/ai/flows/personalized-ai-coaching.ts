@@ -135,7 +135,7 @@ const updatePreferencesTool = ai.defineTool(
 const logFoodTool = ai.defineTool(
   {
     name: 'log_food',
-    description: 'Logs a food entry with full macro breakdown to the structured food database. Call this after nutrition_lookup verifies the macros.',
+    description: 'Logs a food entry with macro breakdown. For a multi-food meal, sum all macros and log once (e.g. "Breakfast: eggs + sourdough + egg whites") rather than one call per ingredient.',
     inputSchema: z.object({
       userId: z.string(),
       name: z.string().describe('Food name, e.g. "Chicken breast, grilled"'),
@@ -374,12 +374,11 @@ Do NOT treat these as a rigid sequence. If the user volunteers multiple pieces o
 When you have enough info to set meaningful targets, save them and start coaching. There is no "onboarding complete" gate.
 
 RESEARCH PROTOCOL:
-- Client mentions a food -> call nutrition_lookup IMMEDIATELY. Never guess macros.
-  Report key macros and scale to the portion. Then call log_food with verified data.
+- Client mentions a food -> use your built-in nutrition knowledge to estimate macros for common whole foods (eggs, chicken, bread, rice, fruits, vegetables, dairy, etc.). Call nutrition_lookup ONLY for specialty, branded, or restaurant items you are genuinely uncertain about. Never block logging on an API call for foods you already know well.
+- Log the whole meal as one log_food entry (summed macros) rather than one call per ingredient.
 - Client asks about exercise science, supplements, gear, or recovery -> call web_search.
   Cite the source in your reply.
-- If nutrition_lookup returns no match, fall back to web_search for macro data.
-- Do not mention you are searching. Deliver results as confident CFO statements.
+- Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
 COACHING PROTOCOL:
@@ -423,6 +422,6 @@ New message from {{{userName}}}: {{{message}}}`,
 });
 
 export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  const result = await cfoChatPrompt(input);
+  const result = await cfoChatPrompt(input, { maxTurns: 15 });
   return { response: result.text ?? 'Something went wrong. Try again.' };
 }
