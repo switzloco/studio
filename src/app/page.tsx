@@ -286,15 +286,15 @@ export default function Home() {
             </TabsTrigger>
             <TabsTrigger value="daily" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <Target className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Focus</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Today</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <History className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Audit</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Ledger</span>
             </TabsTrigger>
             <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <LayoutGrid className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Assets</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">About Me</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
