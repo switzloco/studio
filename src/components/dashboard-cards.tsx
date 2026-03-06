@@ -339,7 +339,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
               <div className="space-y-3 text-sm font-medium opacity-80 leading-relaxed">
                 <p>The CFO builds a <span className="font-black text-white">custom daily point system</span> tuned to your goals. Every workout, protein target hit, and good night of sleep earns points.</p>
-                <p>The score compounds over time — turning the fuzzy question <span className="italic">"am I actually making progress?"</span> into a number you can track and beat.</p>
+                <p>The score compounds over time — turning the fuzzy question <span className="italic">&ldquo;am I actually making progress?&rdquo;</span> into a number you can track and beat.</p>
                 <p className="opacity-60 text-[11px] uppercase tracking-widest font-black">Chat with the CFO to calibrate your system →</p>
               </div>
             </CardContent>
