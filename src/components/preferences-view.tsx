@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2 } from "lucide-react";
 import { useUser, useFirestore } from '@/firebase';
 import { healthService, UserPreferences } from '@/lib/health-service';
 import { useToast } from '@/hooks/use-toast';
@@ -21,6 +21,9 @@ export function PreferencesView() {
   const [schedule, setSchedule] = useState<Record<string, string>>({});
   const [newAsset, setNewAsset] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [savedRecently, setSavedRecently] = useState(false);
+  const isLoadedRef = useRef(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -33,26 +36,40 @@ export function PreferencesView() {
             console.error("Schedule Parse Error", e);
           }
         }
+        isLoadedRef.current = true;
       });
     }
   }, [user, db]);
 
-  const handleSave = async () => {
-    if (!user || !prefs) return;
+  const handleSave = useCallback(async (currentPrefs: UserPreferences, currentSchedule: Record<string, string>) => {
+    if (!user || !currentPrefs) return;
     setIsSaving(true);
     try {
       const updatedPrefs = {
-        ...prefs,
-        weeklySchedule: JSON.stringify(schedule, null, 2)
+        ...currentPrefs,
+        weeklySchedule: JSON.stringify(currentSchedule, null, 2)
       };
       await healthService.updateUserPreferences(db, user.uid, updatedPrefs);
-      toast({ title: "Audit Context Updated", description: "The CFO is now aware of your new asset allocation." });
+      setSavedRecently(true);
+      setTimeout(() => setSavedRecently(false), 2000);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Update Failed", description: e.message });
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [user, db, toast]);
+
+  // Auto-save 800ms after any change, once initial data is loaded
+  useEffect(() => {
+    if (!isLoadedRef.current || !prefs) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      handleSave(prefs, schedule);
+    }, 800);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [prefs, schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleScheduleChange = (day: string, value: string) => {
     setSchedule(prev => ({ ...prev, [day]: value }));
@@ -209,9 +226,9 @@ export function PreferencesView() {
             </CardContent>
           </Card>
 
-          <Button className="w-full gap-3 rounded-2xl h-14 shadow-xl text-sm font-black uppercase tracking-[0.2em] italic" onClick={handleSave} disabled={isSaving}>
-            <Save className="w-5 h-5" />
-            {isSaving ? "Syncing Assets..." : "Sync Portfolio Context"}
+          <Button className="w-full gap-3 rounded-2xl h-14 shadow-xl text-sm font-black uppercase tracking-[0.2em] italic" onClick={() => prefs && handleSave(prefs, schedule)} disabled={isSaving}>
+            {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : savedRecently ? <Check className="w-5 h-5" /> : <Save className="w-5 h-5" />}
+            {isSaving ? "Saving..." : savedRecently ? "Saved" : "Save Changes"}
           </Button>
         </div>
       </div>

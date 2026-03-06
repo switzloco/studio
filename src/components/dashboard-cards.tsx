@@ -288,8 +288,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({data.hrv || 0}ms)</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.recoveryStatus || 'MEDIUM'}</h4>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({data.hrv > 0 ? `${data.hrv}ms` : 'no reading'})</p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
             </CardContent>
           </Card>

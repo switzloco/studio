@@ -59,7 +59,6 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   const healthUpdate: Record<string, unknown> = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
-    hrv: result.hrv.value,
     lastActiveDate: today,
   };
 
@@ -67,10 +66,16 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     healthUpdate.dailyCaloriesOut = result.caloriesOut.value;
   }
 
+  // Only update HRV and recoveryStatus when Fitbit returns a valid reading.
+  // A value of 0 means the sensor failed or data is unavailable — ignore it
+  // so stale-but-valid data isn't overwritten by a bad reading.
   const hrv = result.hrv.value;
-  if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
-  else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
-  else if (hrv > 0) healthUpdate.recoveryStatus = 'low';
+  if (hrv > 0) {
+    healthUpdate.hrv = hrv;
+    if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
+    else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
+    else healthUpdate.recoveryStatus = 'low';
+  }
 
   try {
     await adminHealthService.updateHealthData(firestore, userId, healthUpdate);

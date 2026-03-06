@@ -20,24 +20,42 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
         { name: 'Deficit', value: Math.abs(deficit), color: deficit > 0 ? '#ef4444' : '#3b82f6' } // red if surplus, blue if deficit
     ];
 
-    // Real intraday curve estimation based on carbs vs burn
-    // ~500g capacity (400g muscle, 100g liver). Assuming morning start at 80% full if no previous data.
+    // Intraday glycogen curve.
+    // Capacity: ~500g (400g muscle + 100g liver) = 2000 kcal.
+    // Morning default: 30% — conservative post-overnight-fast baseline.
+    // Carbs logged during the day drive the refueling curve upward.
     const maxGlycogenKcal = 500 * 4; // 2000 kcal capacity
-    const assumedMorningStartKcal = maxGlycogenKcal * 0.8;
-    const workoutBurnKcal = caloriesOut > 2000 ? (caloriesOut - 2000) * 0.7 : 0; // 70% of active burn uses carbs
-    const baseBurnKcal = 2000 * 0.3; // 30% of resting burn uses carbs
+    const morningStartKcal = maxGlycogenKcal * 0.30; // ~30% after overnight fast
 
-    // Estimate end glycogen
-    const netCarbKcal = (carbsG * 4) - workoutBurnKcal - baseBurnKcal;
-    let endGlycogenKcal = Math.max(0, Math.min(maxGlycogenKcal, assumedMorningStartKcal + netCarbKcal));
-    const startGlycogenPct = (assumedMorningStartKcal / maxGlycogenKcal) * 100;
-    const endGlycogenPct = (endGlycogenKcal / maxGlycogenKcal) * 100;
+    // Resting carb burn: ~30% of a 2000 kcal/day BMR uses glycogen, spread over 16 waking hours
+    const restingHourlyBurnKcal = (2000 * 0.30) / 16; // ~37.5 kcal/h
+    const burnByNoon   = restingHourlyBurnKcal * 6;  // 6 AM → 12 PM
+    const burnBy6pm    = restingHourlyBurnKcal * 12; // 6 AM → 6 PM
+    const burnByEnd    = restingHourlyBurnKcal * 16; // 6 AM → 10 PM
+
+    // Active workout burn on top of resting (70% of calories above BMR use glycogen)
+    const activeBurnKcal = Math.max(0, caloriesOut - 2000) * 0.7;
+
+    const carbKcal = carbsG * 4;
+    // Distribute logged carbs across the day: 50% by noon, 85% by 6pm, 100% by end
+    const refuelByNoon = carbKcal * 0.50;
+    const refuelBy6pm  = carbKcal * 0.85;
+    const refuelByEnd  = carbKcal;
+
+    const noonKcal  = Math.max(0, Math.min(maxGlycogenKcal, morningStartKcal - burnByNoon  + refuelByNoon));
+    const pm6Kcal   = Math.max(0, Math.min(maxGlycogenKcal, morningStartKcal - burnBy6pm   + refuelBy6pm  - activeBurnKcal * 0.6));
+    let endGlycogenKcal = Math.max(0, Math.min(maxGlycogenKcal, morningStartKcal - burnByEnd + refuelByEnd - activeBurnKcal));
+
+    const startGlycogenPct = (morningStartKcal  / maxGlycogenKcal) * 100;
+    const noonPct           = (noonKcal          / maxGlycogenKcal) * 100;
+    const pm6Pct            = (pm6Kcal           / maxGlycogenKcal) * 100;
+    const endGlycogenPct    = (endGlycogenKcal   / maxGlycogenKcal) * 100;
 
     const glycogenData = [
-        { time: '6 AM', level: startGlycogenPct },
-        { time: '12 PM', level: Math.max(5, startGlycogenPct - 15 + ((carbsG > 100 ? 50 : carbsG) / 500 * 100)) },
-        { time: '6 PM', level: Math.max(5, startGlycogenPct - 25 + ((carbsG > 100 ? 100 : carbsG) / 500 * 100)) },
-        { time: '10 PM', level: endGlycogenPct },
+        { time: '6 AM',  level: Math.round(startGlycogenPct) },
+        { time: '12 PM', level: Math.round(noonPct) },
+        { time: '6 PM',  level: Math.round(pm6Pct) },
+        { time: '10 PM', level: Math.round(endGlycogenPct) },
     ];
 
     return (
