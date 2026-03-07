@@ -380,13 +380,25 @@ const scoreDailyVFTool = ai.defineTool(
     const newEquity = currentEquity + result.score;
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
 
-    // Record equity event
+    // Record equity event with full breakdown for the day-detail view
     await healthService.recordEquityEvent(firestore, input.userId, {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      isoDate: input.localDate,
       gain: result.score,
       status: result.score >= 0 ? 'Bullish' : 'Correction',
       detail: result.summary,
       equity: newEquity,
+      breakdown: {
+        caloriesIn: totalCaloriesIn,
+        caloriesOut: caloriesOut,
+        proteinG: totalProteinG,
+        proteinGoal,
+        fastingHours: input.fastingHours,
+        alcoholDrinks: totalAlcoholDrinks,
+        sleepHours: input.sleepHours,
+        seedOilMeals,
+        ...result.breakdown,
+      },
     });
 
     return { score: result.score, summary: result.summary, newEquity };

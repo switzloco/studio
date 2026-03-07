@@ -8,12 +8,32 @@ import type { FoodLogEntry, ExerciseLogEntry, UserProfile } from './food-exercis
 
 export type { FoodLogEntry, ExerciseLogEntry, UserProfile };
 
+export interface VFBreakdown {
+  caloriesIn: number;
+  caloriesOut: number;
+  proteinG: number;
+  proteinGoal: number;
+  fastingHours: number;
+  alcoholDrinks: number;
+  sleepHours: number;
+  seedOilMeals: number;
+  baseScore: number;
+  fastingOverride: boolean;
+  alcoholCap: boolean;
+  alcoholPenalty: number;
+  cortisolMultiplier: number;
+  seedOilPenalty: number;
+  proteinMet: boolean;
+}
+
 export interface HistoryEntry {
   date: string;
+  isoDate?: string;          // "YYYY-MM-DD" for reliable date lookups
   gain: number;
   status: 'Bullish' | 'Stable' | 'Correction' | 'Bullish Entry';
   detail: string;
   equity: number;
+  breakdown?: VFBreakdown;   // full scoring breakdown for day-detail view
 }
 
 export interface HealthLog {
