@@ -10,6 +10,7 @@ import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import type { HealthData, UserPreferences } from '@/lib/health-service';
+import { calculateDailyVFScore } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { webSearchTool } from '@/ai/tools/web-search';
 
@@ -147,6 +148,8 @@ const logFoodTool = ai.defineTool(
       fiberG: z.number().optional(),
       source: z.enum(['usda', 'web_search', 'user_estimate']),
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+      alcoholDrinks: z.number().optional().describe('Number of alcoholic drinks in this meal (beer, wine, cocktail = 1 each). Default 0.'),
+      hasSeedOils: z.boolean().optional().describe('True if the meal is heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower). Default false.'),
       localDate: z.string(),
     }),
     outputSchema: z.string(),
@@ -172,6 +175,8 @@ const logFoodTool = ai.defineTool(
       fiberG: input.fiberG ?? 0,
       source: input.source,
       meal: input.meal,
+      alcoholDrinks: input.alcoholDrinks ?? 0,
+      hasSeedOils: input.hasSeedOils ?? false,
       date: today,
     });
 
@@ -325,12 +330,75 @@ const getRecentLogsTool = ai.defineTool(
   }
 );
 
+const scoreDailyVFTool = ai.defineTool(
+  {
+    name: 'score_daily_vf',
+    description: `Calculates today's Visceral Fat score using the 5-rule scoring engine. Call this at end-of-day or when the user asks for their daily score. The tool aggregates food logs to determine alcohol intake, seed oil meals, and calorie totals, then applies: (1) caloric deficit base score, (2) fasting multiplier, (3) alcohol freeze, (4) cortisol tax, (5) seed oil penalty. Returns the score and a plain-english breakdown.`,
+    inputSchema: z.object({
+      userId: z.string(),
+      localDate: z.string().describe('YYYY-MM-DD'),
+      fastingHours: z.number().describe('Consecutive clean fasting hours for the day (0 if no fasting protocol)'),
+      sleepHours: z.number().describe('Hours of sleep last night'),
+    }),
+    outputSchema: z.object({
+      score: z.number(),
+      summary: z.string(),
+      newEquity: z.number(),
+    }),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+
+    // Gather day's food logs to compute totals
+    const foodLogs = await healthService.queryFoodLog(firestore, input.userId, input.localDate, 50);
+    const totalCaloriesIn = foodLogs.reduce((s, e) => s + (e.calories || 0), 0);
+    const totalProteinG = foodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
+    const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
+    const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
+
+    // Get current health data for caloriesOut and existing equity
+    const health = await healthService.getHealthSummary(firestore, input.userId);
+    const caloriesOut = health?.dailyCaloriesOut || 2000;
+    const currentEquity = health?.visceralFatPoints || 0;
+
+    // Get protein goal from preferences
+    const prefs = await healthService.getUserPreferences(firestore, input.userId);
+    const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
+
+    const result = calculateDailyVFScore({
+      caloriesIn: totalCaloriesIn,
+      caloriesOut: caloriesOut,
+      proteinG: totalProteinG,
+      proteinGoal,
+      fastingHours: input.fastingHours,
+      alcoholDrinks: totalAlcoholDrinks,
+      sleepHours: input.sleepHours,
+      seedOilMeals,
+    });
+
+    // Apply score to equity
+    const newEquity = currentEquity + result.score;
+    await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
+
+    // Record equity event
+    await healthService.recordEquityEvent(firestore, input.userId, {
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      gain: result.score,
+      status: result.score >= 0 ? 'Bullish' : 'Correction',
+      detail: result.summary,
+      equity: newEquity,
+    });
+
+    return { score: result.score, summary: result.summary, newEquity };
+  }
+);
+
 // --- PROMPT DEFINITION ---
 
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
@@ -388,14 +456,24 @@ COACHING PROTOCOL:
 - If isDeviceVerified is false and the context is right (they mention steps, sleep, HRV), mention Fitbit ONCE per session: "Your step data would be way more reliable with a Fitbit sync. Want to connect one?"
 - Propose a point system tied to their goals. Make it feel custom, not generic.
 
-WORKOUT POINT GUIDE (for logging — self-reported, unverified):
-- Kettlebell swings (45): +15 pts explosiveness
-- Kettlebell swings (100+): +30 pts explosiveness
-- 30-min walk: +10 pts recovery
-- 2-hour bike ride: +50 pts cardio
-- Basketball game: +40 pts conditioning
-- Heavy strength session: +40 pts strength
-- Rest day: 0 pts
+VF DAILY SCORING SYSTEM (the 5 Bylaws — this is the authoritative scoring engine):
+Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation.
+
+Rule 1 — The Caloric Engine: Base score from caloric deficit (max +100 at ~1,000 cal deficit). Protein mandate: cannot claim +100 unless the 150g daily protein target is met. Missing protein caps the positive score at +50.
+Rule 2 — The Fasting Multiplier: A 24+ hour clean fast = automatic +100, bypassing calorie math entirely. 100% of energy comes from stored body fat.
+Rule 3 — The Alcohol Freeze: >2 alcoholic drinks caps the maximum daily score at 0 (fat oxidation halted). If the alcohol also pushes into caloric surplus, penalty drops to -100 to -200.
+Rule 4 — The Cortisol Tax: <6 hours of sleep halves any positive score. A +100 deficit day becomes +50 because cortisol hoards visceral fat.
+Rule 5 — The Seed Oil Penalty: Each meal heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower) deducts -25 "Inflammation Tax."
+
+When logging food (log_food), ALWAYS assess and set:
+- alcoholDrinks: count of alcoholic beverages in the meal (beer/wine/cocktail = 1 each)
+- hasSeedOils: true if the meal is deep-fried, heavily processed, or cooked in seed oils (typical bar food, fast food, packaged snacks)
+
+The MOST PROFITABLE days combine: caloric deficit + 150g protein + fasting protocol + zero alcohol + 8h sleep + no seed oils.
+
+EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but exercise alone does NOT directly add VF points. Exercise increases the caloric deficit which feeds Rule 1. Log exercise via log_exercise to track workouts and estimate calorie burn.
+
+When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
 
 GOAL VALIDATION:
 - If user sets an aggressive weight loss goal, validate it once: "That's ambitious — sustainable loss is 1-2 lb/week. I'll design the point system so if you follow it perfectly, you hit your goal with some slack built in."
