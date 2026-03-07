@@ -16,6 +16,8 @@ export interface FoodLogEntry {
   fiberG: number;
   source: 'usda' | 'web_search' | 'user_estimate';
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  alcoholDrinks?: number;      // number of alcoholic drinks in this entry
+  hasSeedOils?: boolean;       // true if meal contains heavy seed oils / deep-fried
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD" for date-range queries
 }

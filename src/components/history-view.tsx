@@ -1,19 +1,23 @@
 'use client';
 
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Briefcase, BarChart3, TrendingUp, AlertCircle, Loader2, ArrowRight, History as HistoryIcon } from "lucide-react";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { Area, AreaChart, CartesianGrid, XAxis, ResponsiveContainer } from "recharts";
+import React, { useState } from 'react';
+import { Card, CardContent } from "@/components/ui/card";
+import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { HealthData, HealthLog } from '@/lib/health-service';
+import { HealthData, HealthLog, HistoryEntry } from '@/lib/health-service';
+import { VFScoreChart } from './vf-score-chart';
+import { VFHeatmap } from './vf-heatmap';
+import { VFDayDetail } from './vf-day-detail';
 
 export function HistoryView() {
   const { user } = useUser();
   const db = useFirestore();
 
-  // 1. Fetch High-Level Equity Summary (for the chart)
+  const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // 1. Fetch High-Level Equity Summary (for the charts)
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
 
@@ -26,16 +30,18 @@ export function HistoryView() {
   const { data: logs, isLoading: isLogsLoading } = useCollection<HealthLog>(logsQuery);
 
   const history = healthData?.history || [];
-  const chartData = [...history].map(entry => ({ 
-    day: entry.date, 
-    equity: entry.equity 
-  }));
+
+  const handleDayClick = (entry: HistoryEntry) => {
+    setSelectedEntry(entry);
+    setSheetOpen(true);
+  };
 
   if (isHealthLoading || isLogsLoading) {
     return (
       <div className="p-6 sm:p-10 space-y-10">
         <div className="h-10 w-64 bg-muted animate-pulse rounded-xl" />
-        <div className="h-64 bg-muted animate-pulse rounded-2xl" />
+        <div className="h-80 bg-muted animate-pulse rounded-2xl" />
+        <div className="h-48 bg-muted animate-pulse rounded-2xl" />
         <div className="space-y-4">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-20 bg-muted animate-pulse rounded-xl" />
@@ -57,40 +63,12 @@ export function HistoryView() {
         </div>
       </div>
 
-      {/* Equity Growth Curve */}
-      <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
-        <CardHeader className="p-6 pb-0">
-          <CardTitle className="text-[12px] font-black uppercase text-muted-foreground tracking-widest flex items-center gap-3">
-            <BarChart3 className="w-4 h-4" />
-            Equity Growth Curve
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-6 pt-6">
-          {chartData.length > 0 ? (
-            <ChartContainer config={{ equity: { label: "Equity", color: "hsl(var(--primary))" } }} className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 20, right: 20, left: -10, bottom: 0 }}>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--muted))" />
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: '800', opacity: 0.6 }} dy={15} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="equity" 
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={4} 
-                    fillOpacity={0.15} 
-                    fill="url(#colorEquity)" 
-                  />
-                  <defs>
-                    <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartContainer>
-          ) : (
+      {/* VF Score Bar + Cumulative Line Chart */}
+      {history.length > 0 ? (
+        <VFScoreChart history={history} onDayClick={handleDayClick} />
+      ) : (
+        <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+          <CardContent className="p-6">
             <div className="h-72 flex flex-col items-center justify-center text-center gap-4 bg-muted/20 rounded-2xl border-2 border-dashed">
               <AlertCircle className="w-12 h-12 text-muted-foreground opacity-30" />
               <div className="space-y-1">
@@ -98,14 +76,17 @@ export function HistoryView() {
                 <p className="text-xs text-muted-foreground italic px-6 max-w-sm">Transactions will appear here once you begin depositing assets into your ledger.</p>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* VF Heatmap Calendar */}
+      <VFHeatmap history={history} onDayClick={handleDayClick} />
 
       {/* Audit Log (Transactions) */}
       <div className="space-y-6">
         <h3 className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Transaction Ledger</h3>
-        
+
         {logs && logs.length > 0 ? (
           <div className="space-y-4">
             {logs.map((log) => (
@@ -152,6 +133,9 @@ export function HistoryView() {
           </div>
         )}
       </div>
+
+      {/* Day Detail Sheet */}
+      <VFDayDetail entry={selectedEntry} open={sheetOpen} onOpenChange={setSheetOpen} />
     </div>
   );
 }
