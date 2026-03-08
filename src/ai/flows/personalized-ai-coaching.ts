@@ -405,15 +405,16 @@ const scoreDailyVFTool = ai.defineTool(
   }
 );
 
-const deleteLogEntryTool = ai.defineTool(
+const ignoreLogEntryTool = ai.defineTool(
   {
-    name: 'delete_log_entry',
-    description: 'Deletes a food or exercise log entry and reverses its effect on daily totals. Use when the user says they logged something by mistake, wants to remove a duplicate, or needs to correct an entry. Call get_recent_logs first to find the entry ID, then call this tool with that ID.',
+    name: 'ignore_log_entry',
+    description: 'Flags a food or exercise log entry as ignored (soft-delete) or restores it. Ignored entries are excluded from daily totals but preserved for audit trail. Use when the user says they logged something by mistake, wants to remove a duplicate, or needs to correct an entry. Call get_recent_logs first to find the entry ID, then call this tool with that ID.',
     inputSchema: z.object({
       userId: z.string(),
-      entryId: z.string().describe('The Firestore document ID of the entry to delete'),
+      entryId: z.string().describe('The Firestore document ID of the entry'),
       type: z.enum(['food', 'exercise']),
-      localDate: z.string().describe('YYYY-MM-DD — the date of the entry being deleted'),
+      ignored: z.boolean().describe('true to ignore the entry, false to restore it'),
+      localDate: z.string().describe('YYYY-MM-DD — the date of the entry'),
     }),
     outputSchema: z.string(),
   },
@@ -421,43 +422,47 @@ const deleteLogEntryTool = ai.defineTool(
     const firestore = getAdminFirestore();
 
     if (input.type === 'food') {
-      const entry = await healthService.getFoodEntry(firestore, input.userId, input.entryId);
-      if (!entry) return 'Entry not found — it may have already been deleted.';
+      const entry = await healthService.setFoodEntryIgnored(firestore, input.userId, input.entryId, input.ignored);
+      if (!entry) return 'Entry not found — it may have already been removed.';
 
-      // Delete the document
-      await healthService.deleteFoodEntry(firestore, input.userId, input.entryId);
-
-      // Reverse the daily counters
+      // Recalculate today's totals from all non-ignored food entries
       const current = await healthService.getHealthSummary(firestore, input.userId);
       const isToday = current?.lastActiveDate === input.localDate;
       if (isToday) {
-        const newProtein = Math.max(0, (current?.dailyProteinG || 0) - entry.proteinG);
-        const newCarbs = Math.max(0, (current?.dailyCarbsG || 0) - entry.carbsG);
-        const newCalories = Math.max(0, (current?.dailyCaloriesIn || 0) - entry.calories);
+        const activeFoodLogs = await healthService.queryFoodLog(firestore, input.userId, input.localDate, 50);
+        const newProtein = activeFoodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
+        const newCarbs = activeFoodLogs.reduce((s, e) => s + (e.carbsG || 0), 0);
+        const newCalories = activeFoodLogs.reduce((s, e) => s + (e.calories || 0), 0);
         await healthService.updateHealthData(firestore, input.userId, {
           dailyProteinG: newProtein,
           dailyCarbsG: newCarbs,
           dailyCaloriesIn: newCalories,
         });
-        return `Deleted "${entry.name}" and reversed daily totals. New totals -> Protein: ${newProtein}g, Carbs: ${newCarbs}g, Calories: ${newCalories}.`;
+        const action = input.ignored ? 'Ignored' : 'Restored';
+        return `${action} "${entry.name}". Recalculated today's totals -> Protein: ${newProtein}g, Carbs: ${newCarbs}g, Calories: ${newCalories}.`;
       }
 
-      return `Deleted "${entry.name}" from ${input.localDate}. (Not today, so daily counters unchanged.)`;
+      const action = input.ignored ? 'Ignored' : 'Restored';
+      return `${action} "${entry.name}" from ${input.localDate}. (Not today, so daily counters unchanged.)`;
     }
 
     if (input.type === 'exercise') {
-      const entry = await healthService.getExerciseEntry(firestore, input.userId, input.entryId);
-      if (!entry) return 'Entry not found — it may have already been deleted.';
+      const entry = await healthService.setExerciseEntryIgnored(firestore, input.userId, input.entryId, input.ignored);
+      if (!entry) return 'Entry not found — it may have already been removed.';
 
-      // Delete the document
-      await healthService.deleteExerciseEntry(firestore, input.userId, input.entryId);
+      // Recalculate equity from all non-ignored exercise entries for this date
+      const activeExerciseLogs = await healthService.queryExerciseLog(firestore, input.userId, input.localDate, 50);
+      const dayPoints = activeExerciseLogs.reduce((s, e) => s + (e.pointsDelta || 0), 0);
 
-      // Reverse equity points
+      // We can't fully recalculate all-time equity from just today,
+      // but we can adjust by the delta of this entry
       const current = await healthService.getHealthSummary(firestore, input.userId);
-      const newEquity = (current?.visceralFatPoints || 0) - entry.pointsDelta;
+      const adjustment = input.ignored ? -entry.pointsDelta : entry.pointsDelta;
+      const newEquity = (current?.visceralFatPoints || 0) + adjustment;
       await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
 
-      return `Deleted "${entry.name}" and reversed ${entry.pointsDelta} pts. Equity: ${newEquity} pts.`;
+      const action = input.ignored ? 'Ignored' : 'Restored';
+      return `${action} "${entry.name}" (${entry.pointsDelta} pts). Equity: ${newEquity} pts. Today's exercise points: ${dayPoints}.`;
     }
 
     return 'Unknown entry type.';
@@ -469,7 +474,7 @@ const deleteLogEntryTool = ai.defineTool(
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, deleteLogEntryTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
@@ -546,11 +551,12 @@ EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but e
 
 When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
 
-CORRECTIONS & DELETIONS:
-- If the user says they logged something by mistake, wants to remove an entry, or correct a duplicate, call get_recent_logs first to find the entry and its ID, then call delete_log_entry with that ID.
-- After deletion, report the updated daily totals from the tool response.
-- If the user wants to correct an entry (wrong portion, wrong food), delete the old one first, then log the corrected version.
-- Confirm what you are deleting before doing it: "I'll remove the '2 eggs' entry from breakfast — that right?"
+CORRECTIONS & MISTAKES:
+- If the user says they logged something by mistake, wants to remove an entry, or correct a duplicate, call get_recent_logs first to find the entry and its ID, then call ignore_log_entry with ignored=true. The entry stays in the database for audit trail but is excluded from all totals.
+- After ignoring, report the recalculated daily totals from the tool response.
+- If the user wants to correct an entry (wrong portion, wrong food), ignore the old one first, then log the corrected version.
+- If the user changes their mind, call ignore_log_entry with ignored=false to restore it.
+- Confirm what you are ignoring before doing it: "I'll strike the '2 eggs' entry from breakfast — that right?"
 
 GOAL VALIDATION:
 - If user sets an aggressive weight loss goal, validate it once: "That's ambitious — sustainable loss is 1-2 lb/week. I'll design the point system so if you follow it perfectly, you hit your goal with some slack built in."

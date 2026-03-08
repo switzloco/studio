@@ -119,7 +119,9 @@ export const adminHealthService = {
       q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
     const snapshot = await q.get();
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry)
+      .filter(e => !e.ignored);
   },
 
   // --- Structured Exercise Log ---
@@ -139,30 +141,26 @@ export const adminHealthService = {
       q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
     const snapshot = await q.get();
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
+      .filter(e => !e.ignored);
   },
 
-  // --- Delete / Nullify ---
+  // --- Ignore / Unignore (soft-delete) ---
 
-  async getFoodEntry(db: Firestore, userId: string, entryId: string): Promise<FoodLogEntry | null> {
+  async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<FoodLogEntry | null> {
     const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
     const snap = await docRef.get();
-    return snap.exists ? ({ ...snap.data(), id: snap.id } as FoodLogEntry) : null;
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as FoodLogEntry;
   },
 
-  async deleteFoodEntry(db: Firestore, userId: string, entryId: string): Promise<void> {
-    const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
-    await docRef.delete();
-  },
-
-  async getExerciseEntry(db: Firestore, userId: string, entryId: string): Promise<ExerciseLogEntry | null> {
+  async setExerciseEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<ExerciseLogEntry | null> {
     const docRef = db.doc(`users/${userId}/exercise_log/${entryId}`);
     const snap = await docRef.get();
-    return snap.exists ? ({ ...snap.data(), id: snap.id } as ExerciseLogEntry) : null;
-  },
-
-  async deleteExerciseEntry(db: Firestore, userId: string, entryId: string): Promise<void> {
-    const docRef = db.doc(`users/${userId}/exercise_log/${entryId}`);
-    await docRef.delete();
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as ExerciseLogEntry;
   },
 };

@@ -18,6 +18,7 @@ export interface FoodLogEntry {
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   alcoholDrinks?: number;      // number of alcoholic drinks in this entry
   hasSeedOils?: boolean;       // true if meal contains heavy seed oils / deep-fried
+  ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD" for date-range queries
 }
@@ -33,6 +34,7 @@ export interface ExerciseLogEntry {
   estimatedCaloriesBurned?: number;
   pointsDelta: number;
   notes?: string;
+  ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD"
 }
