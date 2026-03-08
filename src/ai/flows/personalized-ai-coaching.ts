@@ -287,12 +287,12 @@ const logExerciseTool = ai.defineTool(
 const getRecentLogsTool = ai.defineTool(
   {
     name: 'get_recent_logs',
-    description: 'Retrieves recent food and/or exercise logs. Use this to check what the user has logged today or recently.',
+    description: 'Retrieves food and/or exercise logs. Use this to check what the user logged today, review recent history, or answer questions about past performance (e.g. heaviest weight lifted, PRs, weekly patterns). Set days=7 for a week, days=30 for a month, etc. Exercise entries include weightKg, sets, reps, durationMin, and category.',
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('The current local date YYYY-MM-DD from the client, used as the anchor for "today"'),
       type: z.enum(['food', 'exercise', 'all']),
-      days: z.number().optional().describe('Number of days to look back, default 1 (today only)'),
+      days: z.number().optional().describe('Number of days to look back, default 1 (today only). Use 7 for a week, 30 for a month, 90 for a quarter.'),
     }),
     outputSchema: z.any(),
   },
@@ -301,33 +301,62 @@ const getRecentLogsTool = ai.defineTool(
     const daysBack = input.days ?? 1;
     const results: any = {};
 
-    // Build date list anchored to the client's local date, not server UTC
-    const dates: string[] = [];
+    // Build date range anchored to the client's local date
     const [year, month, day] = input.localDate.split('-').map(Number);
-    for (let i = 0; i < daysBack; i++) {
-      const d = new Date(year, month - 1, day - i);
-      dates.push(d.toLocaleDateString('en-CA'));
-    }
+    const startDate = new Date(year, month - 1, day - (daysBack - 1));
+    const startDateStr = startDate.toLocaleDateString('en-CA');
+
+    // For short lookbacks (<=7 days), query per-date for accuracy
+    // For longer lookbacks, use date range comparison for efficiency
+    const useDateRange = daysBack > 7;
 
     if (input.type === 'food' || input.type === 'all') {
-      const foodLogs: any[] = [];
-      for (const date of dates) {
-        const entries = await healthService.queryFoodLog(firestore, input.userId, date, 20);
-        foodLogs.push(...entries);
+      let foodLogs: any[];
+      if (useDateRange) {
+        const ref = firestore.collection(`users/${input.userId}/food_log`);
+        const snapshot = await ref
+          .where('date', '>=', startDateStr)
+          .where('date', '<=', input.localDate)
+          .limit(200)
+          .get();
+        foodLogs = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id }))
+          .filter((e: any) => !e.ignored);
+      } else {
+        foodLogs = [];
+        for (let i = 0; i < daysBack; i++) {
+          const d = new Date(year, month - 1, day - i);
+          const entries = await healthService.queryFoodLog(firestore, input.userId, d.toLocaleDateString('en-CA'), 20);
+          foodLogs.push(...entries);
+        }
       }
       results.foodLog = foodLogs;
-      results.dailyProteinTotal = foodLogs.reduce((sum, e) => sum + (e.proteinG || 0), 0);
-      results.dailyCalorieTotal = foodLogs.reduce((sum, e) => sum + (e.calories || 0), 0);
+      results.dailyProteinTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.proteinG || 0), 0);
+      results.dailyCalorieTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.calories || 0), 0);
     }
 
     if (input.type === 'exercise' || input.type === 'all') {
-      const exerciseLogs: any[] = [];
-      for (const date of dates) {
-        const entries = await healthService.queryExerciseLog(firestore, input.userId, date, 20);
-        exerciseLogs.push(...entries);
+      let exerciseLogs: any[];
+      if (useDateRange) {
+        const ref = firestore.collection(`users/${input.userId}/exercise_log`);
+        const snapshot = await ref
+          .where('date', '>=', startDateStr)
+          .where('date', '<=', input.localDate)
+          .limit(200)
+          .get();
+        exerciseLogs = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id }))
+          .filter((e: any) => !e.ignored);
+      } else {
+        exerciseLogs = [];
+        for (let i = 0; i < daysBack; i++) {
+          const d = new Date(year, month - 1, day - i);
+          const entries = await healthService.queryExerciseLog(firestore, input.userId, d.toLocaleDateString('en-CA'), 20);
+          exerciseLogs.push(...entries);
+        }
       }
       results.exerciseLog = exerciseLogs;
-      results.totalPointsToday = exerciseLogs.reduce((sum, e) => sum + (e.pointsDelta || 0), 0);
+      results.totalPointsToday = exerciseLogs.reduce((sum: number, e: any) => sum + (e.pointsDelta || 0), 0);
     }
 
     return results;
@@ -542,6 +571,12 @@ COACHING PROTOCOL:
 - Be PROACTIVE with guidance: suggest meals, workout ideas, or recovery strategies based on what you know about their profile, equipment, and schedule. Lead with the suggestion, not a question.
 - If isDeviceVerified is false and the context is right (they mention steps, sleep, HRV), mention Fitbit ONCE per session: "Your step data would be way more reliable with a Fitbit sync. Want to connect one?"
 - When asked for help planning a meal or workout, give 1-2 concrete options tailored to their profile — not a menu of 5+ generic ideas.
+
+EXERCISE HISTORY & PHYSICAL ABILITIES:
+- The exercise log stores weightKg, sets, reps, durationMin, and category for every logged workout. You have FULL ACCESS to this history via get_recent_logs.
+- When the user asks about their PRs, heaviest lifts, workout history, progress, or physical abilities, call get_recent_logs with type="exercise" and a sufficient lookback (days=30 for a month, days=90 for a quarter, etc.). Then analyze the data and answer their question.
+- Track and celebrate progress: "You pressed 32kg kettlebells last month — up from 24kg in January. That's a 33% equity gain on overhead press."
+- Never say you don't track this data or can't answer. The data is there — just query it.
 
 VF DAILY SCORING SYSTEM (the 5 Bylaws — this is the authoritative scoring engine):
 Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation.
