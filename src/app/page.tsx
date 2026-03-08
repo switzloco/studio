@@ -1,11 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatInterface } from '@/components/chat-interface';
-import { DashboardCards } from '@/components/dashboard-cards';
-import { HistoryView } from '@/components/history-view';
-import { PreferencesView } from '@/components/preferences-view';
-import { Briefcase, Settings, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWithPopup } from 'firebase/auth';
@@ -25,6 +22,19 @@ import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
 import { syncFitbitData, getFitbitLastSyncedAt } from '@/app/actions/fitbit';
 
+const ChatInterface = dynamic(() => import('@/components/chat-interface').then(m => ({ default: m.ChatInterface })), {
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+const DashboardCards = dynamic(() => import('@/components/dashboard-cards').then(m => ({ default: m.DashboardCards })), {
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+const HistoryView = dynamic(() => import('@/components/history-view').then(m => ({ default: m.HistoryView })), {
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+const PreferencesView = dynamic(() => import('@/components/preferences-view').then(m => ({ default: m.PreferencesView })), {
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+
 /** Must match SYNC_INTERVAL_MS in fitbit-sync.ts — 6 hours. */
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -33,6 +43,7 @@ export default function Home() {
   const auth = useAuth();
   const db = useFirestore();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState('chat');
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const hasSyncedFitbit = useRef(false);
@@ -263,20 +274,28 @@ export default function Home() {
       </header>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <Tabs defaultValue="chat" className="flex-1 flex flex-col h-full overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full overflow-hidden">
           <div className="flex-1 relative overflow-hidden h-full">
-            <TabsContent value="chat" className="h-full w-full m-0 absolute inset-0 flex flex-col data-[state=inactive]:hidden">
-              <ChatInterface />
-            </TabsContent>
-            <TabsContent value="daily" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
-              <DashboardCards data={healthData} isLoading={isHealthLoading} />
-            </TabsContent>
-            <TabsContent value="history" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
-              <HistoryView />
-            </TabsContent>
-            <TabsContent value="assets" className="h-full w-full m-0 absolute inset-0 overflow-y-auto data-[state=inactive]:hidden">
-              <PreferencesView />
-            </TabsContent>
+            {activeTab === 'chat' && (
+              <div className="h-full w-full absolute inset-0 flex flex-col">
+                <ChatInterface />
+              </div>
+            )}
+            {activeTab === 'daily' && (
+              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+                <DashboardCards data={healthData} isLoading={isHealthLoading} />
+              </div>
+            )}
+            {activeTab === 'history' && (
+              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+                <HistoryView />
+              </div>
+            )}
+            {activeTab === 'assets' && (
+              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+                <PreferencesView />
+              </div>
+            )}
           </div>
 
           <TabsList className="grid grid-cols-4 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
