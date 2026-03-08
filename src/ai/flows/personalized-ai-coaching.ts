@@ -150,6 +150,7 @@ const logFoodTool = ai.defineTool(
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
       alcoholDrinks: z.number().optional().describe('Number of alcoholic drinks in this meal (beer, wine, cocktail = 1 each). Default 0.'),
       hasSeedOils: z.boolean().optional().describe('True if the meal is heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower). Default false.'),
+      consumedAt: z.string().optional().describe('HH:MM (24h) — when the user actually ate this. Infer from context (e.g. "I had lunch at noon" -> "12:00"). If unknown, use the current localTime.'),
       localDate: z.string(),
     }),
     outputSchema: z.string(),
@@ -177,6 +178,7 @@ const logFoodTool = ai.defineTool(
       meal: input.meal,
       alcoholDrinks: input.alcoholDrinks ?? 0,
       hasSeedOils: input.hasSeedOils ?? false,
+      consumedAt: input.consumedAt,
       date: today,
     });
 
@@ -225,6 +227,7 @@ const logExerciseTool = ai.defineTool(
       estimatedCaloriesBurned: z.number().optional(),
       pointsDelta: z.number().describe('Visceral fat points earned'),
       notes: z.string().optional(),
+      performedAt: z.string().optional().describe('HH:MM (24h) — when the user actually did this exercise. Infer from context. If unknown, use the current localTime.'),
       localDate: z.string(),
     }),
     outputSchema: z.string(),
@@ -250,6 +253,7 @@ const logExerciseTool = ai.defineTool(
       estimatedCaloriesBurned: input.estimatedCaloriesBurned,
       pointsDelta: input.pointsDelta,
       notes: input.notes,
+      performedAt: input.performedAt,
       date: today,
     });
 
@@ -524,6 +528,11 @@ RESEARCH PROTOCOL:
   Cite the source in your reply.
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
+
+CONSUMPTION TIME:
+- When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
+- When logging exercise via log_exercise, ALWAYS set performedAt using the same logic.
+- The ledger displays consumedAt/performedAt to the user, NOT the time of entry, so getting this right matters.
 
 COACHING PROTOCOL:
 - After calling log_food or log_exercise, report ONLY the daily totals returned by the tool. Never compute running totals from chat history — the tool has the authoritative database value and handles day resets.
