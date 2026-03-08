@@ -150,6 +150,7 @@ const logFoodTool = ai.defineTool(
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
       alcoholDrinks: z.number().optional().describe('Number of alcoholic drinks in this meal (beer, wine, cocktail = 1 each). Default 0.'),
       hasSeedOils: z.boolean().optional().describe('True if the meal is heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower). Default false.'),
+      consumedAt: z.string().optional().describe('HH:MM (24h) — when the user actually ate this. Infer from context (e.g. "I had lunch at noon" -> "12:00"). If unknown, use the current localTime.'),
       localDate: z.string(),
     }),
     outputSchema: z.string(),
@@ -177,6 +178,7 @@ const logFoodTool = ai.defineTool(
       meal: input.meal,
       alcoholDrinks: input.alcoholDrinks ?? 0,
       hasSeedOils: input.hasSeedOils ?? false,
+      consumedAt: input.consumedAt,
       date: today,
     });
 
@@ -225,6 +227,7 @@ const logExerciseTool = ai.defineTool(
       estimatedCaloriesBurned: z.number().optional(),
       pointsDelta: z.number().describe('Visceral fat points earned'),
       notes: z.string().optional(),
+      performedAt: z.string().optional().describe('HH:MM (24h) — when the user actually did this exercise. Infer from context. If unknown, use the current localTime.'),
       localDate: z.string(),
     }),
     outputSchema: z.string(),
@@ -250,6 +253,7 @@ const logExerciseTool = ai.defineTool(
       estimatedCaloriesBurned: input.estimatedCaloriesBurned,
       pointsDelta: input.pointsDelta,
       notes: input.notes,
+      performedAt: input.performedAt,
       date: today,
     });
 
@@ -283,12 +287,12 @@ const logExerciseTool = ai.defineTool(
 const getRecentLogsTool = ai.defineTool(
   {
     name: 'get_recent_logs',
-    description: 'Retrieves recent food and/or exercise logs. Use this to check what the user has logged today or recently.',
+    description: 'Retrieves food and/or exercise logs. Use this to check what the user logged today, review recent history, or answer questions about past performance (e.g. heaviest weight lifted, PRs, weekly patterns). Set days=7 for a week, days=30 for a month, etc. Exercise entries include weightKg, sets, reps, durationMin, and category.',
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('The current local date YYYY-MM-DD from the client, used as the anchor for "today"'),
       type: z.enum(['food', 'exercise', 'all']),
-      days: z.number().optional().describe('Number of days to look back, default 1 (today only)'),
+      days: z.number().optional().describe('Number of days to look back, default 1 (today only). Use 7 for a week, 30 for a month, 90 for a quarter.'),
     }),
     outputSchema: z.any(),
   },
@@ -297,33 +301,62 @@ const getRecentLogsTool = ai.defineTool(
     const daysBack = input.days ?? 1;
     const results: any = {};
 
-    // Build date list anchored to the client's local date, not server UTC
-    const dates: string[] = [];
+    // Build date range anchored to the client's local date
     const [year, month, day] = input.localDate.split('-').map(Number);
-    for (let i = 0; i < daysBack; i++) {
-      const d = new Date(year, month - 1, day - i);
-      dates.push(d.toLocaleDateString('en-CA'));
-    }
+    const startDate = new Date(year, month - 1, day - (daysBack - 1));
+    const startDateStr = startDate.toLocaleDateString('en-CA');
+
+    // For short lookbacks (<=7 days), query per-date for accuracy
+    // For longer lookbacks, use date range comparison for efficiency
+    const useDateRange = daysBack > 7;
 
     if (input.type === 'food' || input.type === 'all') {
-      const foodLogs: any[] = [];
-      for (const date of dates) {
-        const entries = await healthService.queryFoodLog(firestore, input.userId, date, 20);
-        foodLogs.push(...entries);
+      let foodLogs: any[];
+      if (useDateRange) {
+        const ref = firestore.collection(`users/${input.userId}/food_log`);
+        const snapshot = await ref
+          .where('date', '>=', startDateStr)
+          .where('date', '<=', input.localDate)
+          .limit(200)
+          .get();
+        foodLogs = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id }))
+          .filter((e: any) => !e.ignored);
+      } else {
+        foodLogs = [];
+        for (let i = 0; i < daysBack; i++) {
+          const d = new Date(year, month - 1, day - i);
+          const entries = await healthService.queryFoodLog(firestore, input.userId, d.toLocaleDateString('en-CA'), 20);
+          foodLogs.push(...entries);
+        }
       }
       results.foodLog = foodLogs;
-      results.dailyProteinTotal = foodLogs.reduce((sum, e) => sum + (e.proteinG || 0), 0);
-      results.dailyCalorieTotal = foodLogs.reduce((sum, e) => sum + (e.calories || 0), 0);
+      results.dailyProteinTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.proteinG || 0), 0);
+      results.dailyCalorieTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.calories || 0), 0);
     }
 
     if (input.type === 'exercise' || input.type === 'all') {
-      const exerciseLogs: any[] = [];
-      for (const date of dates) {
-        const entries = await healthService.queryExerciseLog(firestore, input.userId, date, 20);
-        exerciseLogs.push(...entries);
+      let exerciseLogs: any[];
+      if (useDateRange) {
+        const ref = firestore.collection(`users/${input.userId}/exercise_log`);
+        const snapshot = await ref
+          .where('date', '>=', startDateStr)
+          .where('date', '<=', input.localDate)
+          .limit(200)
+          .get();
+        exerciseLogs = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id }))
+          .filter((e: any) => !e.ignored);
+      } else {
+        exerciseLogs = [];
+        for (let i = 0; i < daysBack; i++) {
+          const d = new Date(year, month - 1, day - i);
+          const entries = await healthService.queryExerciseLog(firestore, input.userId, d.toLocaleDateString('en-CA'), 20);
+          exerciseLogs.push(...entries);
+        }
       }
       results.exerciseLog = exerciseLogs;
-      results.totalPointsToday = exerciseLogs.reduce((sum, e) => sum + (e.pointsDelta || 0), 0);
+      results.totalPointsToday = exerciseLogs.reduce((sum: number, e: any) => sum + (e.pointsDelta || 0), 0);
     }
 
     return results;
@@ -483,7 +516,8 @@ SYSTEM IDENTIFIERS (never display these to the client):
 
 PERSONA:
 - 2-3 sentences per response unless the client asks for detail.
-- Ask exactly ONE question per turn. Never stack questions.
+- Be a COACH, not an interviewer. Default to giving guidance, suggestions, or observations rather than asking questions. Only ask a question when you genuinely need information to proceed.
+- When the client logs a meal, respond with their totals and proactively offer a helpful suggestion: a meal idea to hit their protein target, a timing tip, or a quick win for the rest of the day. Don't ask "what's next?" — tell them what would be smart next.
 - Address the client as {{{userName}}} or "Partner."
 - No bullet dumps, no raw JSON, no code blocks, no asterisk formatting.
 - Financial metaphors: protein = liquidity/assets, visceral fat = liabilities, workouts = equity injections, rest = capital preservation.
@@ -525,12 +559,24 @@ RESEARCH PROTOCOL:
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
+CONSUMPTION TIME:
+- When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
+- When logging exercise via log_exercise, ALWAYS set performedAt using the same logic.
+- The ledger displays consumedAt/performedAt to the user, NOT the time of entry, so getting this right matters.
+
 COACHING PROTOCOL:
 - After calling log_food or log_exercise, report ONLY the daily totals returned by the tool. Never compute running totals from chat history — the tool has the authoritative database value and handles day resets.
-- Track protein against their goal. Mention the gap naturally.
+- Track protein against their goal. Mention the gap naturally, then suggest a concrete way to close it: "You're 98g short — a chicken breast and a protein shake at lunch would nearly close that gap."
 - When they report exercise, estimate calorie burn and log it. Reference their equipment and schedule.
+- Be PROACTIVE with guidance: suggest meals, workout ideas, or recovery strategies based on what you know about their profile, equipment, and schedule. Lead with the suggestion, not a question.
 - If isDeviceVerified is false and the context is right (they mention steps, sleep, HRV), mention Fitbit ONCE per session: "Your step data would be way more reliable with a Fitbit sync. Want to connect one?"
-- Propose a point system tied to their goals. Make it feel custom, not generic.
+- When asked for help planning a meal or workout, give 1-2 concrete options tailored to their profile — not a menu of 5+ generic ideas.
+
+EXERCISE HISTORY & PHYSICAL ABILITIES:
+- The exercise log stores weightKg, sets, reps, durationMin, and category for every logged workout. You have FULL ACCESS to this history via get_recent_logs.
+- When the user asks about their PRs, heaviest lifts, workout history, progress, or physical abilities, call get_recent_logs with type="exercise" and a sufficient lookback (days=30 for a month, days=90 for a quarter, etc.). Then analyze the data and answer their question.
+- Track and celebrate progress: "You pressed 32kg kettlebells last month — up from 24kg in January. That's a 33% equity gain on overhead press."
+- Never say you don't track this data or can't answer. The data is there — just query it.
 
 VF DAILY SCORING SYSTEM (the 5 Bylaws — this is the authoritative scoring engine):
 Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation.

@@ -19,6 +19,7 @@ export interface FoodLogEntry {
   alcoholDrinks?: number;      // number of alcoholic drinks in this entry
   hasSeedOils?: boolean;       // true if meal contains heavy seed oils / deep-fried
   ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
+  consumedAt?: string;         // HH:MM (24h) — when the user actually ate, from conversation context
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD" for date-range queries
 }
@@ -35,6 +36,7 @@ export interface ExerciseLogEntry {
   pointsDelta: number;
   notes?: string;
   ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
+  performedAt?: string;        // HH:MM (24h) — when the user actually exercised, from conversation context
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD"
 }
