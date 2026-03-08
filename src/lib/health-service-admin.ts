@@ -119,7 +119,9 @@ export const adminHealthService = {
       q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
     const snapshot = await q.get();
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry)
+      .filter(e => !e.ignored);
   },
 
   // --- Structured Exercise Log ---
@@ -139,6 +141,26 @@ export const adminHealthService = {
       q = q.orderBy('timestamp', 'desc').limit(limitCount);
     }
     const snapshot = await q.get();
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
+      .filter(e => !e.ignored);
+  },
+
+  // --- Ignore / Unignore (soft-delete) ---
+
+  async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<FoodLogEntry | null> {
+    const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as FoodLogEntry;
+  },
+
+  async setExerciseEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<ExerciseLogEntry | null> {
+    const docRef = db.doc(`users/${userId}/exercise_log/${entryId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as ExerciseLogEntry;
   },
 };

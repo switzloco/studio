@@ -208,7 +208,9 @@ export const healthService = {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry)
+      .filter(e => !e.ignored);
   },
 
   // --- Structured Exercise Log ---
@@ -232,6 +234,8 @@ export const healthService = {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
+      .filter(e => !e.ignored);
   }
 };
