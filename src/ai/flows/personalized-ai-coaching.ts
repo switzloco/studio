@@ -405,12 +405,71 @@ const scoreDailyVFTool = ai.defineTool(
   }
 );
 
+const deleteLogEntryTool = ai.defineTool(
+  {
+    name: 'delete_log_entry',
+    description: 'Deletes a food or exercise log entry and reverses its effect on daily totals. Use when the user says they logged something by mistake, wants to remove a duplicate, or needs to correct an entry. Call get_recent_logs first to find the entry ID, then call this tool with that ID.',
+    inputSchema: z.object({
+      userId: z.string(),
+      entryId: z.string().describe('The Firestore document ID of the entry to delete'),
+      type: z.enum(['food', 'exercise']),
+      localDate: z.string().describe('YYYY-MM-DD — the date of the entry being deleted'),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+
+    if (input.type === 'food') {
+      const entry = await healthService.getFoodEntry(firestore, input.userId, input.entryId);
+      if (!entry) return 'Entry not found — it may have already been deleted.';
+
+      // Delete the document
+      await healthService.deleteFoodEntry(firestore, input.userId, input.entryId);
+
+      // Reverse the daily counters
+      const current = await healthService.getHealthSummary(firestore, input.userId);
+      const isToday = current?.lastActiveDate === input.localDate;
+      if (isToday) {
+        const newProtein = Math.max(0, (current?.dailyProteinG || 0) - entry.proteinG);
+        const newCarbs = Math.max(0, (current?.dailyCarbsG || 0) - entry.carbsG);
+        const newCalories = Math.max(0, (current?.dailyCaloriesIn || 0) - entry.calories);
+        await healthService.updateHealthData(firestore, input.userId, {
+          dailyProteinG: newProtein,
+          dailyCarbsG: newCarbs,
+          dailyCaloriesIn: newCalories,
+        });
+        return `Deleted "${entry.name}" and reversed daily totals. New totals -> Protein: ${newProtein}g, Carbs: ${newCarbs}g, Calories: ${newCalories}.`;
+      }
+
+      return `Deleted "${entry.name}" from ${input.localDate}. (Not today, so daily counters unchanged.)`;
+    }
+
+    if (input.type === 'exercise') {
+      const entry = await healthService.getExerciseEntry(firestore, input.userId, input.entryId);
+      if (!entry) return 'Entry not found — it may have already been deleted.';
+
+      // Delete the document
+      await healthService.deleteExerciseEntry(firestore, input.userId, input.entryId);
+
+      // Reverse equity points
+      const current = await healthService.getHealthSummary(firestore, input.userId);
+      const newEquity = (current?.visceralFatPoints || 0) - entry.pointsDelta;
+      await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
+
+      return `Deleted "${entry.name}" and reversed ${entry.pointsDelta} pts. Equity: ${newEquity} pts.`;
+    }
+
+    return 'Unknown entry type.';
+  }
+);
+
 // --- PROMPT DEFINITION ---
 
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, deleteLogEntryTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
@@ -486,6 +545,12 @@ The MOST PROFITABLE days combine: caloric deficit + 150g protein + fasting proto
 EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but exercise alone does NOT directly add VF points. Exercise increases the caloric deficit which feeds Rule 1. Log exercise via log_exercise to track workouts and estimate calorie burn.
 
 When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
+
+CORRECTIONS & DELETIONS:
+- If the user says they logged something by mistake, wants to remove an entry, or correct a duplicate, call get_recent_logs first to find the entry and its ID, then call delete_log_entry with that ID.
+- After deletion, report the updated daily totals from the tool response.
+- If the user wants to correct an entry (wrong portion, wrong food), delete the old one first, then log the corrected version.
+- Confirm what you are deleting before doing it: "I'll remove the '2 eggs' entry from breakfast — that right?"
 
 GOAL VALIDATION:
 - If user sets an aggressive weight loss goal, validate it once: "That's ambitious — sustainable loss is 1-2 lb/week. I'll design the point system so if you follow it perfectly, you hit your goal with some slack built in."

@@ -141,4 +141,28 @@ export const adminHealthService = {
     const snapshot = await q.get();
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry);
   },
+
+  // --- Delete / Nullify ---
+
+  async getFoodEntry(db: Firestore, userId: string, entryId: string): Promise<FoodLogEntry | null> {
+    const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
+    const snap = await docRef.get();
+    return snap.exists ? ({ ...snap.data(), id: snap.id } as FoodLogEntry) : null;
+  },
+
+  async deleteFoodEntry(db: Firestore, userId: string, entryId: string): Promise<void> {
+    const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
+    await docRef.delete();
+  },
+
+  async getExerciseEntry(db: Firestore, userId: string, entryId: string): Promise<ExerciseLogEntry | null> {
+    const docRef = db.doc(`users/${userId}/exercise_log/${entryId}`);
+    const snap = await docRef.get();
+    return snap.exists ? ({ ...snap.data(), id: snap.id } as ExerciseLogEntry) : null;
+  },
+
+  async deleteExerciseEntry(db: Firestore, userId: string, entryId: string): Promise<void> {
+    const docRef = db.doc(`users/${userId}/exercise_log/${entryId}`);
+    await docRef.delete();
+  },
 };
