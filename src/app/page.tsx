@@ -23,15 +23,19 @@ import { healthService, HealthData } from '@/lib/health-service';
 import { syncFitbitData, getFitbitLastSyncedAt } from '@/app/actions/fitbit';
 
 const ChatInterface = dynamic(() => import('@/components/chat-interface').then(m => ({ default: m.ChatInterface })), {
+  ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 const DashboardCards = dynamic(() => import('@/components/dashboard-cards').then(m => ({ default: m.DashboardCards })), {
+  ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 const HistoryView = dynamic(() => import('@/components/history-view').then(m => ({ default: m.HistoryView })), {
+  ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 const PreferencesView = dynamic(() => import('@/components/preferences-view').then(m => ({ default: m.PreferencesView })), {
+  ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 
