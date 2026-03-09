@@ -58,6 +58,7 @@ const getUserContextTool = ai.defineTool(
     // yesterday's logged intake as today's data.
     const isNewDay = health?.lastActiveDate !== today;
     return {
+      today: today,
       preferences: prefs,
       health: {
         dailyProteinG: isNewDay ? 0 : (health?.dailyProteinG ?? 0),
@@ -163,9 +164,8 @@ const logFoodTool = ai.defineTool(
     if (!validated.success) throw new Error(validated.error.errors[0].message);
 
     const firestore = getAdminFirestore();
-    const today = new Date().toISOString().split('T')[0];
 
-    // Write to structured food_log
+    // Write to structured food_log — use the client's localDate, NOT server UTC
     await healthService.logFood(firestore, input.userId, {
       name: input.name,
       portionG: input.portionG,
@@ -179,7 +179,7 @@ const logFoodTool = ai.defineTool(
       alcoholDrinks: input.alcoholDrinks ?? 0,
       hasSeedOils: input.hasSeedOils ?? false,
       consumedAt: input.consumedAt,
-      date: today,
+      date: input.localDate,
     });
 
     // Update daily protein, carbs, calories counter on user doc
@@ -330,9 +330,17 @@ const getRecentLogsTool = ai.defineTool(
           foodLogs.push(...entries);
         }
       }
-      results.foodLog = foodLogs;
-      results.dailyProteinTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.proteinG || 0), 0);
-      results.dailyCalorieTotal = foodLogs.reduce((sum: number, e: any) => sum + (e.calories || 0), 0);
+      // Group by date so the AI can clearly distinguish days
+      const foodByDate: Record<string, any[]> = {};
+      for (const entry of foodLogs) {
+        const d = entry.date || 'unknown';
+        if (!foodByDate[d]) foodByDate[d] = [];
+        foodByDate[d].push(entry);
+      }
+      results.foodByDate = foodByDate;
+      results.todayFood = foodByDate[input.localDate] || [];
+      results.todayProteinTotal = results.todayFood.reduce((sum: number, e: any) => sum + (e.proteinG || 0), 0);
+      results.todayCalorieTotal = results.todayFood.reduce((sum: number, e: any) => sum + (e.calories || 0), 0);
     }
 
     if (input.type === 'exercise' || input.type === 'all') {
@@ -355,10 +363,20 @@ const getRecentLogsTool = ai.defineTool(
           exerciseLogs.push(...entries);
         }
       }
-      results.exerciseLog = exerciseLogs;
-      results.totalPointsToday = exerciseLogs.reduce((sum: number, e: any) => sum + (e.pointsDelta || 0), 0);
+      // Group by date
+      const exerciseByDate: Record<string, any[]> = {};
+      for (const entry of exerciseLogs) {
+        const d = entry.date || 'unknown';
+        if (!exerciseByDate[d]) exerciseByDate[d] = [];
+        exerciseByDate[d].push(entry);
+      }
+      results.exerciseByDate = exerciseByDate;
+      results.todayExercise = exerciseByDate[input.localDate] || [];
+      results.todayPointsTotal = results.todayExercise.reduce((sum: number, e: any) => sum + (e.pointsDelta || 0), 0);
     }
 
+    results.queryDate = input.localDate;
+    results.daysQueried = daysBack;
     return results;
   }
 );
