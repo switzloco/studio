@@ -9,10 +9,11 @@ import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightnin
 import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
-import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
-import { doc } from 'firebase/firestore';
+import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
+import type { FoodLogEntry } from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -48,6 +49,33 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user]
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
+
+  // Compute today's protein/calorie totals from the actual food log (source of truth)
+  const todayStr = React.useMemo(() => {
+    const now = new Date();
+    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+  }, []);
+
+  const foodLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'food_log'),
+      where('date', '==', todayStr),
+      limit(50)
+    ) : null,
+    [db, user, todayStr]
+  );
+  const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
+
+  // Sum from non-ignored entries
+  const computedTotals = React.useMemo(() => {
+    if (!todayFoodLogs) return null;
+    const active = todayFoodLogs.filter(e => !e.ignored);
+    return {
+      proteinG: active.reduce((s, e) => s + (e.proteinG || 0), 0),
+      caloriesIn: active.reduce((s, e) => s + (e.calories || 0), 0),
+      carbsG: active.reduce((s, e) => s + (e.carbsG || 0), 0),
+    };
+  }, [todayFoodLogs]);
 
   const [isSyncing, setIsSyncing] = React.useState(false);
 
@@ -94,14 +122,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     );
   }
 
-  const now = new Date();
-  const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
-  const isNewDay = data.lastActiveDate !== localDate;
-
-  // User-logged intake resets on a new day (nothing eaten yet).
-  const dailyProteinG = isNewDay ? 0 : (data.dailyProteinG || 0);
-  const dailyCaloriesIn = isNewDay ? 0 : (data.dailyCaloriesIn || 0);
-  const dailyCarbsG = isNewDay ? 0 : (data.dailyCarbsG || 0);
+  // Use computed totals from food_log (accurate) or fall back to user doc counter
+  const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
+  const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
+  const dailyCarbsG = computedTotals?.carbsG ?? (data.dailyCarbsG || 0);
   // Fitbit calorie burn is device-sourced — use it whenever available, even on a new day.
   const dailyCaloriesOut = data.dailyCaloriesOut || 2000;
 
