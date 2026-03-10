@@ -69,6 +69,17 @@ export interface HealthData {
   lastActiveDate?: string;
 }
 
+export interface FoodNickname {
+  nickname: string;          // e.g. "The IPO"
+  description: string;       // e.g. "Double protein shake"
+  items: string[];           // e.g. ["2 scoops whey protein", "almond milk", "banana"]
+  totalCalories: number;
+  totalProteinG: number;
+  totalCarbsG: number;
+  totalFatG: number;
+  meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+}
+
 export interface UserPreferences {
   weeklySchedule: string;
   equipment: string[];
@@ -77,6 +88,7 @@ export interface UserPreferences {
     fatPointsGoal: number;
   };
   profile: UserProfile;
+  foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
 }
 
 export interface FitbitCredentials {
