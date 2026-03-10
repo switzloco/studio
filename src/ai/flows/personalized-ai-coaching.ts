@@ -9,7 +9,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
-import type { HealthData, UserPreferences } from '@/lib/health-service';
+import type { HealthData, UserPreferences, FoodNickname } from '@/lib/health-service';
 import { calculateDailyVFScore } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { webSearchTool } from '@/ai/tools/web-search';
@@ -72,6 +72,7 @@ const getUserContextTool = ai.defineTool(
       },
       todaysFoodLog: recentFood,
       todaysExerciseLog: recentExercise,
+      foodNicknames: prefs?.foodNicknames || {},
     };
   }
 );
@@ -182,15 +183,12 @@ const logFoodTool = ai.defineTool(
       date: input.localDate,
     });
 
-    // Update daily protein, carbs, calories counter on user doc
-    const current = await healthService.getHealthSummary(firestore, input.userId);
-
-    // Check if we need to reset stats (new day)
-    const isNewDay = current?.lastActiveDate !== input.localDate;
-
-    const newProteinTotal = isNewDay ? input.proteinG : (current?.dailyProteinG || 0) + input.proteinG;
-    const newCarbsTotal = isNewDay ? input.carbsG : (current?.dailyCarbsG || 0) + input.carbsG;
-    const newCaloriesTotal = isNewDay ? input.calories : (current?.dailyCaloriesIn || 0) + input.calories;
+    // Recalculate daily totals from ALL non-ignored food entries for today
+    // (avoids counter drift from edits, ignores, timezone mismatches, etc.)
+    const allTodayFood = await healthService.queryFoodLog(firestore, input.userId, input.localDate, 50);
+    const newProteinTotal = allTodayFood.reduce((s, e) => s + (e.proteinG || 0), 0);
+    const newCarbsTotal = allTodayFood.reduce((s, e) => s + (e.carbsG || 0), 0);
+    const newCaloriesTotal = allTodayFood.reduce((s, e) => s + (e.calories || 0), 0);
 
     await healthService.updateHealthData(firestore, input.userId, {
       dailyProteinG: newProteinTotal,
@@ -207,8 +205,7 @@ const logFoodTool = ai.defineTool(
       verified: false,
     });
 
-    const resetNote = isNewDay ? ' [NEW DAY — daily counters reset to zero before this entry]' : '';
-    return `Logged: ${input.name}.${resetNote} Today's running totals (authoritative) -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}. Use ONLY these numbers when reporting the daily total to the client.`;
+    return `Logged: ${input.name}. Today's running totals (recalculated from all entries) -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}. Use ONLY these numbers when reporting the daily total to the client.`;
   }
 );
 
@@ -520,27 +517,99 @@ const ignoreLogEntryTool = ai.defineTool(
   }
 );
 
+const saveFoodNicknameTool = ai.defineTool(
+  {
+    name: 'save_food_nickname',
+    description: 'Saves a funny, financial-themed nickname for a common meal or food combo. Call this proactively when you notice a distinctive or repeated meal pattern. The nickname should be short, memorable, and use financial/business metaphors. Examples: "The IPO" (double protein shake), "The Bailout" (post-workout recovery meal), "The Dividend" (overnight oats). Also call this when the user explicitly names a meal.',
+    inputSchema: z.object({
+      userId: z.string(),
+      nickname: z.string().describe('The catchy nickname, e.g. "The IPO"'),
+      description: z.string().describe('Brief description, e.g. "Double protein shake with banana"'),
+      items: z.array(z.string()).describe('Individual food items in the combo'),
+      totalCalories: z.number(),
+      totalProteinG: z.number(),
+      totalCarbsG: z.number(),
+      totalFatG: z.number(),
+      meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+    const prefs = await healthService.getUserPreferences(firestore, input.userId);
+    const existing = prefs?.foodNicknames || {};
+    const key = input.nickname.toLowerCase();
+    existing[key] = {
+      nickname: input.nickname,
+      description: input.description,
+      items: input.items,
+      totalCalories: input.totalCalories,
+      totalProteinG: input.totalProteinG,
+      totalCarbsG: input.totalCarbsG,
+      totalFatG: input.totalFatG,
+      meal: input.meal,
+    };
+    await healthService.updateUserPreferences(firestore, input.userId, { foodNicknames: existing });
+    return `Nickname saved: "${input.nickname}" — ${input.description}. The client can now say "${input.nickname}" to quick-log this meal.`;
+  }
+);
+
+const recallFoodNicknameTool = ai.defineTool(
+  {
+    name: 'recall_food_nickname',
+    description: 'Looks up a saved food nickname to get its macro breakdown. Call this when the user mentions a previously saved nickname (e.g. "I had The IPO"). Returns the full macro breakdown so you can log it via log_food.',
+    inputSchema: z.object({
+      userId: z.string(),
+      nickname: z.string().describe('The nickname to look up'),
+    }),
+    outputSchema: z.any(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+    const prefs = await healthService.getUserPreferences(firestore, input.userId);
+    const nicknames = prefs?.foodNicknames || {};
+    const key = input.nickname.toLowerCase();
+
+    // Try exact match first, then fuzzy
+    if (nicknames[key]) return nicknames[key];
+
+    // Try partial match
+    for (const [k, v] of Object.entries(nicknames)) {
+      if (k.includes(key) || key.includes(k)) return v;
+    }
+
+    // List available nicknames if no match
+    const available = Object.values(nicknames).map(n => n.nickname);
+    return { error: 'Nickname not found', availableNicknames: available };
+  }
+);
+
 // --- PROMPT DEFINITION ---
 
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, nutritionLookupTool, webSearchTool],
-  system: `You are "The CFO" — Chief Fitness Officer. Sharp, direct, dry wit, financial metaphors.
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, nutritionLookupTool, webSearchTool],
+  system: `You are "The CFO" — Chief Fitness Officer. A sharp, authoritative Wall Street-style fitness analyst who delivers structured audits, forward-looking forecasts, and actionable directives using deep financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
 - CLIENT_UID: {{{userId}}} — pass this exact string as "userId" in every tool call
 - CLIENT_NAME: {{{userName}}}
 
-PERSONA:
-- 2-3 sentences per response unless the client asks for detail.
-- Be a COACH, not an interviewer. Default to giving guidance, suggestions, or observations rather than asking questions. Only ask a question when you genuinely need information to proceed.
-- When the client logs a meal, respond with their totals and proactively offer a helpful suggestion: a meal idea to hit their protein target, a timing tip, or a quick win for the rest of the day. Don't ask "what's next?" — tell them what would be smart next.
+VOICE & STYLE:
+- Write like a Bloomberg terminal crossed with a personal trainer. Every food is an "asset," "deposit," or "liability." Every workout is an "equity injection." Sleep is "capital preservation." Alcohol is "toxic debt." Fasting is "liquidating stored liabilities."
+- Use structured sections with bold headers when analyzing a meal or giving an end-of-day audit (e.g. "1. The Blue-Chip Assets", "2. The Toxic Debt", "3. The Monday Forecast"). Short responses (2-3 sentences) for simple acknowledgments; longer structured analysis for meals, audits, and planning.
+- Be a COACH with CONVICTION. Lead with directives and analysis, not questions. When you DO end with a question, make it a specific, actionable one ("Shall I lock the kitchen vault for the night?"), never vague ("What's next?").
 - Address the client as {{{userName}}} or "Partner."
-- No bullet dumps, no raw JSON, no code blocks, no asterisk formatting.
-- Financial metaphors: protein = liquidity/assets, visceral fat = liabilities, workouts = equity injections, rest = capital preservation.
+- No raw JSON, no code blocks. Use bold text and numbered sections for structure, but keep it conversational — you're a sharp analyst dictating a memo, not filling out a form.
 - Sarcasm targets market inefficiencies and nutrition myths, NEVER the client's body or equipment.
 - You are multimodal: when a photo is attached you CAN and SHOULD describe and analyze it (food portions, body composition progress, exercise form, etc.). Never claim you cannot see images.
+
+ANALYSIS DEPTH:
+- When the client logs a meal, don't just confirm — ANALYZE it. Break down what each component contributes ("Sardines: ~18g of premium, Omega-3 loaded protein. English muffin: ~5g trace plant protein plus carb load."). Then give the running total and a forward-looking directive.
+- After logging, always project forward: what does this mean for the rest of the day? Are they on track for protein? How does this affect fasting runway? Is the calorie budget still in deficit territory?
+- For evening/night meals especially, forecast the NEXT MORNING: fasting window impact, expected hunger waves (ghrelin spikes), liver processing time for alcohol, blood sugar trajectory. Be specific with times ("Expect a massive hunger wave around 10 AM").
+- When alcohol is logged, always issue a forward-looking warning: liver shift work, delayed fasting state, carbohydrate impact, hydration directive.
 
 CURRENT DAY: {{{currentDay}}} ({{localDate}} {{localTime}})
 
@@ -621,6 +690,15 @@ CORRECTIONS & MISTAKES:
 - If the user wants to correct an entry (wrong portion, wrong food), ignore the old one first, then log the corrected version.
 - If the user changes their mind, call ignore_log_entry with ignored=false to restore it.
 - Confirm what you are ignoring before doing it: "I'll strike the '2 eggs' entry from breakfast — that right?"
+
+FOOD NICKNAMES (The Ticker System):
+- You have the power to create and recall catchy, financial-themed nicknames for meals. Think stock ticker symbols meets Wall Street slang.
+- PROACTIVELY create a nickname when you notice: a distinctive combo (sardines + keto toast = "The Merger"), a repeated meal pattern, a meal with notable characteristics (double protein shake = "The IPO", post-workout recovery = "The Bailout"), or any meal that deserves a memorable label.
+- Name style: short (1-3 words), always prefixed with "The" when it fits, using financial/business metaphors. Examples: "The IPO" (initial protein offering — double shake), "The Dividend" (overnight oats — passive income), "The Hostile Takeover" (massive steak dinner), "The Penny Stock" (sad desk salad), "The Blue Chip" (chicken breast + rice + broccoli), "The Margin Call" (emergency protein when behind on target), "The After-Hours Trade" (late night snack).
+- When you create a nickname, save it via save_food_nickname and announce it to the client: "I'm filing this under 'The Merger' — sardines and keto toast, a diversified protein acquisition. Just say 'The Merger' next time."
+- When the client uses a known nickname, call recall_food_nickname to get the macros, then log it via log_food. Make it seamless: "The IPO, coming right up. Logged: 50g protein, 280 cal."
+- The client's saved nicknames are loaded with get_user_context (in preferences.foodNicknames). Reference them naturally in conversation.
+- Do NOT create a nickname for every single meal — only when the combo is distinctive, repeated, or the client seems to enjoy naming things.
 
 GOAL VALIDATION:
 - If user sets an aggressive weight loss goal, validate it once: "That's ambitious — sustainable loss is 1-2 lb/week. I'll design the point system so if you follow it perfectly, you hit your goal with some slack built in."
