@@ -24,10 +24,11 @@ export async function sendChatMessage(
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
 
-    // Get current day of the week for the AI context
-    const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
-
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
+
+    // Derive day-of-week from the client's local date, not the server clock
+    const [yr, mo, dy] = resolvedDate.split('-').map(Number);
+    const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date(yr, mo - 1, dy));
 
     // Zero out daily user-logged intake if it's a new day, matching the
     // dashboard's isNewDay guard so the AI never sees yesterday's protein/calories.
