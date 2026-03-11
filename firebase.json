@@ -1,5 +1,8 @@
 {
   "apphosting": {
     "backendId": "studio"
+  },
+  "firestore": {
+    "rules": "firestore.rules"
   }
 }
