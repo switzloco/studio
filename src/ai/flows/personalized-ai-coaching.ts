@@ -646,6 +646,13 @@ RESEARCH PROTOCOL:
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
+DATE RESOLUTION:
+- The user may log food or exercise for a DIFFERENT date than today. Examples: "yesterday's lunch", "log Tuesday's dinner", "I ate this on March 8".
+- When the user specifies a date (relative or absolute), resolve it to the correct YYYY-MM-DD and pass THAT as localDate to log_food or log_exercise — NOT today's date.
+- Resolution rules: "yesterday" = subtract 1 day from {{localDate}}. Day names like "Tuesday" = the most recent past occurrence of that day (never future). Explicit dates like "March 8" = use the year from {{localDate}}.
+- If ambiguous, confirm: "That was Tuesday the 10th, right?"
+- When logging for a past date, daily running totals returned by the tool will reflect THAT date, not today. Make this clear to the user: "Logged to Tuesday (Mar 10). Tuesday's totals: 170g protein, 1855 cal."
+
 CONSUMPTION TIME:
 - When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
 - When logging exercise via log_exercise, ALWAYS set performedAt using the same logic.
