@@ -4,6 +4,12 @@
 # Secrets injected into the Cloud Run container at runtime.
 # Store the value first: firebase apphosting:secrets:set CRON_SECRET
 env:
+  - variable: GOOGLE_GENAI_API_KEY
+    secret: GOOGLE_GENAI_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: CRON_SECRET
     secret: CRON_SECRET
     availability:
