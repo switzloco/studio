@@ -48,17 +48,44 @@ const getUserContextTool = ai.defineTool(
   async (input) => {
     const firestore = getAdminFirestore();
     const today = input.localDate;
-    const [prefs, health, recentFood, recentExercise] = await Promise.all([
+
+    // Compute yesterday's date string for checking prior-day intake
+    const [y, m, d] = today.split('-').map(Number);
+    const yesterdayDate = new Date(y, m - 1, d - 1);
+    const yesterday = yesterdayDate.toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+    const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds] = await Promise.all([
       healthService.getUserPreferences(firestore, input.userId),
       healthService.getHealthSummary(firestore, input.userId),
       healthService.queryFoodLog(firestore, input.userId, today, 10),
       healthService.queryExerciseLog(firestore, input.userId, today, 10),
+      healthService.queryFoodLog(firestore, input.userId, yesterday, 10),
+      healthService.getFitbitCredentials(firestore, input.userId),
     ]);
     // Apply the same isNewDay guard the dashboard uses so the AI never sees
     // yesterday's logged intake as today's data.
     const isNewDay = health?.lastActiveDate !== today;
+
+    // Fitbit sync status
+    const fitbitStatus: {
+      connected: boolean;
+      lastSyncedAt?: number;
+      lastSyncedAgo?: string;
+      tokenExpired?: boolean;
+    } = { connected: false };
+    if (fitbitCreds) {
+      fitbitStatus.connected = true;
+      fitbitStatus.lastSyncedAt = fitbitCreds.lastSyncedAt;
+      fitbitStatus.tokenExpired = Date.now() >= fitbitCreds.expiresAt;
+      if (fitbitCreds.lastSyncedAt) {
+        const hoursAgo = Math.round((Date.now() - fitbitCreds.lastSyncedAt) / (1000 * 60 * 60));
+        fitbitStatus.lastSyncedAgo = hoursAgo <= 1 ? 'just now' : `${hoursAgo}h ago`;
+      }
+    }
+
     return {
       today: today,
+      yesterday: yesterday,
       preferences: prefs,
       health: {
         dailyProteinG: isNewDay ? 0 : (health?.dailyProteinG ?? 0),
@@ -70,8 +97,13 @@ const getUserContextTool = ai.defineTool(
         weightKg: health?.weightKg,
         heightCm: health?.heightCm,
       },
+      fitbitSync: fitbitStatus,
       todaysFoodLog: recentFood,
       todaysExerciseLog: recentExercise,
+      yesterdaysFoodLog: yesterdayFood,
+      yesterdaysFoodCount: yesterdayFood.length,
+      yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
+      yesterdaysCalorieTotal: yesterdayFood.reduce((s, e) => s + (e.calories || 0), 0),
       foodNicknames: prefs?.foodNicknames || {},
     };
   }
@@ -650,6 +682,14 @@ CONSUMPTION TIME:
 - When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
 - When logging exercise via log_exercise, ALWAYS set performedAt using the same logic.
 - The ledger displays consumedAt/performedAt to the user, NOT the time of entry, so getting this right matters.
+
+SITUATIONAL AWARENESS (check these on every __init__ via get_user_context):
+
+1. FITBIT SYNC HEALTH: If fitbitSync.connected is true but fitbitSync.tokenExpired is true, or fitbitSync.lastSyncedAgo shows >12h, proactively flag the issue in your opening. Use financial metaphors: "Your Fitbit data feed went dark — the API token expired. Head to the About Me tab and reconnect so we can resume live telemetry." If the sync is merely stale (6-12h), mention it lighter: "Your wearable data is a few hours stale — might want to hit Sync Now on the Today tab."
+
+2. YESTERDAY'S FOOD AUDIT: If yesterdaysFoodCount is 0 and yesterdaysCalorieTotal is 0, the books were EMPTY yesterday. Address this with playful CFO skepticism — "I'm showing zero caloric deposits on yesterday's ledger. Are we running an intentional fast, or did the accounting department take the day off? If you ate, let's backfill the books." If they DID log food yesterday, you can reference it naturally: "Yesterday closed at Xg protein, Y cal."
+
+3. TODAY'S INTAKE STATUS: If todaysFoodLog is empty and it's past noon (check localTime), note it: "It's past noon and the books are still blank today. Let's get some assets on the balance sheet."
 
 COACHING PROTOCOL:
 - After calling log_food or log_exercise, report ONLY the daily totals returned by the tool. Never compute running totals from chat history — the tool has the authoritative database value and handles day resets.
