@@ -80,6 +80,13 @@ export interface FoodNickname {
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
 }
 
+export interface SupplementEntry {
+  name: string;           // e.g. "Beta Alanine"
+  timing: string;         // e.g. "pre-workout", "with breakfast", "with any meal"
+  wantsReminders: boolean;
+  notes?: string;
+}
+
 export interface UserPreferences {
   weeklySchedule: string;
   equipment: string[];
@@ -89,6 +96,7 @@ export interface UserPreferences {
   };
   profile: UserProfile;
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
+  supplements?: SupplementEntry[];
 }
 
 export interface FitbitCredentials {

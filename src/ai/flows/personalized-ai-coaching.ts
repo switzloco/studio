@@ -9,7 +9,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
-import type { HealthData, UserPreferences, FoodNickname } from '@/lib/health-service';
+import type { HealthData, UserPreferences, FoodNickname, SupplementEntry } from '@/lib/health-service';
 import { calculateDailyVFScore } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { webSearchTool } from '@/ai/tools/web-search';
@@ -105,6 +105,7 @@ const getUserContextTool = ai.defineTool(
       yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
       yesterdaysCalorieTotal: yesterdayFood.reduce((s, e) => s + (e.calories || 0), 0),
       foodNicknames: prefs?.foodNicknames || {},
+      supplements: prefs?.supplements || [],
     };
   }
 );
@@ -112,7 +113,7 @@ const getUserContextTool = ai.defineTool(
 const updatePreferencesTool = ai.defineTool(
   {
     name: 'update_preferences',
-    description: 'Saves equipment, schedule, targets, or profile info (height, weight, goals, etc.) to persistent storage. Call this silently whenever the user shares personal info.',
+    description: 'Saves equipment, schedule, targets, profile info (height, weight, goals, etc.), or supplement list to persistent storage. Call this silently whenever the user shares personal info. To update supplements, pass the full updated supplements array — it replaces the existing list.',
     inputSchema: z.object({
       userId: z.string(),
       equipment: z.array(z.string()).optional(),
@@ -128,6 +129,12 @@ const updatePreferencesTool = ai.defineTool(
         dietaryRestrictions: z.array(z.string()).optional(),
         lastConversationSummary: z.string().optional(),
       }).optional(),
+      supplements: z.array(z.object({
+        name: z.string().describe('Supplement name, e.g. "Beta Alanine"'),
+        timing: z.string().describe('When they take it, e.g. "pre-workout", "with breakfast", "with any meal", "before bed"'),
+        wantsReminders: z.boolean().describe('Whether the user wants contextual reminders in chat'),
+        notes: z.string().optional().describe('Optional notes, e.g. "3-5g dose"'),
+      })).optional().describe('Full updated supplement list. Replaces the existing list entirely.'),
     }),
     outputSchema: z.string(),
   },
@@ -151,6 +158,9 @@ const updatePreferencesTool = ai.defineTool(
       // Merge profile fields
       const existing = await healthService.getUserPreferences(firestore, input.userId);
       updates.profile = { ...(existing?.profile ?? {}), ...input.profile };
+    }
+    if (input.supplements !== undefined) {
+      updates.supplements = input.supplements as SupplementEntry[];
     }
 
     await healthService.updateUserPreferences(firestore, input.userId, updates);
@@ -670,6 +680,7 @@ NEW USER ONBOARDING (first session only — do this in order, one question at a 
    - What their weekly exercise looks like (frequency, type — running, lifting, sports, etc.)
    - What equipment or gear they actually have access to (home, gym, rings, kettlebells, jump rope, bodyweight only, etc.) — frame it as: "What do you have to work with? Gym membership, home setup, or just bodyweight?"
    - Any dietary preferences or restrictions worth knowing about
+   - Supplements: "Do you take any supplements? If so, when do you usually take them — and would you like me to remind you during our conversations?" Save their answer via update_preferences (supplements array). If they say no supplements, skip saving. If they want reminders, set wantsReminders=true; if they mention them but don't want reminders, set wantsReminders=false.
 
 CONVERSATION FLOW (new users — gather info naturally, not as a checklist):
 Do NOT treat these as a rigid sequence. If the user volunteers multiple pieces of info at once, save them all and move on. If they want to start logging immediately, let them — you can gather profile info over multiple sessions.
@@ -735,6 +746,20 @@ The MOST PROFITABLE days combine: caloric deficit + 150g protein + fasting proto
 EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but exercise alone does NOT directly add VF points. Exercise increases the caloric deficit which feeds Rule 1. Log exercise via log_exercise to track workouts and estimate calorie burn.
 
 When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
+
+SUPPLEMENT REMINDERS (context-driven, opt-in only):
+- Supplements are stored in preferences.supplements (loaded via get_user_context). Each entry has: name, timing, wantsReminders.
+- ONLY issue a reminder if wantsReminders=true for that supplement. Never remind for supplements where wantsReminders=false.
+- Trigger reminders contextually — when the action in the conversation matches the supplement's timing:
+  - timing contains "meal", "food", "breakfast", "lunch", "dinner", or "snack" → remind when the user logs food
+  - timing contains "pre-workout" or "before workout" → remind when the user is about to log or mentions starting exercise
+  - timing contains "post-workout" or "after workout" → remind when the user logs a completed workout
+  - timing contains "morning" → remind once on the first food log or check-in of the day
+  - timing contains "before bed" or "night" → remind when it's evening (after 8 PM local time) and the user checks in or logs dinner
+- Keep reminders SHORT and conversational — one line max, in CFO voice. Example: "Quick reminder: pop your Beta Alanine before you hit that session." or "Don't forget your creatine — you take it with meals."
+- Do NOT remind every single message. Once per relevant trigger per session is enough. If you've already reminded for a supplement in this conversation, do not repeat it.
+- If the user says they already took it, acknowledge briefly and move on. Do NOT nag.
+- Never mention supplements the user hasn't saved, and never invent supplements.
 
 CORRECTIONS & MISTAKES:
 - If the user says they logged something by mistake, wants to remove an entry, or correct a duplicate, call get_recent_logs first to find the entry and its ID, then call ignore_log_entry with ignored=true. The entry stays in the database for audit trail but is excluded from all totals.
