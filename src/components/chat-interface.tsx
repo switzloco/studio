@@ -3,6 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
+import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -150,7 +151,13 @@ export function ChatInterface() {
               </div>
               <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}>
                 {m.image && <Image src={m.image} alt="Audit" width={400} height={300} className="mb-2 rounded-lg border w-full h-auto" unoptimized />}
-                {m.content}
+                {m.role === 'model' ? (
+                  <div className="prose prose-sm prose-slate max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-strong:text-primary prose-headings:text-primary">
+                    <ReactMarkdown>{m.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  m.content
+                )}
               </div>
             </div>
           ))}
