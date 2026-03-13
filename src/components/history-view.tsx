@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell } from "lucide-react";
+import { Briefcase, TrendingUp, AlertCircle, ChevronDown, History as HistoryIcon, Dumbbell } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { HealthData, HistoryEntry } from '@/lib/health-service';
@@ -51,6 +51,15 @@ export function HistoryView() {
 
   const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   // 1. Fetch High-Level Equity Summary (for the charts)
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
@@ -175,31 +184,40 @@ export function HistoryView() {
 
         {ledgerEntries.length > 0 ? (
           <div className="space-y-4">
-            {ledgerEntries.map((entry) => (
-              <Card key={entry.id} className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:bg-white hover:ring-primary/20 transition-all duration-300">
-                <CardContent className="p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-5">
-                    <div className={`p-3 rounded-xl shadow-sm ${entry.type === 'food' ? 'bg-purple-100' : 'bg-orange-100'}`}>
-                      {entry.type === 'food'
-                        ? <Briefcase className="w-5 h-5 text-accent" />
-                        : <Dumbbell className="w-5 h-5 text-orange-600" />}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <p className="text-sm font-black italic">
-                          {entry.displayTime}
-                        </p>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full tracking-tighter ${entry.type === 'food' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
-                          {entry.type}
-                        </span>
+            {ledgerEntries.map((entry) => {
+              const expanded = expandedIds.has(entry.id);
+              return (
+                <Card
+                  key={entry.id}
+                  className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:bg-white hover:ring-primary/20 transition-all duration-300 cursor-pointer"
+                  onClick={() => toggleExpanded(entry.id)}
+                >
+                  <CardContent className="p-5 flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-5 min-w-0">
+                      <div className={`p-3 rounded-xl shadow-sm shrink-0 ${entry.type === 'food' ? 'bg-purple-100' : 'bg-orange-100'}`}>
+                        {entry.type === 'food'
+                          ? <Briefcase className="w-5 h-5 text-accent" />
+                          : <Dumbbell className="w-5 h-5 text-orange-600" />}
                       </div>
-                      <p className="text-sm text-muted-foreground font-medium truncate max-w-[250px] sm:max-w-md">{entry.detail}</p>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-3 mb-1">
+                          <p className="text-sm font-black italic">
+                            {entry.displayTime}
+                          </p>
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full tracking-tighter shrink-0 ${entry.type === 'food' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
+                            {entry.type}
+                          </span>
+                        </div>
+                        <p className={`text-sm text-muted-foreground font-medium ${expanded ? 'whitespace-normal break-words' : 'truncate max-w-[250px] sm:max-w-md'}`}>
+                          {entry.detail}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground opacity-30" />
-                </CardContent>
-              </Card>
-            ))}
+                    <ChevronDown className={`w-4 h-4 text-muted-foreground opacity-40 shrink-0 mt-1 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         ) : (
           <div className="p-20 text-center bg-white/50 rounded-3xl border-2 border-dashed border-muted space-y-6 flex flex-col items-center">
