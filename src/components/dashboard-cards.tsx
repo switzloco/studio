@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
@@ -13,6 +13,8 @@ import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@
 import { DashboardCharts } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { FoodLogEntry } from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
@@ -50,19 +52,44 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
 
-  // Compute today's protein/calorie totals from the actual food log (source of truth)
+  // Today's date string (YYYY-MM-DD)
   const todayStr = React.useMemo(() => {
     const now = new Date();
     return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
   }, []);
 
+  // Selected date for viewing (defaults to today)
+  const [selectedDateStr, setSelectedDateStr] = React.useState<string>(todayStr);
+  const [calendarOpen, setCalendarOpen] = React.useState(false);
+
+  const isViewingToday = selectedDateStr === todayStr;
+
+  const selectedDateObj = React.useMemo(() => {
+    const [y, m, d] = selectedDateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }, [selectedDateStr]);
+
+  const handleDateSelect = (date: Date | undefined) => {
+    if (!date) return;
+    const str = date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, '0') + "-" + String(date.getDate()).padStart(2, '0');
+    setSelectedDateStr(str);
+    setCalendarOpen(false);
+  };
+
+  // History entry for the selected date (used to get calories out on past days)
+  const historyEntry = React.useMemo(() => {
+    if (!data?.history || isViewingToday) return null;
+    return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
+  }, [data?.history, selectedDateStr, isViewingToday]);
+
+  // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
-      where('date', '==', todayStr),
+      where('date', '==', selectedDateStr),
       limit(50)
     ) : null,
-    [db, user, todayStr]
+    [db, user, selectedDateStr]
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
 
@@ -126,8 +153,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
   const dailyCarbsG = computedTotals?.carbsG ?? (data.dailyCarbsG || 0);
-  // Fitbit calorie burn is device-sourced — use it whenever available, even on a new day.
-  const dailyCaloriesOut = data.dailyCaloriesOut || 2000;
+  // For past dates, use the history breakdown's calories out if available
+  const dailyCaloriesOut = isViewingToday
+    ? (data.dailyCaloriesOut || 2000)
+    : (historyEntry?.breakdown?.caloriesOut || data.dailyCaloriesOut || 2000);
 
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
@@ -215,10 +244,50 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
       <div className="space-y-6">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] italic">Live Market Audit</h2>
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] italic">
+            {isViewingToday ? 'Live Market Audit' : 'Historical Audit'}
+          </h2>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-            <span className="text-[12px] font-bold text-emerald-600 uppercase">Active Session</span>
+            {!isViewingToday && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
+                onClick={() => setSelectedDateStr(todayStr)}
+              >
+                <RotateCcw className="w-3 h-3 mr-1" />
+                Today
+              </Button>
+            )}
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-3 text-[10px] font-black uppercase tracking-widest gap-1.5"
+                >
+                  <CalendarIcon className="w-3 h-3" />
+                  {isViewingToday ? 'Today' : selectedDateStr}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={selectedDateObj}
+                  onSelect={handleDateSelect}
+                  disabled={(date) => date > new Date()}
+                  autoFocus
+                />
+              </PopoverContent>
+            </Popover>
+            {isViewingToday ? (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                <span className="text-[12px] font-bold text-emerald-600 uppercase">Active Session</span>
+              </div>
+            ) : (
+              <span className="text-[12px] font-bold text-muted-foreground uppercase">Historical</span>
+            )}
           </div>
         </div>
 
@@ -298,7 +367,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
               <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
-              <h4 className="text-4xl font-black italic">{(data.steps || 0).toLocaleString()}</h4>
+              <h4 className="text-4xl font-black italic">{isViewingToday ? (data.steps || 0).toLocaleString() : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-orange-200 rounded-full" />
             </CardContent>
           </Card>
@@ -312,8 +381,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({data.hrv > 0 ? `${data.hrv}ms` : 'no reading'})</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A'}</h4>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({isViewingToday && data.hrv > 0 ? `${data.hrv}ms` : 'no reading'})</p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{isViewingToday ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A') : 'N/A'}</h4>
               <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
             </CardContent>
           </Card>
