@@ -10,6 +10,7 @@ import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 import { VFScoreChart } from './vf-score-chart';
 import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
+import { LedgerChat } from './ledger-chat';
 
 type LedgerEntry = {
   id: string;
@@ -148,6 +149,9 @@ export function HistoryView() {
           <TrendingUp className="w-6 h-6 text-emerald-600" />
         </div>
       </div>
+
+      {/* Ledger Analyst — inline query agent */}
+      <LedgerChat />
 
       {/* VF Score Bar + Cumulative Line Chart */}
       {history.length > 0 ? (
