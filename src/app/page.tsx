@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -35,6 +35,10 @@ const HistoryView = dynamic(() => import('@/components/history-view').then(m => 
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 const PreferencesView = dynamic(() => import('@/components/preferences-view').then(m => ({ default: m.PreferencesView })), {
+  ssr: false,
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+const AboutView = dynamic(() => import('@/components/about-view').then(m => ({ default: m.AboutView })), {
   ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
@@ -300,24 +304,33 @@ export default function Home() {
                 <PreferencesView />
               </div>
             )}
+            {activeTab === 'about' && (
+              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+                <AboutView />
+              </div>
+            )}
           </div>
 
-          <TabsList className="grid grid-cols-4 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
+          <TabsList className="grid grid-cols-5 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
             <TabsTrigger value="chat" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <MessageSquare className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Coach</span>
+              <MessageSquare className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">Coach</span>
             </TabsTrigger>
             <TabsTrigger value="daily" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <Target className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Today</span>
+              <Target className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">Today</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <History className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Ledger</span>
+              <History className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">Ledger</span>
             </TabsTrigger>
             <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <LayoutGrid className="w-6 h-6" />
-              <span className="text-[10px] font-black uppercase tracking-widest">About Me</span>
+              <LayoutGrid className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">About Me</span>
+            </TabsTrigger>
+            <TabsTrigger value="about" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <Info className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">About</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>

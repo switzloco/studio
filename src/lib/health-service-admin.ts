@@ -105,7 +105,10 @@ export const adminHealthService = {
 
   async logFood(db: Firestore, userId: string, entry: Omit<FoodLogEntry, 'timestamp'>): Promise<string> {
     const ref = db.collection(`users/${userId}/food_log`);
-    const docRef = await ref.add({ ...entry, timestamp: FieldValue.serverTimestamp() });
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await ref.add(clean);
     return docRef.id;
   },
 
@@ -128,7 +131,10 @@ export const adminHealthService = {
 
   async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
     const ref = db.collection(`users/${userId}/exercise_log`);
-    const docRef = await ref.add({ ...entry, timestamp: FieldValue.serverTimestamp() });
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await ref.add(clean);
     return docRef.id;
   },
 
