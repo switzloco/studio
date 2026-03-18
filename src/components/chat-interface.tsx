@@ -201,7 +201,6 @@ export function ChatInterface() {
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             onPaste={handlePaste}
             className="flex-1 rounded-full border-muted bg-white/50"
-            disabled={isLoading}
           />
           <Button size="icon" className="rounded-full w-12 h-12" onClick={handleSend} disabled={isLoading || (!input.trim() && !selectedImage)}>
             <Send className="w-4 h-4" />
