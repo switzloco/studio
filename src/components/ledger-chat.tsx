@@ -179,7 +179,6 @@ export function LedgerChat() {
               onKeyDown={e => e.key === 'Enter' && handleSend()}
               placeholder="Ask about your history..."
               className="flex-1 rounded-full text-sm border-muted bg-white/50 h-9"
-              disabled={isLoading}
             />
             <Button
               size="icon"
