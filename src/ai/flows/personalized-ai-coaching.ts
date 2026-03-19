@@ -256,7 +256,14 @@ const logExerciseTool = ai.defineTool(
       reps: z.number().optional(),
       durationMin: z.number().optional(),
       weightKg: z.number().optional(),
-      estimatedCaloriesBurned: z.number().optional(),
+      estimatedCaloriesBurned: z.number().optional().describe('Your raw best-estimate of calories burned (before wearable accuracy discount). The system applies the tier discount automatically.'),
+      activityTier: z.enum(['tier1_walking', 'tier2_steady_state', 'tier3_anaerobic']).optional().describe(
+        'Wearable accuracy tier for calorie discount. ' +
+        'tier1_walking (0% discount): walking, light hiking, casual biking, stretching, yoga. ' +
+        'tier2_steady_state (20% discount): ebiking, steady jogging, light cycling, elliptical, swimming. ' +
+        'tier3_anaerobic (35% discount): basketball, ultimate frisbee, kettlebell, rucking with load, HIIT, sprints, heavy lifting, any grip-intensive or stop-and-go activity. ' +
+        'Omit only for bodyweight floor work where no wearable is relevant.'
+      ),
       pointsDelta: z.number().describe('Visceral fat points earned'),
       notes: z.string().optional(),
       performedAt: z.string().optional().describe('HH:MM (24h) — when the user actually did this exercise. Infer from context. If unknown, use the current localTime.'),
@@ -271,10 +278,21 @@ const logExerciseTool = ai.defineTool(
     }).safeParse({ pointsDelta: input.pointsDelta, name: input.name });
     if (!validated.success) throw new Error(validated.error.errors[0].message);
 
+    // Apply wearable accuracy discount based on activity tier
+    const TIER_MULTIPLIERS: Record<string, number> = {
+      tier1_walking:       1.00,   // Accurate — wrist trackers designed for this
+      tier2_steady_state:  0.80,   // 20% off — steady state / ebike / gripping distortion
+      tier3_anaerobic:     0.65,   // 35% off — stop-and-go / heavy grip / HRV distortion
+    };
+    const rawCalories = input.estimatedCaloriesBurned;
+    const tierMultiplier = input.activityTier ? (TIER_MULTIPLIERS[input.activityTier] ?? 1.0) : 1.0;
+    const adjustedCalories = rawCalories != null ? Math.round(rawCalories * tierMultiplier) : undefined;
+    const discountPct = input.activityTier ? Math.round((1 - tierMultiplier) * 100) : 0;
+
     const firestore = getAdminFirestore();
     const today = input.localDate;
 
-    // Write to structured exercise_log
+    // Write to structured exercise_log — store the accuracy-adjusted calorie figure
     await healthService.logExercise(firestore, input.userId, {
       name: input.name,
       category: input.category,
@@ -282,7 +300,7 @@ const logExerciseTool = ai.defineTool(
       reps: input.reps,
       durationMin: input.durationMin,
       weightKg: input.weightKg,
-      estimatedCaloriesBurned: input.estimatedCaloriesBurned,
+      estimatedCaloriesBurned: adjustedCalories,
       pointsDelta: input.pointsDelta,
       notes: input.notes,
       performedAt: input.performedAt,
@@ -311,7 +329,14 @@ const logExerciseTool = ai.defineTool(
       equity: newTotalEquity,
     });
 
-    const calorieNote = input.estimatedCaloriesBurned ? ` (~${input.estimatedCaloriesBurned} cal burned)` : '';
+    let calorieNote = '';
+    if (adjustedCalories != null) {
+      if (discountPct > 0 && rawCalories != null) {
+        calorieNote = ` (~${adjustedCalories} cal burned after ${discountPct}% wearable accuracy discount from ${rawCalories} raw est.)`;
+      } else {
+        calorieNote = ` (~${adjustedCalories} cal burned)`;
+      }
+    }
     return `Logged: ${input.name}${calorieNote}. Equity: ${newTotalEquity} pts (+${input.pointsDelta}).`;
   }
 );
@@ -736,6 +761,29 @@ When logging food (log_food), ALWAYS assess and set:
 The MOST PROFITABLE days combine: caloric deficit + 150g protein + fasting protocol + zero alcohol + 8h sleep + no seed oils.
 
 EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but exercise alone does NOT directly add VF points. Exercise increases the caloric deficit which feeds Rule 1. Log exercise via log_exercise to track workouts and estimate calorie burn.
+
+WEARABLE ACCURACY TIERS (apply every time you call log_exercise):
+Fitness wearables systematically overestimate calorie burn for certain activity types. The system corrects this automatically — but YOU must classify the exercise correctly. Pass your raw calorie estimate and the right tier; the discount is applied for you.
+
+Tier 1 — tier1_walking (0% discount — accurate):
+  Walking, light hiking (unweighted), casual strolling, gentle yoga.
+  Why accurate: arm swings rhythmically, heart rate is steady, no gripping. The optical sensor on the wrist was built for exactly this.
+
+Tier 2 — tier2_steady_state (20% discount):
+  Ebiking, steady-state jogging, light cycling, elliptical, swimming.
+  Why inaccurate: GPS speed suggests high effort but motor/water absorbs mechanical load; slight handlebar grip compresses the wrist sensor.
+
+Tier 3 — tier3_anaerobic (35% discount):
+  Basketball, ultimate frisbee, kettlebell swings, rucking with load, HIIT, heavy lifting, sprints, pull-ups, ring work.
+  Why wildly inaccurate: (1) Stop-and-go effect — heart rate stays pinned at sprint levels during rest intervals, tricking the algorithm. (2) Grip effect — gripping kettlebells, barbells, ruck straps, or pull-up rings forces forearm muscles to contract continuously, squeezing the wrist blood vessels and severely distorting the optical pulse reading.
+
+Examples:
+  "30 min kettlebell circuit" → estimatedCaloriesBurned: 420 (raw MET estimate), activityTier: "tier3_anaerobic" → stored as 273
+  "45 min steady jog" → estimatedCaloriesBurned: 380, activityTier: "tier2_steady_state" → stored as 304
+  "60 min basketball" → estimatedCaloriesBurned: 600, activityTier: "tier3_anaerobic" → stored as 390
+  "5 mile walk" → estimatedCaloriesBurned: 450, activityTier: "tier1_walking" → stored as 450
+
+Always report the ADJUSTED figure to the client with a brief mention: "Logged ~273 cal after Tier 3 accuracy adjustment — kettlebells destroy wrist sensors."
 
 When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
 
