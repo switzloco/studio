@@ -14,6 +14,25 @@ interface DashboardChartsProps {
     exerciseLogs?: ExerciseLogEntry[];
     /** Morning glycogen %, chained from previous day's end state. 100 for new users. */
     morningGlycogenPct?: number;
+    /** From Firestore HealthData — used to size glycogen reservoir from lean mass. */
+    weightKg?: number;
+    /** 0–100, from DEXA or assessment. Improves glycogen capacity estimate. */
+    bodyFatPct?: number;
+    /** True when calorie burn data comes from Fitbit (−10% already applied). */
+    isDeviceVerified?: boolean;
+}
+
+/**
+ * Compute glycogen reservoir size from body composition.
+ * Formula: lean_mass_kg × 15 g/kg (muscle) + 100 g (liver), capped 300-700 g.
+ * Falls back to 500 g (2000 kcal) when no body comp is available.
+ */
+export function computeMaxGlycogenKcal(weightKg?: number, bodyFatPct?: number): number {
+    if (!weightKg) return 2000;
+    const bfFraction = bodyFatPct != null ? bodyFatPct / 100 : 0.25;
+    const leanKg = weightKg * (1 - bfFraction);
+    const glycogenG = Math.min(700, Math.max(300, Math.round(leanKg * 15 + 100)));
+    return glycogenG * 4;
 }
 
 // 15-minute intraday glycogen simulation
@@ -23,8 +42,7 @@ const START_MIN = 6 * 60;   // 360
 const END_MIN   = 22 * 60;  // 1320
 const NUM_SLOTS = (END_MIN - START_MIN) / INTERVAL_MIN + 1; // 65
 
-const MAX_GLYCOGEN_KCAL = 500 * 4; // 2000 kcal (400g muscle + 100g liver)
-// 30% of a 2000-kcal BMR is fuelled by glycogen, spread over 16 waking hours, per slot
+// 30% of a 2000-kcal BMR fuelled by glycogen, spread over 16 waking hours, per 15-min slot
 const RESTING_BURN_PER_SLOT = (2000 * 0.30) / 16 / (60 / INTERVAL_MIN); // ~9.4 kcal / 15 min
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
@@ -55,6 +73,7 @@ function buildGlycogenCurve(
     caloriesOut: number,
     carbsG: number,
     morningPct: number,
+    maxGlycogenKcal: number,
     foodLogs?: FoodLogEntry[],
     exerciseLogs?: ExerciseLogEntry[],
 ): { slot: number; level: number }[] {
@@ -120,17 +139,19 @@ function buildGlycogenCurve(
 
     // --- Simulate slot by slot ---
     const result: { slot: number; level: number }[] = [];
-    let current = MAX_GLYCOGEN_KCAL * (morningPct / 100);
+    let current = maxGlycogenKcal * (morningPct / 100);
     for (let s = 0; s < NUM_SLOTS; s++) {
-        current = Math.max(0, Math.min(MAX_GLYCOGEN_KCAL,
+        current = Math.max(0, Math.min(maxGlycogenKcal,
             current - RESTING_BURN_PER_SLOT - exerciseBurn[s] + carbRefuel[s]
         ));
-        result.push({ slot: s, level: Math.round((current / MAX_GLYCOGEN_KCAL) * 100) });
+        result.push({ slot: s, level: Math.round((current / maxGlycogenKcal) * 100) });
     }
     return result;
 }
 
-export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0, foodLogs, exerciseLogs, morningGlycogenPct = 100 }: DashboardChartsProps) {
+export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0, foodLogs, exerciseLogs, morningGlycogenPct = 100, weightKg, bodyFatPct, isDeviceVerified }: DashboardChartsProps) {
+    const maxGlycogenKcal = computeMaxGlycogenKcal(weightKg, bodyFatPct);
+    const glycogenCapacityG = Math.round(maxGlycogenKcal / 4);
     const deficit = caloriesIn - caloriesOut;
 
     const calorieData = [
@@ -140,12 +161,12 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
     ];
 
     const glycogenData = React.useMemo(
-        () => buildGlycogenCurve(caloriesOut, carbsG, morningGlycogenPct, foodLogs, exerciseLogs),
-        [caloriesOut, carbsG, morningGlycogenPct, foodLogs, exerciseLogs],
+        () => buildGlycogenCurve(caloriesOut, carbsG, morningGlycogenPct, maxGlycogenKcal, foodLogs, exerciseLogs),
+        [caloriesOut, carbsG, morningGlycogenPct, maxGlycogenKcal, foodLogs, exerciseLogs],
     );
 
     const endGlycogenPct  = glycogenData[glycogenData.length - 1].level;
-    const endGlycogenKcal = Math.round((endGlycogenPct / 100) * MAX_GLYCOGEN_KCAL);
+    const endGlycogenKcal = Math.round((endGlycogenPct / 100) * maxGlycogenKcal);
 
     // Show tick labels at 6 AM, 9 AM, 12 PM, 3 PM, 6 PM, 10 PM
     const X_TICKS = [0, 12, 24, 36, 48, 64];
@@ -190,6 +211,9 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Out</p>
                             <p className="text-lg font-black text-orange-500">{caloriesOut} <span className="text-xs font-medium text-orange-500/60">kcal</span></p>
+                            {isDeviceVerified && (
+                                <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Fitbit −10% adj.</p>
+                            )}
                         </div>
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Net</p>
@@ -209,7 +233,9 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
                         </div>
                         <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">Glycogen Reserves</CardTitle>
                     </div>
-                    <CardDescription className="text-xs font-medium">Estimated Liver & Muscle Glycogen (%) · Not medical advice</CardDescription>
+                    <CardDescription className="text-xs font-medium">
+                        Est. Liver & Muscle Glycogen · ~{glycogenCapacityG}g reserve · Not medical advice
+                    </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="h-[200px] w-full mt-4">

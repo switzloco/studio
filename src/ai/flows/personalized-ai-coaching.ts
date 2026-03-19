@@ -96,6 +96,7 @@ const getUserContextTool = ai.defineTool(
         steps: health?.steps ?? 0,
         weightKg: health?.weightKg,
         heightCm: health?.heightCm,
+        bodyFatPct: health?.bodyFatPct,
       },
       fitbitSync: fitbitStatus,
       todaysFoodLog: recentFood,
@@ -121,6 +122,7 @@ const updatePreferencesTool = ai.defineTool(
       profile: z.object({
         heightCm: z.number().optional(),
         weightKg: z.number().optional(),
+        bodyFatPct: z.number().min(2).max(60).optional().describe('Body fat %, from DEXA, BodPod, or reliable assessment.'),
         age: z.number().optional(),
         activityLevel: z.enum(['sedentary', 'light', 'moderate', 'active']).optional(),
         goals: z.array(z.string()).optional(),
@@ -155,11 +157,12 @@ const updatePreferencesTool = ai.defineTool(
 
     await healthService.updateUserPreferences(firestore, input.userId, updates);
 
-    // Also update vanity metrics on the main health doc if provided
-    if (input.profile?.heightCm || input.profile?.weightKg) {
+    // Also update body comp fields on the main health doc if provided
+    if (input.profile?.heightCm || input.profile?.weightKg || input.profile?.bodyFatPct != null) {
       const healthUpdates: Partial<HealthData> = {};
       if (input.profile.heightCm) healthUpdates.heightCm = input.profile.heightCm;
       if (input.profile.weightKg) healthUpdates.weightKg = input.profile.weightKg;
+      if (input.profile.bodyFatPct != null) healthUpdates.bodyFatPct = input.profile.bodyFatPct;
       await healthService.updateHealthData(firestore, input.userId, healthUpdates);
     }
 

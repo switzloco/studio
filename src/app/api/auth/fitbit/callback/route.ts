@@ -91,7 +91,8 @@ export async function GET(request: NextRequest) {
     if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
     if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
     if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-      healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
+      // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
+      healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * 0.90);
     }
 
     // Derive recovery status from HRV.

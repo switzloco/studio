@@ -155,9 +155,16 @@ export function PreferencesView() {
         const rank = getRank(points);
         const rankIdx = RANKS.indexOf(rank as typeof RANKS[number]);
         const nextRank = rankIdx < RANKS.length - 1 ? RANKS[rankIdx + 1] : null;
-        const progressPct = nextRank
-          ? Math.round(((points - rank.min) / (nextRank.min - rank.min)) * 100)
-          : 100;
+
+        // Numeric level: every 3000 pts = 1 level. Level 1 = 0-2999, Level 2 = 3000-5999, etc.
+        const LEVEL_STEP = 3000;
+        const level = Math.floor(Math.max(0, points) / LEVEL_STEP) + 1;
+        const levelBase = (level - 1) * LEVEL_STEP;
+        const levelProgressPct = Math.min(100, Math.round(((points - levelBase) / LEVEL_STEP) * 100));
+        const ptsToNextLevel = LEVEL_STEP - (points - levelBase);
+        // First 1000 milestone within Level 1
+        const hit1kMilestone = points >= 1000;
+        const show1kBadge = level === 1; // only relevant in level 1
         return (
           <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
             <CardHeader className="p-6 pb-2">
@@ -167,33 +174,50 @@ export function PreferencesView() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 pt-4 space-y-5">
-              {/* Current rank display */}
+              {/* Current rank + level display */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`p-3 ${rank.bg} rounded-xl`}>
+                  <div className={`p-3 ${rank.bg} rounded-xl relative`}>
                     <Trophy className={`w-5 h-5 ${rank.color}`} />
+                    <span className="absolute -top-1.5 -right-1.5 text-[9px] font-black bg-primary text-white rounded-full px-1.5 py-0.5 leading-none">
+                      L{level}
+                    </span>
                   </div>
                   <div>
-                    <p className={`text-lg font-black uppercase tracking-tight ${rank.color}`}>{rank.label}</p>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-lg font-black uppercase tracking-tight ${rank.color}`}>{rank.label}</p>
+                      <span className="text-[10px] font-black text-muted-foreground/60 bg-muted rounded px-1.5 py-0.5">LVL {level}</span>
+                    </div>
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                      {points.toLocaleString()} pts{nextRank ? ` · ${(nextRank.min - points).toLocaleString()} to ${nextRank.label}` : ' · Max Tier'}
+                      {points.toLocaleString()} pts · {ptsToNextLevel.toLocaleString()} to Level {level + 1}
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* Progress to next rank */}
-              {nextRank && (
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                    <span>{rank.label}</span>
-                    <span>{nextRank.label}</span>
-                  </div>
-                  <Progress value={progressPct} className="h-2" />
+              {/* Level progress bar with 1K milestone marker */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                  <span>Level {level}</span>
+                  <span>Level {level + 1} at {((level) * LEVEL_STEP).toLocaleString()} pts</span>
                 </div>
-              )}
+                <div className="relative">
+                  <Progress value={levelProgressPct} className="h-2" />
+                  {/* 1K milestone tick within Level 1 */}
+                  {show1kBadge && (
+                    <div className="absolute top-0 h-2" style={{ left: `${(1000 / LEVEL_STEP) * 100}%` }}>
+                      <div className={`w-0.5 h-full ${hit1kMilestone ? 'bg-violet-500' : 'bg-muted-foreground/30'}`} />
+                    </div>
+                  )}
+                </div>
+                {show1kBadge && (
+                  <p className={`text-[9px] font-bold ${hit1kMilestone ? 'text-violet-500' : 'text-muted-foreground/60'}`}>
+                    {hit1kMilestone ? '✓ 1K Milestone reached' : `1K Milestone at 1,000 pts · ${(1000 - points).toLocaleString()} away`}
+                  </p>
+                )}
+              </div>
 
-              {/* All tier ladder */}
+              {/* Prestige tier ladder */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 pt-1">
                 {RANKS.map((r) => (
                   r.max === Infinity ? null :

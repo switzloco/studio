@@ -63,7 +63,8 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    healthUpdate.dailyCaloriesOut = result.caloriesOut.value;
+    // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
+    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value * 0.90);
   }
 
   // Only update HRV and recoveryStatus when Fitbit returns a valid reading.

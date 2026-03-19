@@ -59,6 +59,7 @@ export interface HealthData {
   visceralFatPoints: number;
   heightCm?: number;
   weightKg?: number;
+  bodyFatPct?: number;    // 0-100, from DEXA/assessment; used for glycogen capacity estimate
   history: HistoryEntry[];
   updatedAt?: FieldValue | Timestamp;
   createdAt?: FieldValue | Timestamp;

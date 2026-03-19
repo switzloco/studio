@@ -10,7 +10,7 @@ import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
-import { DashboardCharts } from './dashboard-charts';
+import { DashboardCharts, computeMaxGlycogenKcal } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -100,16 +100,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     if (!prevEntry?.breakdown) return 100;
 
     const { caloriesIn, caloriesOut } = prevEntry.breakdown;
-    const MAX = 2000; // kcal glycogen capacity
-    // Yesterday started at 100% (base assumption for first known day; chain further when history grows)
+    // Use same body-comp-based capacity as the chart
+    const MAX = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
+    // Yesterday started at 100% (base assumption for first known day)
     const prevMorningKcal = MAX;
-    const restingBurn = 600; // 30% of 2000 kcal BMR × 16 waking hours
+    const restingBurn = MAX * 0.30; // ~30% of daily glycogen budget burned at rest across 16h
     const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70;
     // Estimate carbs as ~35% of calorie intake (reasonable mixed-diet assumption)
     const carbKcal = caloriesIn * 0.35;
     const endKcal = Math.max(0, Math.min(MAX, prevMorningKcal - restingBurn - activeBurn + carbKcal));
     return Math.round((endKcal / MAX) * 100);
-  }, [data?.history, selectedDateStr]);
+  }, [data?.history, data?.weightKg, data?.bodyFatPct, selectedDateStr]);
 
   // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
@@ -460,6 +461,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           foodLogs={todayFoodLogs ?? undefined}
           exerciseLogs={todayExerciseLogs ?? undefined}
           morningGlycogenPct={morningGlycogenPct}
+          weightKg={data.weightKg}
+          bodyFatPct={data.bodyFatPct}
+          isDeviceVerified={data.isDeviceVerified}
         />
       </div>
 
