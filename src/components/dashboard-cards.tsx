@@ -82,6 +82,35 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
   }, [data?.history, selectedDateStr, isViewingToday]);
 
+  // Morning glycogen % — chain from previous day's end-of-day estimate.
+  // Uses a simplified single-compartment model on the prior day's daily totals.
+  // New users (no history) start at 100% (full reserves).
+  const morningGlycogenPct = React.useMemo(() => {
+    const history = data?.history;
+    if (!history || history.length === 0) return 100;
+
+    // Find the calendar date one day before the viewed date
+    const [y, m, d] = selectedDateStr.split('-').map(Number);
+    const prevDate = new Date(y, m - 1, d - 1);
+    const prevIso = prevDate.getFullYear() + '-'
+      + String(prevDate.getMonth() + 1).padStart(2, '0') + '-'
+      + String(prevDate.getDate()).padStart(2, '0');
+
+    const prevEntry = history.find(h => (h.isoDate || h.date) === prevIso);
+    if (!prevEntry?.breakdown) return 100;
+
+    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
+    const MAX = 2000; // kcal glycogen capacity
+    // Yesterday started at 100% (base assumption for first known day; chain further when history grows)
+    const prevMorningKcal = MAX;
+    const restingBurn = 600; // 30% of 2000 kcal BMR × 16 waking hours
+    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70;
+    // Estimate carbs as ~35% of calorie intake (reasonable mixed-diet assumption)
+    const carbKcal = caloriesIn * 0.35;
+    const endKcal = Math.max(0, Math.min(MAX, prevMorningKcal - restingBurn - activeBurn + carbKcal));
+    return Math.round((endKcal / MAX) * 100);
+  }, [data?.history, selectedDateStr]);
+
   // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
     () => user ? query(
@@ -430,6 +459,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           carbsG={dailyCarbsG}
           foodLogs={todayFoodLogs ?? undefined}
           exerciseLogs={todayExerciseLogs ?? undefined}
+          morningGlycogenPct={morningGlycogenPct}
         />
       </div>
 

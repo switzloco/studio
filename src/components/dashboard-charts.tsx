@@ -12,6 +12,8 @@ interface DashboardChartsProps {
     carbsG: number;
     foodLogs?: FoodLogEntry[];
     exerciseLogs?: ExerciseLogEntry[];
+    /** Morning glycogen %, chained from previous day's end state. 100 for new users. */
+    morningGlycogenPct?: number;
 }
 
 // 15-minute intraday glycogen simulation
@@ -21,8 +23,7 @@ const START_MIN = 6 * 60;   // 360
 const END_MIN   = 22 * 60;  // 1320
 const NUM_SLOTS = (END_MIN - START_MIN) / INTERVAL_MIN + 1; // 65
 
-const MAX_GLYCOGEN_KCAL  = 500 * 4;          // 2000 kcal (400g muscle + 100g liver)
-const MORNING_START_KCAL = MAX_GLYCOGEN_KCAL * 0.30; // 600 kcal — post overnight-fast baseline
+const MAX_GLYCOGEN_KCAL = 500 * 4; // 2000 kcal (400g muscle + 100g liver)
 // 30% of a 2000-kcal BMR is fuelled by glycogen, spread over 16 waking hours, per slot
 const RESTING_BURN_PER_SLOT = (2000 * 0.30) / 16 / (60 / INTERVAL_MIN); // ~9.4 kcal / 15 min
 
@@ -53,6 +54,7 @@ const slotToTimeLabel = (slot: number): string => {
 function buildGlycogenCurve(
     caloriesOut: number,
     carbsG: number,
+    morningPct: number,
     foodLogs?: FoodLogEntry[],
     exerciseLogs?: ExerciseLogEntry[],
 ): { slot: number; level: number }[] {
@@ -118,7 +120,7 @@ function buildGlycogenCurve(
 
     // --- Simulate slot by slot ---
     const result: { slot: number; level: number }[] = [];
-    let current = MORNING_START_KCAL;
+    let current = MAX_GLYCOGEN_KCAL * (morningPct / 100);
     for (let s = 0; s < NUM_SLOTS; s++) {
         current = Math.max(0, Math.min(MAX_GLYCOGEN_KCAL,
             current - RESTING_BURN_PER_SLOT - exerciseBurn[s] + carbRefuel[s]
@@ -128,7 +130,7 @@ function buildGlycogenCurve(
     return result;
 }
 
-export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0, foodLogs, exerciseLogs }: DashboardChartsProps) {
+export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0, foodLogs, exerciseLogs, morningGlycogenPct = 100 }: DashboardChartsProps) {
     const deficit = caloriesIn - caloriesOut;
 
     const calorieData = [
@@ -138,8 +140,8 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
     ];
 
     const glycogenData = React.useMemo(
-        () => buildGlycogenCurve(caloriesOut, carbsG, foodLogs, exerciseLogs),
-        [caloriesOut, carbsG, foodLogs, exerciseLogs],
+        () => buildGlycogenCurve(caloriesOut, carbsG, morningGlycogenPct, foodLogs, exerciseLogs),
+        [caloriesOut, carbsG, morningGlycogenPct, foodLogs, exerciseLogs],
     );
 
     const endGlycogenPct  = glycogenData[glycogenData.length - 1].level;
@@ -207,7 +209,7 @@ export function DashboardCharts({ caloriesIn = 0, caloriesOut = 2000, carbsG = 0
                         </div>
                         <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">Glycogen Reserves</CardTitle>
                     </div>
-                    <CardDescription className="text-xs font-medium">Estimated Liver & Muscle Glycogen (%)</CardDescription>
+                    <CardDescription className="text-xs font-medium">Estimated Liver & Muscle Glycogen (%) · Not medical advice</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="h-[200px] w-full mt-4">
