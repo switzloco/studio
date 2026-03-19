@@ -10,7 +10,7 @@ import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
-import { DashboardCharts, computeMaxGlycogenKcal } from './dashboard-charts';
+import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -100,16 +100,19 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     if (!prevEntry?.breakdown) return 100;
 
     const { caloriesIn, caloriesOut } = prevEntry.breakdown;
-    // Use same body-comp-based capacity as the chart
-    const MAX = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
-    // Yesterday started at 100% (base assumption for first known day)
-    const prevMorningKcal = MAX;
-    const restingBurn = MAX * 0.30; // ~30% of daily glycogen budget burned at rest across 16h
-    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70;
-    // Estimate carbs as ~35% of calorie intake (reasonable mixed-diet assumption)
-    const carbKcal = caloriesIn * 0.35;
-    const endKcal = Math.max(0, Math.min(MAX, prevMorningKcal - restingBurn - activeBurn + carbKcal));
-    return Math.round((endKcal / MAX) * 100);
+    // Muscle-only carry-over — liver always starts the day at 60% (overnight fast baseline).
+    // Muscle has no resting burn (glycogen is biologically locked without mechanical stimulus).
+    const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
+    const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
+    // Base assumption: yesterday morning muscle was 100% (full).
+    const prevMuscleKcal = muscleMax;
+    // 85% of glycolytic exercise burn comes from muscle; above-BMR calories ≈ active exercise.
+    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70 * 0.85;
+    // Carbs: ~35% of intake, but liver takes first 30g (120 kcal) priority — rest to muscle.
+    const totalCarbKcal  = caloriesIn * 0.35;
+    const muscleCarbs    = Math.max(0, totalCarbKcal - 120);
+    const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
+    return Math.round((endMuscleKcal / muscleMax) * 100);
   }, [data?.history, data?.weightKg, data?.bodyFatPct, selectedDateStr]);
 
   // Compute protein/calorie totals from the food log for the selected date
