@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { FoodLogEntry } from '@/lib/food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -92,6 +92,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, selectedDateStr]
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
+
+  // Exercise logs for the selected date (used for intraday glycogen timing)
+  const exerciseLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'exercise_log'),
+      where('date', '==', selectedDateStr),
+      limit(20)
+    ) : null,
+    [db, user, selectedDateStr]
+  );
+  const { data: todayExerciseLogs } = useCollection<ExerciseLogEntry>(exerciseLogQuery);
 
   // Sum from non-ignored entries
   const computedTotals = React.useMemo(() => {
@@ -413,7 +424,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </div>
 
         {/* Charts section */}
-        <DashboardCharts caloriesIn={dailyCaloriesIn} caloriesOut={dailyCaloriesOut} carbsG={dailyCarbsG} />
+        <DashboardCharts
+          caloriesIn={dailyCaloriesIn}
+          caloriesOut={dailyCaloriesOut}
+          carbsG={dailyCarbsG}
+          foodLogs={todayFoodLogs ?? undefined}
+          exerciseLogs={todayExerciseLogs ?? undefined}
+        />
       </div>
 
       <div className="space-y-4">
