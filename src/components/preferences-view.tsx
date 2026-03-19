@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import { healthService, UserPreferences, HealthData } from '@/lib/health-service';
@@ -52,6 +52,46 @@ export function PreferencesView() {
   // Points editor state
   const [pointsInput, setPointsInput] = useState('');
   const [isSavingPoints, setIsSavingPoints] = useState(false);
+
+  // Body composition inputs — seeded from live health data
+  const [heightCm, setHeightCm] = useState('');
+  const [weightKg, setWeightKg] = useState('');
+  const [bodyFatPct, setBodyFatPct] = useState('');
+  const [isSavingBodyComp, setIsSavingBodyComp] = useState(false);
+  const [bodyCompSavedRecently, setBodyCompSavedRecently] = useState(false);
+
+  // Seed body comp fields once health data loads
+  const bodyCompSeededRef = useRef(false);
+  useEffect(() => {
+    if (healthData && !bodyCompSeededRef.current) {
+      bodyCompSeededRef.current = true;
+      if (healthData.heightCm)   setHeightCm(String(healthData.heightCm));
+      if (healthData.weightKg)   setWeightKg(String(healthData.weightKg));
+      if (healthData.bodyFatPct != null) setBodyFatPct(String(healthData.bodyFatPct));
+    }
+  }, [healthData]);
+
+  const handleSaveBodyComp = async () => {
+    if (!user) return;
+    const updates: Partial<import('@/lib/health-service').HealthData> = {};
+    const h = parseFloat(heightCm);
+    const w = parseFloat(weightKg);
+    const bf = parseFloat(bodyFatPct);
+    if (!isNaN(h) && h > 0)   updates.heightCm   = h;
+    if (!isNaN(w) && w > 0)   updates.weightKg   = w;
+    if (!isNaN(bf) && bf > 0 && bf < 60) updates.bodyFatPct = bf;
+    if (Object.keys(updates).length === 0) return;
+    setIsSavingBodyComp(true);
+    try {
+      await healthService.updateHealthData(db, user.uid, updates);
+      setBodyCompSavedRecently(true);
+      setTimeout(() => setBodyCompSavedRecently(false), 2000);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Save Failed', description: e.message });
+    } finally {
+      setIsSavingBodyComp(false);
+    }
+  };
 
   const handleSetPoints = async (newPoints: number) => {
     if (!user || isNaN(newPoints)) return;
@@ -366,6 +406,61 @@ export function PreferencesView() {
                   />
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Body Composition */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <Activity className="w-4 h-4" />
+                Body Composition
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-4 space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase font-black text-muted-foreground tracking-widest px-1">Height (cm)</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 178"
+                    value={heightCm}
+                    onChange={e => setHeightCm(e.target.value)}
+                    className="h-10 text-sm font-black bg-white/50 border-muted-foreground/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase font-black text-muted-foreground tracking-widest px-1">Weight (kg)</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 82"
+                    value={weightKg}
+                    onChange={e => setWeightKg(e.target.value)}
+                    className="h-10 text-sm font-black bg-white/50 border-muted-foreground/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase font-black text-muted-foreground tracking-widest px-1">Body Fat %</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 18"
+                    value={bodyFatPct}
+                    onChange={e => setBodyFatPct(e.target.value)}
+                    className="h-10 text-sm font-black bg-white/50 border-muted-foreground/10"
+                  />
+                </div>
+              </div>
+              <p className="text-[9px] text-muted-foreground italic leading-relaxed">
+                Body fat % drives glycogen reserve estimates. Use DEXA, BodPod, or a reliable assessment. Can also be set via coach chat.
+              </p>
+              <Button
+                onClick={handleSaveBodyComp}
+                disabled={isSavingBodyComp}
+                className="w-full h-10 rounded-xl font-black uppercase tracking-widest text-xs"
+              >
+                {isSavingBodyComp ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : bodyCompSavedRecently ? <Check className="w-4 h-4 mr-2" /> : null}
+                {isSavingBodyComp ? 'Saving…' : bodyCompSavedRecently ? 'Saved' : 'Save Body Comp'}
+              </Button>
             </CardContent>
           </Card>
 

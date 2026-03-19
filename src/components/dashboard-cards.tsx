@@ -400,7 +400,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
               <div className="flex justify-between items-start mb-4">
@@ -443,17 +443,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300 hidden lg:block">
-            <CardContent className="p-6 sm:p-10">
-              <div className="p-3 bg-indigo-100 rounded-xl w-fit mb-4 shadow-sm">
-                <Ruler className="w-6 h-6 text-indigo-600" />
-              </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Height Asset</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Used for BMI calculations</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.heightCm ? `${data.heightCm}cm` : 'N/A'}</h4>
-              <div className="mt-4 h-1 w-12 bg-indigo-200 rounded-full" />
-            </CardContent>
-          </Card>
         </div>
 
         {/* Charts section */}
