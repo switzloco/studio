@@ -10,12 +10,12 @@ import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
-import { DashboardCharts } from './dashboard-charts';
+import { DashboardCharts, computeMaxGlycogenKcal } from './dashboard-charts';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { FoodLogEntry } from '@/lib/food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -82,6 +82,36 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
   }, [data?.history, selectedDateStr, isViewingToday]);
 
+  // Morning glycogen % — chain from previous day's end-of-day estimate.
+  // Uses a simplified single-compartment model on the prior day's daily totals.
+  // New users (no history) start at 100% (full reserves).
+  const morningGlycogenPct = React.useMemo(() => {
+    const history = data?.history;
+    if (!history || history.length === 0) return 100;
+
+    // Find the calendar date one day before the viewed date
+    const [y, m, d] = selectedDateStr.split('-').map(Number);
+    const prevDate = new Date(y, m - 1, d - 1);
+    const prevIso = prevDate.getFullYear() + '-'
+      + String(prevDate.getMonth() + 1).padStart(2, '0') + '-'
+      + String(prevDate.getDate()).padStart(2, '0');
+
+    const prevEntry = history.find(h => (h.isoDate || h.date) === prevIso);
+    if (!prevEntry?.breakdown) return 100;
+
+    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
+    // Use same body-comp-based capacity as the chart
+    const MAX = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
+    // Yesterday started at 100% (base assumption for first known day)
+    const prevMorningKcal = MAX;
+    const restingBurn = MAX * 0.30; // ~30% of daily glycogen budget burned at rest across 16h
+    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70;
+    // Estimate carbs as ~35% of calorie intake (reasonable mixed-diet assumption)
+    const carbKcal = caloriesIn * 0.35;
+    const endKcal = Math.max(0, Math.min(MAX, prevMorningKcal - restingBurn - activeBurn + carbKcal));
+    return Math.round((endKcal / MAX) * 100);
+  }, [data?.history, data?.weightKg, data?.bodyFatPct, selectedDateStr]);
+
   // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
     () => user ? query(
@@ -92,6 +122,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, selectedDateStr]
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
+
+  // Exercise logs for the selected date (used for intraday glycogen timing)
+  const exerciseLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'exercise_log'),
+      where('date', '==', selectedDateStr),
+      limit(20)
+    ) : null,
+    [db, user, selectedDateStr]
+  );
+  const { data: todayExerciseLogs } = useCollection<ExerciseLogEntry>(exerciseLogQuery);
 
   // Sum from non-ignored entries
   const computedTotals = React.useMemo(() => {
@@ -413,7 +454,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </div>
 
         {/* Charts section */}
-        <DashboardCharts caloriesIn={dailyCaloriesIn} caloriesOut={dailyCaloriesOut} carbsG={dailyCarbsG} />
+        <DashboardCharts
+          caloriesIn={dailyCaloriesIn}
+          caloriesOut={dailyCaloriesOut}
+          carbsG={dailyCarbsG}
+          foodLogs={todayFoodLogs ?? undefined}
+          exerciseLogs={todayExerciseLogs ?? undefined}
+          morningGlycogenPct={morningGlycogenPct}
+          weightKg={data.weightKg}
+          bodyFatPct={data.bodyFatPct}
+          isDeviceVerified={data.isDeviceVerified}
+        />
       </div>
 
       <div className="space-y-4">

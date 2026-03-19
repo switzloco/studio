@@ -6,10 +6,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2 } from "lucide-react";
-import { useUser, useFirestore } from '@/firebase';
-import { healthService, UserPreferences } from '@/lib/health-service';
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw } from "lucide-react";
+import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { doc } from 'firebase/firestore';
+import { healthService, UserPreferences, HealthData } from '@/lib/health-service';
 import { useToast } from '@/hooks/use-toast';
+import { Progress } from '@/components/ui/progress';
+
+// Rank tiers — financial seniority ladder matching the app's portfolio metaphor
+const RANKS = [
+  { label: 'Analyst I',         min: 0,     max: 999,      color: 'text-slate-500',   bg: 'bg-slate-100'   },
+  { label: 'Analyst II',        min: 1000,  max: 1999,     color: 'text-blue-500',    bg: 'bg-blue-100'    },
+  { label: 'Associate',         min: 2000,  max: 2999,     color: 'text-indigo-500',  bg: 'bg-indigo-100'  },
+  { label: 'Vice President',    min: 3000,  max: 4999,     color: 'text-violet-600',  bg: 'bg-violet-100'  },
+  { label: 'Director',          min: 5000,  max: 7499,     color: 'text-amber-600',   bg: 'bg-amber-100'   },
+  { label: 'Managing Director', min: 7500,  max: 9999,     color: 'text-orange-600',  bg: 'bg-orange-100'  },
+  { label: 'Partner',           min: 10000, max: Infinity,  color: 'text-emerald-600', bg: 'bg-emerald-100' },
+] as const;
+
+const STARTING_EQUITY = 1250;
+
+function getRank(points: number) {
+  return RANKS.find(r => points >= r.min && points <= r.max) ?? RANKS[0];
+}
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -24,6 +43,29 @@ export function PreferencesView() {
   const [savedRecently, setSavedRecently] = useState(false);
   const isLoadedRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Live points subscription
+  const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
+  const { data: healthData } = useDoc<HealthData>(userDocRef);
+  const points = healthData?.visceralFatPoints ?? STARTING_EQUITY;
+
+  // Points editor state
+  const [pointsInput, setPointsInput] = useState('');
+  const [isSavingPoints, setIsSavingPoints] = useState(false);
+
+  const handleSetPoints = async (newPoints: number) => {
+    if (!user || isNaN(newPoints)) return;
+    setIsSavingPoints(true);
+    try {
+      await healthService.updateHealthData(db, user.uid, { visceralFatPoints: newPoints });
+      toast({ title: 'Points Updated', description: `Equity set to ${newPoints.toLocaleString()} pts.` });
+      setPointsInput('');
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Update Failed', description: e.message });
+    } finally {
+      setIsSavingPoints(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -107,6 +149,126 @@ export function PreferencesView() {
           <Briefcase className="w-6 h-6 text-primary" />
         </div>
       </div>
+
+      {/* Rank / Leveling Card */}
+      {(() => {
+        const rank = getRank(points);
+        const rankIdx = RANKS.indexOf(rank as typeof RANKS[number]);
+        const nextRank = rankIdx < RANKS.length - 1 ? RANKS[rankIdx + 1] : null;
+
+        // Numeric level: every 3000 pts = 1 level. Level 1 = 0-2999, Level 2 = 3000-5999, etc.
+        const LEVEL_STEP = 3000;
+        const level = Math.floor(Math.max(0, points) / LEVEL_STEP) + 1;
+        const levelBase = (level - 1) * LEVEL_STEP;
+        const levelProgressPct = Math.min(100, Math.round(((points - levelBase) / LEVEL_STEP) * 100));
+        const ptsToNextLevel = LEVEL_STEP - (points - levelBase);
+        // First 1000 milestone within Level 1
+        const hit1kMilestone = points >= 1000;
+        const show1kBadge = level === 1; // only relevant in level 1
+        return (
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <Trophy className="w-4 h-4" />
+                Portfolio Rank
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-4 space-y-5">
+              {/* Current rank + level display */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-3 ${rank.bg} rounded-xl relative`}>
+                    <Trophy className={`w-5 h-5 ${rank.color}`} />
+                    <span className="absolute -top-1.5 -right-1.5 text-[9px] font-black bg-primary text-white rounded-full px-1.5 py-0.5 leading-none">
+                      L{level}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-lg font-black uppercase tracking-tight ${rank.color}`}>{rank.label}</p>
+                      <span className="text-[10px] font-black text-muted-foreground/60 bg-muted rounded px-1.5 py-0.5">LVL {level}</span>
+                    </div>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                      {points.toLocaleString()} pts · {ptsToNextLevel.toLocaleString()} to Level {level + 1}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Level progress bar with 1K milestone marker */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                  <span>Level {level}</span>
+                  <span>Level {level + 1} at {((level) * LEVEL_STEP).toLocaleString()} pts</span>
+                </div>
+                <div className="relative">
+                  <Progress value={levelProgressPct} className="h-2" />
+                  {/* 1K milestone tick within Level 1 */}
+                  {show1kBadge && (
+                    <div className="absolute top-0 h-2" style={{ left: `${(1000 / LEVEL_STEP) * 100}%` }}>
+                      <div className={`w-0.5 h-full ${hit1kMilestone ? 'bg-violet-500' : 'bg-muted-foreground/30'}`} />
+                    </div>
+                  )}
+                </div>
+                {show1kBadge && (
+                  <p className={`text-[9px] font-bold ${hit1kMilestone ? 'text-violet-500' : 'text-muted-foreground/60'}`}>
+                    {hit1kMilestone ? '✓ 1K Milestone reached' : `1K Milestone at 1,000 pts · ${(1000 - points).toLocaleString()} away`}
+                  </p>
+                )}
+              </div>
+
+              {/* Prestige tier ladder */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 pt-1">
+                {RANKS.map((r) => (
+                  r.max === Infinity ? null :
+                  <div key={r.label} className={`p-2 rounded-lg text-center border ${points >= r.min ? `${r.bg} border-transparent` : 'border-dashed border-muted-foreground/20 opacity-40'}`}>
+                    <p className={`text-[9px] font-black uppercase tracking-wider ${points >= r.min ? r.color : 'text-muted-foreground'}`}>{r.label}</p>
+                    <p className="text-[8px] text-muted-foreground font-bold">{r.min.toLocaleString()}+</p>
+                  </div>
+                ))}
+                <div key="Partner" className={`p-2 rounded-lg text-center border ${points >= 10000 ? 'bg-emerald-100 border-transparent' : 'border-dashed border-muted-foreground/20 opacity-40'}`}>
+                  <p className={`text-[9px] font-black uppercase tracking-wider ${points >= 10000 ? 'text-emerald-600' : 'text-muted-foreground'}`}>Partner</p>
+                  <p className="text-[8px] text-muted-foreground font-bold">10,000+</p>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="border-t pt-4 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Equity Controls</p>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Set points manually…"
+                    value={pointsInput}
+                    onChange={e => setPointsInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSetPoints(Number(pointsInput))}
+                    className="h-10 text-sm bg-white/50 border-muted-foreground/10 font-bold"
+                  />
+                  <Button
+                    size="icon"
+                    className="h-10 w-10 shrink-0 rounded-xl"
+                    disabled={isSavingPoints || !pointsInput}
+                    onClick={() => handleSetPoints(Number(pointsInput))}
+                  >
+                    {isSavingPoints ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0 rounded-xl border-dashed"
+                    disabled={isSavingPoints}
+                    title="Reset to starting equity (1,250 pts)"
+                    onClick={() => handleSetPoints(STARTING_EQUITY)}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </Button>
+                </div>
+                <p className="text-[9px] text-muted-foreground italic">Reset returns to {STARTING_EQUITY.toLocaleString()} pts (starting equity). Enter any value to jump to a specific tier.</p>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Left Column: Schedule */}
