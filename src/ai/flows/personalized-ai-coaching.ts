@@ -321,8 +321,10 @@ const logExerciseTool = ai.defineTool(
     });
 
     // Record equity event for the history chart
+    const [ew_y, ew_m, ew_d] = input.localDate.split('-').map(Number);
+    const ewDisplayDate = new Date(ew_y, ew_m - 1, ew_d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     await healthService.recordEquityEvent(firestore, input.userId, {
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      date: ewDisplayDate,
       gain: input.pointsDelta,
       status: input.pointsDelta >= 0 ? 'Bullish' : 'Correction',
       detail: input.name,
@@ -489,8 +491,10 @@ const scoreDailyVFTool = ai.defineTool(
     await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
 
     // Record equity event with full breakdown for the day-detail view
+    const [vf_y, vf_m, vf_d] = input.localDate.split('-').map(Number);
+    const vfDisplayDate = new Date(vf_y, vf_m - 1, vf_d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     await healthService.recordEquityEvent(firestore, input.userId, {
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      date: vfDisplayDate,
       isoDate: input.localDate,
       gain: result.score,
       status: result.score >= 0 ? 'Bullish' : 'Correction',

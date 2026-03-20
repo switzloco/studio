@@ -3,8 +3,9 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine,
-         CartesianGrid, AreaChart, Area, Legend } from 'recharts';
-import { Flame, BatteryCharging } from 'lucide-react';
+         CartesianGrid, AreaChart, Area, Legend, ReferenceArea } from 'recharts';
+import { Flame, BatteryCharging, Info } from 'lucide-react';
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 
 interface DashboardChartsProps {
@@ -21,6 +22,8 @@ interface DashboardChartsProps {
     bodyFatPct?: number;
     /** True when calorie burn data comes from Fitbit (−10% already applied). */
     isDeviceVerified?: boolean;
+    /** True when showing today — enables the NOW line + projection shading. */
+    isViewingToday?: boolean;
 }
 
 /** Liver glycogen capacity — fixed regardless of body size (~100g). */
@@ -233,6 +236,7 @@ export function DashboardCharts({
     morningGlycogenPct = 100,
     weightKg, bodyFatPct,
     isDeviceVerified,
+    isViewingToday = false,
 }: DashboardChartsProps) {
     const totalMaxKcal    = computeMaxGlycogenKcal(weightKg, bodyFatPct);
     const muscleMaxKcal   = Math.max(400, totalMaxKcal - LIVER_MAX_KCAL);
@@ -256,6 +260,16 @@ export function DashboardCharts({
         () => buildGlycogenCurves(caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs),
         [caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs],
     );
+
+    // Slot index for the current time — null when viewing a past/future date or outside chart hours
+    const nowSlot = React.useMemo(() => {
+        if (!isViewingToday) return null;
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const slot = Math.round((nowMin - START_MIN) / INTERVAL_MIN);
+        if (slot <= 0 || slot >= NUM_SLOTS - 1) return null; // before 6 AM or after 10 PM
+        return slot;
+    }, [isViewingToday]);
 
     const last            = glycogenData[glycogenData.length - 1];
     const endLiverPct     = last.liver;
@@ -329,9 +343,24 @@ export function DashboardCharts({
                             <BatteryCharging className="w-5 h-5 text-blue-500" />
                         </div>
                         <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">Glycogen Reserves</CardTitle>
+                        <TooltipProvider delayDuration={200}>
+                            <UITooltip>
+                                <TooltipTrigger asChild>
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground/50 cursor-help shrink-0" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[280px] text-xs leading-relaxed">
+                                    <p className="font-black uppercase tracking-wide mb-1">What is glycogen?</p>
+                                    <p>Glycogen is your body&apos;s fast-access carbohydrate fuel — stored glucose in your liver and muscles.</p>
+                                    <p className="mt-1.5"><span className="font-bold text-orange-400">Liver (100g):</span> Maintains blood sugar between meals. Drained by overnight fasting, alcohol, and rest. Refuelled by carbs (priority).</p>
+                                    <p className="mt-1.5"><span className="font-bold text-blue-400">Muscle (~{muscleCapacityG}g):</span> Powers high-intensity effort — sprints, lifts, intervals. Biologically locked at rest; only exercise burns it. Alcohol doesn&apos;t drain it directly but impairs resynthesis.</p>
+                                    <p className="mt-1.5 opacity-70 italic">Estimated model — not medical advice.</p>
+                                </TooltipContent>
+                            </UITooltip>
+                        </TooltipProvider>
                     </div>
                     <CardDescription className="text-xs font-medium">
                         Liver (100g) + Muscle (~{muscleCapacityG}g) · Estimated · Not medical advice
+                        {nowSlot != null && <span className="text-muted-foreground/60"> · dashed line = now, shaded = projected</span>}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -375,6 +404,26 @@ export function DashboardCharts({
                                         </span>
                                     )}
                                 />
+                                {/* Projection zone — shaded region after current time */}
+                                {nowSlot != null && (
+                                    <ReferenceArea
+                                        x1={nowSlot}
+                                        x2={NUM_SLOTS - 1}
+                                        fill="#94a3b8"
+                                        fillOpacity={0.07}
+                                        stroke="none"
+                                    />
+                                )}
+                                {/* NOW line */}
+                                {nowSlot != null && (
+                                    <ReferenceLine
+                                        x={nowSlot}
+                                        stroke="#475569"
+                                        strokeDasharray="4 3"
+                                        strokeWidth={1.5}
+                                        label={{ value: 'NOW', position: 'insideTopRight', fontSize: 8, fontWeight: 800, fill: '#475569', offset: 4 }}
+                                    />
+                                )}
                                 <Area
                                     type="monotone"
                                     dataKey="liver"
