@@ -456,6 +456,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           weightKg={data.weightKg}
           bodyFatPct={data.bodyFatPct}
           isDeviceVerified={data.isDeviceVerified}
+          isViewingToday={isViewingToday}
         />
       </div>
 
