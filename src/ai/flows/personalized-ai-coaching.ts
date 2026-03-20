@@ -443,7 +443,7 @@ const getRecentLogsTool = ai.defineTool(
 const scoreDailyVFTool = ai.defineTool(
   {
     name: 'score_daily_vf',
-    description: `Calculates today's Visceral Fat score using the 5-rule scoring engine. Call this at end-of-day or when the user asks for their daily score. The tool aggregates food logs to determine alcohol intake, seed oil meals, and calorie totals, then applies: (1) caloric deficit base score, (2) fasting multiplier, (3) alcohol freeze, (4) cortisol tax, (5) seed oil penalty. Returns the score and a plain-english breakdown.`,
+    description: `Calculates today's Visceral Fat score using the Alpert-number method. Call this at end-of-day or when the user asks for their daily score. The score = (caloric deficit / Alpert max burn) × 100, capped at 100. Alpert max burn = max sustainable fat oxidation based on fat mass (Alpert 2005). Returns the score, a plain-english breakdown, and coaching context on the 5 rules (protein, fasting, alcohol, sleep, seed oils) as talking points — they do not affect the score directly.`,
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('YYYY-MM-DD'),
@@ -454,6 +454,8 @@ const scoreDailyVFTool = ai.defineTool(
       score: z.number(),
       summary: z.string(),
       newEquity: z.number(),
+      alpertNumber: z.number(),
+      deficit: z.number(),
     }),
   },
   async (input) => {
@@ -466,7 +468,7 @@ const scoreDailyVFTool = ai.defineTool(
     const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
     const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
 
-    // Get current health data for caloriesOut and existing equity
+    // Get current health data for caloriesOut, body comp, and existing equity
     const health = await healthService.getHealthSummary(firestore, input.userId);
     const caloriesOut = health?.dailyCaloriesOut || 2000;
     const currentEquity = health?.visceralFatPoints || 0;
@@ -484,6 +486,8 @@ const scoreDailyVFTool = ai.defineTool(
       alcoholDrinks: totalAlcoholDrinks,
       sleepHours: input.sleepHours,
       seedOilMeals,
+      weightKg: health?.weightKg,
+      bodyFatPct: health?.bodyFatPct,
     });
 
     // Apply score to equity
@@ -508,12 +512,17 @@ const scoreDailyVFTool = ai.defineTool(
         fastingHours: input.fastingHours,
         alcoholDrinks: totalAlcoholDrinks,
         sleepHours: input.sleepHours,
-        seedOilMeals,
         ...result.breakdown,
       },
     });
 
-    return { score: result.score, summary: result.summary, newEquity };
+    return {
+      score: result.score,
+      summary: result.summary,
+      newEquity,
+      alpertNumber: result.breakdown.alpertNumber,
+      deficit: result.breakdown.deficit,
+    };
   }
 );
 
@@ -751,22 +760,40 @@ EXERCISE HISTORY & PHYSICAL ABILITIES:
 - Track and celebrate progress: "You pressed 32kg kettlebells last month — up from 24kg in January. That's a 33% equity gain on overhead press."
 - Never say you don't track this data or can't answer. The data is there — just query it.
 
-VF DAILY SCORING SYSTEM (the 5 Bylaws — this is the authoritative scoring engine):
-Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation.
+VF DAILY SCORING SYSTEM (Alpert Method):
+Score = (caloric deficit ÷ Alpert number) × 100, capped at 100.
 
-Rule 1 — The Caloric Engine: Base score from caloric deficit (max +100 at ~1,000 cal deficit). Protein mandate: cannot claim +100 unless the 150g daily protein target is met. Missing protein caps the positive score at +50.
-Rule 2 — The Fasting Multiplier: A 24+ hour clean fast = automatic +100, bypassing calorie math entirely. 100% of energy comes from stored body fat.
-Rule 3 — The Alcohol Freeze: >2 alcoholic drinks caps the maximum daily score at 0 (fat oxidation halted). If the alcohol also pushes into caloric surplus, penalty drops to -100 to -200.
-Rule 4 — The Cortisol Tax: <6 hours of sleep halves any positive score. A +100 deficit day becomes +50 because cortisol hoards visceral fat.
-Rule 5 — The Seed Oil Penalty: Each meal heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower) deducts -25 "Inflammation Tax."
+The Alpert number is the maximum sustainable fat oxidation rate for this client's body composition:
+  Alpert (kcal/day) = fat mass (lbs) × 31
+  → Default at 25% BF / 150 lbs: ~1,162 kcal/day = 100 pts
+  → At heavier/higher BF: higher Alpert number (bigger furnace)
+
+Examples:
+  800 kcal deficit, Alpert = 1,162 → score = +69
+  1,162 kcal deficit              → score = +100 (maxed out)
+  0 kcal (maintenance)            → score = 0
+  +400 kcal surplus               → score = -34
+
+Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation. The tool returns alpertNumber and deficit so you can explain the math.
+
+THE 5 RULES — COACHING TALKING POINTS (they do NOT directly change the score):
+These are context levers you surface when relevant. They matter because they affect the underlying deficit, hormone environment, or fat oxidation capacity:
+
+Rule 1 — Protein Mandate: Below target protein (usually 150g) means muscle is more likely to be cannibalized to make up the deficit. This is not "clean" fat loss. Call it out: "You're in deficit but protein was short — you're not getting all-fat burning today."
+
+Rule 2 — Fasting Multiplier: Longer fasts deepen the deficit naturally and shift substrate to pure fat oxidation. Note it as a positive lever: "That 18h fast extended your fat burn window."
+
+Rule 3 — Alcohol Load: Alcohol pauses fat oxidation while the liver prioritizes ethanol clearance. It also adds empty calories. Call it out when relevant: "The 8 drinks last night would have suppressed fat oxidation for ~8-10h — your score reflects the calorie math but the metabolic environment was impaired."
+
+Rule 4 — Cortisol Tax: <6h sleep elevates cortisol, which promotes visceral fat retention even in deficit. Flag it: "You're in deficit but poor sleep raises cortisol — the metabolic return on that deficit is lower."
+
+Rule 5 — Seed Oils: Each seed-oil-heavy meal triggers systemic inflammation (seed oils oxidize to aldehydes at cooking temps). Flag it as an inflammation liability: "Good deficit, but 2 seed-oil meals put inflammation on the books."
 
 When logging food (log_food), ALWAYS assess and set:
 - alcoholDrinks: count of alcoholic beverages in the meal (beer/wine/cocktail = 1 each)
-- hasSeedOils: true if the meal is deep-fried, heavily processed, or cooked in seed oils (typical bar food, fast food, packaged snacks)
+- hasSeedOils: true if the meal is deep-fried, heavily processed, or cooked in seed oils
 
-The MOST PROFITABLE days combine: caloric deficit + 150g protein + fasting protocol + zero alcohol + 8h sleep + no seed oils.
-
-EXERCISE STILL MATTERS for calorie burn (caloriesOut) and muscle building, but exercise alone does NOT directly add VF points. Exercise increases the caloric deficit which feeds Rule 1. Log exercise via log_exercise to track workouts and estimate calorie burn.
+EXERCISE STILL MATTERS — it expands caloriesOut, which directly increases the deficit and the score. Log exercise via log_exercise. Reference the alpertNumber when coaching: "You burned ~600 cal today. Your Alpert ceiling is 1,162 — you're at 52 pts before food."
 
 WEARABLE ACCURACY TIERS (apply every time you call log_exercise):
 Fitness wearables systematically overestimate calorie burn for certain activity types. The system corrects this automatically — but YOU must classify the exercise correctly. Pass your raw calorie estimate and the right tier; the discount is applied for you.

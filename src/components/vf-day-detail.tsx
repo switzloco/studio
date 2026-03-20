@@ -83,61 +83,78 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
 
         {hasBreakdown ? (
           <div className="space-y-3">
-            <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground px-1">5-Rule Breakdown</p>
+            {/* Alpert math — shown when new-format breakdown exists */}
+            {b.alpertNumber != null && b.deficit != null ? (
+              <div className="p-4 rounded-xl bg-slate-50 ring-1 ring-slate-200 space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Alpert Score Math</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-bold text-foreground">{Math.abs(b.deficit).toLocaleString()} kcal {b.deficit >= 0 ? 'deficit' : 'surplus'}</span>
+                  <span className="text-xs text-muted-foreground">÷ {b.alpertNumber.toLocaleString()} kcal Alpert max</span>
+                  <span className="text-sm font-black text-foreground">= {entry.gain > 0 ? '+' : ''}{entry.gain} pts</span>
+                </div>
+                <div className="h-1.5 bg-slate-200 rounded-full">
+                  {entry.gain > 0 && (
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, entry.gain)}%` }} />
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground px-1 pt-2">Coaching Context</p>
 
             <RuleRow
-              icon={<Flame className={`w-5 h-5 ${b.baseScore > 0 ? 'text-emerald-600' : b.baseScore < 0 ? 'text-red-500' : 'text-gray-500'}`} />}
+              icon={<Flame className={`w-5 h-5 ${(b.caloriesOut - b.caloriesIn) > 0 ? 'text-emerald-600' : 'text-red-500'}`} />}
               label="Rule 1 — Caloric Engine"
-              value={`${b.caloriesIn.toLocaleString()} in / ${b.caloriesOut.toLocaleString()} out (${b.caloriesOut - b.caloriesIn > 0 ? '-' : '+'}${Math.abs(b.caloriesOut - b.caloriesIn).toLocaleString()} cal)`}
-              impact={`${b.baseScore > 0 ? '+' : ''}${b.baseScore} base`}
-              status={b.baseScore > 0 ? 'positive' : b.baseScore < 0 ? 'negative' : 'neutral'}
+              value={`${b.caloriesIn.toLocaleString()} in / ${b.caloriesOut.toLocaleString()} out (+${Math.abs(b.caloriesOut - b.caloriesIn).toLocaleString()} cal)`}
+              impact={`${b.caloriesOut - b.caloriesIn > 0 ? '-' : '+'}${Math.abs(b.caloriesOut - b.caloriesIn).toLocaleString()} kcal`}
+              status={(b.caloriesOut - b.caloriesIn) > 0 ? 'positive' : 'negative'}
             />
 
             <RuleRow
-              icon={<Beef className={`w-5 h-5 ${b.proteinMet ? 'text-emerald-600' : 'text-red-500'}`} />}
+              icon={<Beef className={`w-5 h-5 ${(b.proteinMet ?? (b.proteinG >= b.proteinGoal)) ? 'text-emerald-600' : 'text-red-500'}`} />}
               label="Protein Mandate"
               value={`${b.proteinG}g / ${b.proteinGoal}g`}
-              impact={b.proteinMet ? 'Met' : 'Capped at +50'}
-              status={b.proteinMet ? 'positive' : 'negative'}
+              impact={(b.proteinMet ?? (b.proteinG >= b.proteinGoal)) ? 'Clean burn' : 'Muscle risk'}
+              status={(b.proteinMet ?? (b.proteinG >= b.proteinGoal)) ? 'positive' : 'negative'}
             />
 
             <RuleRow
-              icon={<Zap className={`w-5 h-5 ${b.fastingOverride ? 'text-emerald-600' : 'text-gray-400'}`} />}
-              label="Rule 2 — Fasting Multiplier"
+              icon={<Zap className={`w-5 h-5 ${(b.fastingActive ?? b.fastingOverride) ? 'text-emerald-600' : 'text-gray-400'}`} />}
+              label="Rule 2 — Fasting Window"
               value={`${b.fastingHours}h fasted`}
-              impact={b.fastingOverride ? 'Auto +100' : 'N/A'}
-              status={b.fastingOverride ? 'positive' : 'neutral'}
+              impact={(b.fastingActive ?? b.fastingOverride) ? 'Fat window open' : 'N/A'}
+              status={(b.fastingActive ?? b.fastingOverride) ? 'positive' : 'neutral'}
             />
 
             <RuleRow
-              icon={<Wine className={`w-5 h-5 ${b.alcoholCap ? 'text-red-500' : b.alcoholDrinks > 0 ? 'text-amber-500' : 'text-emerald-600'}`} />}
-              label="Rule 3 — Alcohol Freeze"
+              icon={<Wine className={`w-5 h-5 ${b.alcoholDrinks > 2 ? 'text-red-500' : b.alcoholDrinks > 0 ? 'text-amber-500' : 'text-emerald-600'}`} />}
+              label="Rule 3 — Alcohol Load"
               value={`${b.alcoholDrinks} drink${b.alcoholDrinks !== 1 ? 's' : ''}`}
-              impact={b.alcoholCap ? `Capped${b.alcoholPenalty < 0 ? ` ${b.alcoholPenalty}` : ' at 0'}` : 'Clear'}
-              status={b.alcoholCap ? 'negative' : 'positive'}
+              impact={b.alcoholDrinks > 2 ? 'Oxidation paused' : b.alcoholDrinks > 0 ? 'Partial load' : 'Clear'}
+              status={b.alcoholDrinks > 2 ? 'negative' : b.alcoholDrinks > 0 ? 'negative' : 'positive'}
             />
 
             <RuleRow
-              icon={<Moon className={`w-5 h-5 ${b.cortisolMultiplier < 1 ? 'text-red-500' : 'text-emerald-600'}`} />}
+              icon={<Moon className={`w-5 h-5 ${b.sleepHours < 6 ? 'text-red-500' : 'text-emerald-600'}`} />}
               label="Rule 4 — Cortisol Tax"
               value={`${b.sleepHours}h sleep`}
-              impact={b.cortisolMultiplier < 1 ? '50% penalty' : 'No tax'}
-              status={b.cortisolMultiplier < 1 ? 'negative' : 'positive'}
+              impact={b.sleepHours < 6 ? 'Cortisol elevated' : 'No tax'}
+              status={b.sleepHours < 6 ? 'negative' : 'positive'}
             />
 
             <RuleRow
-              icon={<Droplets className={`w-5 h-5 ${b.seedOilPenalty < 0 ? 'text-red-500' : 'text-emerald-600'}`} />}
+              icon={<Droplets className={`w-5 h-5 ${b.seedOilMeals > 0 ? 'text-red-500' : 'text-emerald-600'}`} />}
               label="Rule 5 — Seed Oil Penalty"
               value={`${b.seedOilMeals} seed-oil meal${b.seedOilMeals !== 1 ? 's' : ''}`}
-              impact={b.seedOilPenalty < 0 ? `${b.seedOilPenalty} pts` : 'Clean'}
-              status={b.seedOilPenalty < 0 ? 'negative' : 'positive'}
+              impact={b.seedOilMeals > 0 ? 'Inflammation load' : 'Clean'}
+              status={b.seedOilMeals > 0 ? 'negative' : 'positive'}
             />
           </div>
         ) : (
           <div className="p-8 text-center bg-muted/20 rounded-2xl border-2 border-dashed">
             <p className="text-[11px] font-black text-muted-foreground uppercase tracking-widest">No Detailed Breakdown Available</p>
             <p className="text-xs text-muted-foreground mt-2">
-              This entry was recorded before the 5-rule scoring system. New entries will include a full breakdown.
+              This entry was recorded before the detailed scoring system. New entries will include a full breakdown.
             </p>
           </div>
         )}

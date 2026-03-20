@@ -17,13 +17,20 @@ export interface VFBreakdown {
   alcoholDrinks: number;
   sleepHours: number;
   seedOilMeals: number;
-  baseScore: number;
-  fastingOverride: boolean;
-  alcoholCap: boolean;
-  alcoholPenalty: number;
-  cortisolMultiplier: number;
-  seedOilPenalty: number;
-  proteinMet: boolean;
+  // Alpert-based scoring (new)
+  alpertNumber?: number;
+  deficit?: number;
+  proteinMet?: boolean;
+  fastingActive?: boolean;
+  alcoholFlag?: boolean;
+  poorSleep?: boolean;
+  // Legacy rule-based fields (kept for backward compat with old history entries)
+  baseScore?: number;
+  fastingOverride?: boolean;
+  alcoholCap?: boolean;
+  alcoholPenalty?: number;
+  cortisolMultiplier?: number;
+  seedOilPenalty?: number;
 }
 
 export interface HistoryEntry {
