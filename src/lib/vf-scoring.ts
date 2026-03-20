@@ -1,37 +1,62 @@
 /**
  * @fileOverview Visceral Fat daily scoring engine.
  *
- * Five rules determine a daily VF score (typically -200 to +100):
+ * SCORING: Alpert-number based.
+ *   Alpert number = max sustainable fat oxidation (kcal/day) per body composition.
+ *   Formula: fat mass (lbs) × 31 kcal/lb/day  [Alpert 2005]
+ *   Score = clamp(deficit / alpertNumber × 100, -∞, 100)
+ *     • 100 pts  = burned at maximum sustainable fat-loss rate
+ *     • 0 pts    = break-even (maintenance)
+ *     • negative = caloric surplus
  *
- * Rule 1 — Caloric Engine: base score from caloric deficit (max +100).
- *          Requires 150g protein to claim +100.
- * Rule 2 — Fasting Multiplier: 24+ hour clean fast = automatic +100, bypasses calorie math.
- * Rule 3 — Alcohol Freeze: >2 drinks caps score at 0; surplus + alcohol = -100 to -200.
- * Rule 4 — Cortisol Tax: <6 hours sleep halves any positive score.
- * Rule 5 — Seed Oil Penalty: each seed-oil-heavy meal deducts -25 ("Inflammation Tax").
+ * 5-RULE ASSESSMENTS (coaching context, not scoring):
+ *   Rule 1 — Caloric Engine    (base deficit context)
+ *   Rule 2 — Fasting Multiplier
+ *   Rule 3 — Alcohol Freeze
+ *   Rule 4 — Cortisol Tax
+ *   Rule 5 — Seed Oil Penalty
  */
+
+/** Compute maximum sustainable fat oxidation in kcal/day (Alpert 2005). */
+export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): number {
+  const kg = weightKg ?? 68;           // ~150 lbs default
+  const bfFraction = bodyFatPct != null ? bodyFatPct / 100 : 0.25;
+  const fatMassLbs = kg * bfFraction * 2.20462;
+  return Math.round(Math.max(500, fatMassLbs * 31)); // floor at 500 to avoid div-by-zero extremes
+}
 
 export interface DailyVFInput {
   caloriesIn: number;
   caloriesOut: number;
   proteinG: number;
-  proteinGoal: number;         // typically 150
-  fastingHours: number;        // consecutive clean fast hours for the day
-  alcoholDrinks: number;       // number of alcoholic drinks consumed
+  proteinGoal: number;       // typically 150
+  fastingHours: number;      // consecutive clean fast hours for the day
+  alcoholDrinks: number;     // number of alcoholic drinks consumed
   sleepHours: number;
-  seedOilMeals: number;        // count of meals with heavy seed oil / deep-fried
+  seedOilMeals: number;      // count of meals with heavy seed oil / deep-fried
+  weightKg?: number;         // used for Alpert number calculation
+  bodyFatPct?: number;       // 0-100; used for Alpert number calculation
 }
 
 export interface DailyVFResult {
   score: number;
   breakdown: {
-    baseScore: number;
-    fastingOverride: boolean;
-    alcoholCap: boolean;
-    alcoholPenalty: number;
-    cortisolMultiplier: number;
-    seedOilPenalty: number;
+    // Alpert core
+    alpertNumber: number;
+    deficit: number;
+    // Coaching context (rule assessments)
     proteinMet: boolean;
+    fastingActive: boolean;
+    alcoholFlag: boolean;
+    poorSleep: boolean;
+    seedOilMeals: number;
+    // Legacy fields kept for backward compatibility with old history entries
+    baseScore?: number;
+    fastingOverride?: boolean;
+    alcoholCap?: boolean;
+    alcoholPenalty?: number;
+    cortisolMultiplier?: number;
+    seedOilPenalty?: number;
   };
   summary: string;
 }
@@ -46,91 +71,42 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     alcoholDrinks,
     sleepHours,
     seedOilMeals,
+    weightKg,
+    bodyFatPct,
   } = input;
 
+  const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
+  const deficit = caloriesOut - caloriesIn;
+  const score = Math.min(100, Math.round((deficit / alpertNumber) * 100));
+
+  // --- Coaching context assessments (informational only) ---
   const proteinMet = proteinG >= proteinGoal;
-
-  // --- Rule 2: Fasting Multiplier (checked first — overrides calorie math) ---
-  const fastingOverride = fastingHours >= 24;
-
-  // --- Rule 1: Caloric Engine ---
-  let baseScore: number;
-  if (fastingOverride) {
-    // 24+ hour clean fast guarantees +100 (all energy from body fat)
-    baseScore = 100;
-  } else {
-    const deficit = caloriesOut - caloriesIn;
-    if (deficit <= 0) {
-      // Surplus: scale from 0 to -100 based on how far over
-      // Every 500 cal surplus = -100
-      baseScore = Math.max(-100, Math.round((deficit / 500) * 100));
-    } else {
-      // Deficit: scale toward +100, where ~1000 cal deficit = +100
-      baseScore = Math.min(100, Math.round((deficit / 1000) * 100));
-      // Protein gate: cannot claim +100 without hitting protein goal
-      if (baseScore > 0 && !proteinMet) {
-        baseScore = Math.min(baseScore, 50);
-      }
-    }
-  }
-
-  // --- Rule 3: Alcohol Freeze ---
-  let alcoholCap = false;
-  let alcoholPenalty = 0;
-  if (alcoholDrinks > 2) {
-    alcoholCap = true;
-    const surplus = caloriesIn - caloriesOut;
-    if (surplus > 0) {
-      // In surplus + alcohol: -100 to -200
-      alcoholPenalty = -Math.min(200, Math.max(100, Math.round((surplus / 500) * 100) + 100));
-    }
-    // Cap the base score at 0 (can't claim a fat-burning day)
-    baseScore = Math.min(0, baseScore);
-  }
-
-  // Start with base + alcohol penalty
-  let score = baseScore + alcoholPenalty;
-
-  // --- Rule 4: Cortisol Tax ---
-  let cortisolMultiplier = 1;
-  if (sleepHours < 6) {
-    cortisolMultiplier = 0.5;
-    // Only halve positive scores
-    if (score > 0) {
-      score = Math.round(score * cortisolMultiplier);
-    }
-  }
-
-  // --- Rule 5: Seed Oil Penalty ---
-  const seedOilPenalty = -25 * seedOilMeals;
-  score += seedOilPenalty;
-
-  // Clamp to [-200, 100]
-  score = Math.max(-200, Math.min(100, score));
+  const fastingActive = fastingHours >= 16;   // noteworthy at 16h+
+  const alcoholFlag = alcoholDrinks > 2;
+  const poorSleep = sleepHours < 6;
 
   // Build summary
-  const parts: string[] = [];
-  if (fastingOverride) parts.push('24h+ fast -> automatic +100 base');
-  else if (baseScore > 0) parts.push(`caloric deficit -> +${baseScore} base`);
-  else if (baseScore < 0) parts.push(`caloric surplus -> ${baseScore} base`);
-  else parts.push('break-even calories -> 0 base');
-
-  if (!proteinMet && !fastingOverride) parts.push(`protein mandate missed (${proteinG}/${proteinGoal}g) -> capped`);
-  if (alcoholCap) parts.push(`${alcoholDrinks} drinks -> market halted at 0`);
-  if (alcoholPenalty < 0) parts.push(`surplus + alcohol -> ${alcoholPenalty} penalty`);
-  if (cortisolMultiplier < 1 && (baseScore + alcoholPenalty) > 0) parts.push(`<6h sleep -> 50% cortisol tax`);
-  if (seedOilPenalty < 0) parts.push(`${seedOilMeals} seed-oil meal(s) -> ${seedOilPenalty} inflammation tax`);
+  const pct = Math.abs(Math.round((deficit / alpertNumber) * 100));
+  const directionLabel = deficit >= 0 ? 'deficit' : 'surplus';
+  const parts: string[] = [
+    `${Math.abs(deficit)} kcal ${directionLabel} vs ${alpertNumber} kcal Alpert max → ${score} pts`,
+  ];
+  if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
+  if (fastingActive) parts.push(`${fastingHours}h fast`);
+  if (alcoholFlag) parts.push(`${alcoholDrinks} drinks — liver overhead`);
+  if (poorSleep) parts.push(`<6h sleep — cortisol elevated`);
+  if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s) — inflammation load`);
 
   return {
     score,
     breakdown: {
-      baseScore,
-      fastingOverride,
-      alcoholCap,
-      alcoholPenalty,
-      cortisolMultiplier,
-      seedOilPenalty,
+      alpertNumber,
+      deficit,
       proteinMet,
+      fastingActive,
+      alcoholFlag,
+      poorSleep,
+      seedOilMeals,
     },
     summary: `Daily VF score: ${score}. ${parts.join('; ')}.`,
   };
