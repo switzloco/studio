@@ -11,6 +11,7 @@ import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
+import { computeAlpertNumber } from '@/lib/vf-scoring';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -209,6 +210,18 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
+  // Alpert daily score
+  const alpertNumber = computeAlpertNumber(data.weightKg, data.bodyFatPct);
+  const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
+  // For past days use stored score if available, otherwise compute
+  const dailyAlpertScore = !isViewingToday && historyEntry
+    ? historyEntry.gain
+    : (dailyCaloriesOut > 0 && dailyCaloriesIn > 0)
+      ? Math.min(100, Math.round((alpertDeficit / alpertNumber) * 100))
+      : null;
+  const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
+  const scoreHasDevicePending = isViewingToday && !data.isDeviceVerified;
+
   const handleConnectFitbit = async () => {
     if (!user) return;
 
@@ -382,6 +395,49 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Alpert Daily Score */}
+        <Card className="border-none shadow-xl overflow-hidden">
+          <CardContent className="p-0">
+            <div className={`p-6 ${dailyAlpertScore !== null && dailyAlpertScore >= 0 ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : dailyAlpertScore !== null ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-slate-600 to-slate-800'} text-white`}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.25em] opacity-70">{isViewingToday ? "Today's Score" : "Day's Score"}</p>
+                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Alpert Fat Burn Index</p>
+                </div>
+                <div className="p-2.5 bg-white/15 rounded-xl">
+                  <Zap className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="flex items-end gap-3 mb-4">
+                <div className="text-6xl font-black italic tracking-tighter">
+                  {dailyAlpertScore !== null ? (
+                    <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending) && <span className="text-2xl opacity-60">*</span>}</>
+                  ) : '—'}
+                </div>
+                <div className="text-sm font-bold opacity-60 mb-2">/ 100</div>
+              </div>
+              <div className="h-1.5 bg-white/20 rounded-full mb-4">
+                {dailyAlpertScore !== null && dailyAlpertScore > 0 && (
+                  <div className="h-full bg-white rounded-full transition-all duration-500" style={{ width: `${Math.min(100, dailyAlpertScore)}%` }} />
+                )}
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
+                <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0 ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}` : 'Log food to calculate'}</span>
+                <span>Alpert max: {alpertNumber.toLocaleString()} kcal</span>
+              </div>
+            </div>
+            {(scoreHasFoodPending || scoreHasDevicePending) && (
+              <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
+                  {scoreHasFoodPending && scoreHasDevicePending ? 'Pending food log + device sync' :
+                   scoreHasFoodPending ? 'Pending food log' : 'Pending device sync — burn estimated'}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
           <CardContent className="p-6 sm:p-10 flex items-center gap-8">

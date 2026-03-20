@@ -2,8 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell, Zap, AlertTriangle } from "lucide-react";
-import { computeAlpertNumber } from '@/lib/vf-scoring';
+import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { HealthData, HistoryEntry } from '@/lib/health-service';
@@ -119,18 +118,6 @@ export function HistoryView() {
 
   const history = healthData?.history || [];
 
-  // --- Running daily Alpert score ---
-  const today = new Date().toLocaleDateString('en-CA');
-  const isNewDay = healthData?.lastActiveDate !== today;
-  const alpertNumber = computeAlpertNumber(healthData?.weightKg, healthData?.bodyFatPct);
-  const caloriesIn = isNewDay ? 0 : (healthData?.dailyCaloriesIn ?? 0);
-  const caloriesOut = isNewDay ? 0 : (healthData?.dailyCaloriesOut ?? 0);
-  const deficit = caloriesOut - caloriesIn;
-  const rawDailyScore = caloriesOut > 0 ? Math.min(100, Math.round((deficit / alpertNumber) * 100)) : null;
-  const hasFoodLogged = !isNewDay && caloriesIn > 0;
-  const hasDeviceSync = healthData?.isDeviceVerified ?? false;
-  const scoreIsPending = !hasFoodLogged || !hasDeviceSync;
-
   const handleDayClick = (entry: HistoryEntry) => {
     setSelectedEntry(entry);
     setSheetOpen(true);
@@ -162,55 +149,6 @@ export function HistoryView() {
           <TrendingUp className="w-6 h-6 text-emerald-600" />
         </div>
       </div>
-
-      {/* Today's Running Alpert Score */}
-      <Card className="border-none shadow-xl overflow-hidden">
-        <CardContent className="p-0">
-          <div className={`p-6 ${rawDailyScore !== null && rawDailyScore >= 0 ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : rawDailyScore !== null ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-slate-600 to-slate-800'} text-white`}>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.25em] opacity-70">Today&apos;s Score</p>
-                <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Alpert Fat Burn Index</p>
-              </div>
-              <div className="p-2.5 bg-white/15 rounded-xl">
-                <Zap className="w-5 h-5" />
-              </div>
-            </div>
-            <div className="flex items-end gap-3 mb-4">
-              <div className="text-6xl font-black italic tracking-tighter">
-                {rawDailyScore !== null ? (
-                  <>
-                    {rawDailyScore > 0 ? '+' : ''}{rawDailyScore}
-                    {scoreIsPending && <span className="text-2xl opacity-60">*</span>}
-                  </>
-                ) : '—'}
-              </div>
-              <div className="text-sm font-bold opacity-60 mb-2">/ 100</div>
-            </div>
-            <div className="h-1.5 bg-white/20 rounded-full mb-4">
-              {rawDailyScore !== null && rawDailyScore > 0 && (
-                <div
-                  className="h-full bg-white rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, rawDailyScore)}%` }}
-                />
-              )}
-            </div>
-            <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
-              <span>{caloriesOut > 0 ? `${Math.abs(deficit)} kcal ${deficit >= 0 ? 'deficit' : 'surplus'}` : 'No data yet'}</span>
-              <span>Alpert max: {alpertNumber} kcal</span>
-            </div>
-          </div>
-          {scoreIsPending && (
-            <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
-                {!hasFoodLogged && !hasDeviceSync ? 'Pending food log + device sync' :
-                 !hasFoodLogged ? 'Pending food log' : 'Pending device sync — calorie burn estimated'}
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Ledger Analyst — inline query agent */}
       <LedgerChat />
