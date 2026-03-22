@@ -65,6 +65,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const isViewingToday = selectedDateStr === todayStr;
 
+  // Previous day ISO string — used to query yesterday's logs for glycogen carry-over
+  const prevDateStr = React.useMemo(() => {
+    const [y, m, d] = selectedDateStr.split('-').map(Number);
+    const prev = new Date(y, m - 1, d - 1);
+    return prev.getFullYear() + '-'
+      + String(prev.getMonth() + 1).padStart(2, '0') + '-'
+      + String(prev.getDate()).padStart(2, '0');
+  }, [selectedDateStr]);
+
   const selectedDateObj = React.useMemo(() => {
     const [y, m, d] = selectedDateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
@@ -82,39 +91,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     if (!data?.history || isViewingToday) return null;
     return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
   }, [data?.history, selectedDateStr, isViewingToday]);
-
-  // Morning glycogen % — chain from previous day's end-of-day estimate.
-  // Uses a simplified single-compartment model on the prior day's daily totals.
-  // New users (no history) start at 100% (full reserves).
-  const morningGlycogenPct = React.useMemo(() => {
-    const history = data?.history;
-    if (!history || history.length === 0) return 100;
-
-    // Find the calendar date one day before the viewed date
-    const [y, m, d] = selectedDateStr.split('-').map(Number);
-    const prevDate = new Date(y, m - 1, d - 1);
-    const prevIso = prevDate.getFullYear() + '-'
-      + String(prevDate.getMonth() + 1).padStart(2, '0') + '-'
-      + String(prevDate.getDate()).padStart(2, '0');
-
-    const prevEntry = history.find(h => (h.isoDate || h.date) === prevIso);
-    if (!prevEntry?.breakdown) return 100;
-
-    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
-    // Muscle-only carry-over — liver always starts the day at 60% (overnight fast baseline).
-    // Muscle has no resting burn (glycogen is biologically locked without mechanical stimulus).
-    const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
-    const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
-    // Base assumption: yesterday morning muscle was 100% (full).
-    const prevMuscleKcal = muscleMax;
-    // 85% of glycolytic exercise burn comes from muscle; above-BMR calories ≈ active exercise.
-    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70 * 0.85;
-    // Carbs: ~35% of intake, but liver takes first 30g (120 kcal) priority — rest to muscle.
-    const totalCarbKcal  = caloriesIn * 0.35;
-    const muscleCarbs    = Math.max(0, totalCarbKcal - 120);
-    const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
-    return Math.round((endMuscleKcal / muscleMax) * 100);
-  }, [data?.history, data?.weightKg, data?.bodyFatPct, selectedDateStr]);
 
   // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
@@ -137,6 +113,75 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, selectedDateStr]
   );
   const { data: todayExerciseLogs } = useCollection<ExerciseLogEntry>(exerciseLogQuery);
+
+  // Previous day logs — needed for accurate muscle glycogen carry-over
+  const prevFoodLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'food_log'),
+      where('date', '==', prevDateStr),
+      limit(50)
+    ) : null,
+    [db, user, prevDateStr]
+  );
+  const { data: prevFoodLogs } = useCollection<FoodLogEntry>(prevFoodLogQuery);
+
+  const prevExerciseLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'exercise_log'),
+      where('date', '==', prevDateStr),
+      limit(20)
+    ) : null,
+    [db, user, prevDateStr]
+  );
+  const { data: prevExerciseLogs } = useCollection<ExerciseLogEntry>(prevExerciseLogQuery);
+
+  // Morning muscle glycogen % — chains from previous day's end-of-day state.
+  // Uses actual exercise + food logs from prev day when available; falls back to
+  // history breakdown aggregate only if logs haven't loaded yet.
+  const morningGlycogenPct = React.useMemo(() => {
+    const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
+    const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
+
+    // Tier → fraction of exercise calories that depletes muscle glycogen
+    const MUSCLE_FRACTION: Record<string, number> = {
+      tier1_walking:    0.40,  // mostly fat oxidation
+      tier2_steady_state: 0.65,
+      tier3_anaerobic:  0.85,  // high glycolytic demand (basketball, HIIT, weights)
+    };
+
+    // --- Use actual prev-day logs when available (most accurate) ---
+    if (prevFoodLogs !== undefined && prevExerciseLogs !== undefined) {
+      const activePrevFood = (prevFoodLogs ?? []).filter(e => !e.ignored);
+      const activePrevEx   = (prevExerciseLogs ?? []).filter(e => !e.ignored);
+
+      // Carb replenishment: total carbs → liver priority 30g (120 kcal) → rest to muscle
+      const prevCarbKcal = activePrevFood.reduce((s, e) => s + ((e.carbsG || 0) * 4), 0);
+      const muscleCarbs  = Math.max(0, prevCarbKcal - 120);
+
+      // Exercise glycogen burn: per-exercise tier × adjusted calories
+      const activeBurn = activePrevEx.reduce((s, e) => {
+        const frac = e.activityTier ? (MUSCLE_FRACTION[e.activityTier] ?? 0.65) : 0.65;
+        return s + ((e.adjustedCalories || 0) * frac);
+      }, 0);
+
+      const prevMuscleKcal = muscleMax; // yesterday morning assumed full
+      const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
+      return Math.round((endMuscleKcal / muscleMax) * 100);
+    }
+
+    // --- Fallback: use history entry breakdown aggregate ---
+    const history = data?.history;
+    if (!history || history.length === 0) return 100;
+    const prevEntry = history.find(h => (h.isoDate || h.date) === prevDateStr);
+    if (!prevEntry?.breakdown) return 100;
+
+    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
+    const activeBurnFallback = Math.max(0, caloriesOut - 1800) * 0.65;
+    const totalCarbKcal  = caloriesIn * 0.35;
+    const muscleCarbs    = Math.max(0, totalCarbKcal - 120);
+    const endMuscleKcal  = Math.max(0, Math.min(muscleMax, muscleMax - activeBurnFallback + muscleCarbs));
+    return Math.round((endMuscleKcal / muscleMax) * 100);
+  }, [prevFoodLogs, prevExerciseLogs, data?.history, data?.weightKg, data?.bodyFatPct, prevDateStr]);
 
   // Sum from non-ignored entries
   const computedTotals = React.useMemo(() => {
