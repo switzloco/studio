@@ -11,6 +11,7 @@ import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
+import { computeAlpertNumber } from '@/lib/vf-scoring';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -64,6 +65,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const isViewingToday = selectedDateStr === todayStr;
 
+  // Previous day ISO string — used to query yesterday's logs for glycogen carry-over
+  const prevDateStr = React.useMemo(() => {
+    const [y, m, d] = selectedDateStr.split('-').map(Number);
+    const prev = new Date(y, m - 1, d - 1);
+    return prev.getFullYear() + '-'
+      + String(prev.getMonth() + 1).padStart(2, '0') + '-'
+      + String(prev.getDate()).padStart(2, '0');
+  }, [selectedDateStr]);
+
   const selectedDateObj = React.useMemo(() => {
     const [y, m, d] = selectedDateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
@@ -81,39 +91,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     if (!data?.history || isViewingToday) return null;
     return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
   }, [data?.history, selectedDateStr, isViewingToday]);
-
-  // Morning glycogen % — chain from previous day's end-of-day estimate.
-  // Uses a simplified single-compartment model on the prior day's daily totals.
-  // New users (no history) start at 100% (full reserves).
-  const morningGlycogenPct = React.useMemo(() => {
-    const history = data?.history;
-    if (!history || history.length === 0) return 100;
-
-    // Find the calendar date one day before the viewed date
-    const [y, m, d] = selectedDateStr.split('-').map(Number);
-    const prevDate = new Date(y, m - 1, d - 1);
-    const prevIso = prevDate.getFullYear() + '-'
-      + String(prevDate.getMonth() + 1).padStart(2, '0') + '-'
-      + String(prevDate.getDate()).padStart(2, '0');
-
-    const prevEntry = history.find(h => (h.isoDate || h.date) === prevIso);
-    if (!prevEntry?.breakdown) return 100;
-
-    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
-    // Muscle-only carry-over — liver always starts the day at 60% (overnight fast baseline).
-    // Muscle has no resting burn (glycogen is biologically locked without mechanical stimulus).
-    const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
-    const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
-    // Base assumption: yesterday morning muscle was 100% (full).
-    const prevMuscleKcal = muscleMax;
-    // 85% of glycolytic exercise burn comes from muscle; above-BMR calories ≈ active exercise.
-    const activeBurn = Math.max(0, caloriesOut - 2000) * 0.70 * 0.85;
-    // Carbs: ~35% of intake, but liver takes first 30g (120 kcal) priority — rest to muscle.
-    const totalCarbKcal  = caloriesIn * 0.35;
-    const muscleCarbs    = Math.max(0, totalCarbKcal - 120);
-    const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
-    return Math.round((endMuscleKcal / muscleMax) * 100);
-  }, [data?.history, data?.weightKg, data?.bodyFatPct, selectedDateStr]);
 
   // Compute protein/calorie totals from the food log for the selected date
   const foodLogQuery = useMemoFirebase(
@@ -136,6 +113,75 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, selectedDateStr]
   );
   const { data: todayExerciseLogs } = useCollection<ExerciseLogEntry>(exerciseLogQuery);
+
+  // Previous day logs — needed for accurate muscle glycogen carry-over
+  const prevFoodLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'food_log'),
+      where('date', '==', prevDateStr),
+      limit(50)
+    ) : null,
+    [db, user, prevDateStr]
+  );
+  const { data: prevFoodLogs } = useCollection<FoodLogEntry>(prevFoodLogQuery);
+
+  const prevExerciseLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'exercise_log'),
+      where('date', '==', prevDateStr),
+      limit(20)
+    ) : null,
+    [db, user, prevDateStr]
+  );
+  const { data: prevExerciseLogs } = useCollection<ExerciseLogEntry>(prevExerciseLogQuery);
+
+  // Morning muscle glycogen % — chains from previous day's end-of-day state.
+  // Uses actual exercise + food logs from prev day when available; falls back to
+  // history breakdown aggregate only if logs haven't loaded yet.
+  const morningGlycogenPct = React.useMemo(() => {
+    const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
+    const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
+
+    // Tier → fraction of exercise calories that depletes muscle glycogen
+    const MUSCLE_FRACTION: Record<string, number> = {
+      tier1_walking:    0.40,  // mostly fat oxidation
+      tier2_steady_state: 0.65,
+      tier3_anaerobic:  0.85,  // high glycolytic demand (basketball, HIIT, weights)
+    };
+
+    // --- Use actual prev-day logs when available (most accurate) ---
+    if (prevFoodLogs !== undefined && prevExerciseLogs !== undefined) {
+      const activePrevFood = (prevFoodLogs ?? []).filter(e => !e.ignored);
+      const activePrevEx   = (prevExerciseLogs ?? []).filter(e => !e.ignored);
+
+      // Carb replenishment: total carbs → liver priority 30g (120 kcal) → rest to muscle
+      const prevCarbKcal = activePrevFood.reduce((s, e) => s + ((e.carbsG || 0) * 4), 0);
+      const muscleCarbs  = Math.max(0, prevCarbKcal - 120);
+
+      // Exercise glycogen burn: per-exercise tier × adjusted calories
+      const activeBurn = activePrevEx.reduce((s, e) => {
+        const frac = e.activityTier ? (MUSCLE_FRACTION[e.activityTier] ?? 0.65) : 0.65;
+        return s + ((e.adjustedCalories || 0) * frac);
+      }, 0);
+
+      const prevMuscleKcal = muscleMax; // yesterday morning assumed full
+      const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
+      return Math.round((endMuscleKcal / muscleMax) * 100);
+    }
+
+    // --- Fallback: use history entry breakdown aggregate ---
+    const history = data?.history;
+    if (!history || history.length === 0) return 100;
+    const prevEntry = history.find(h => (h.isoDate || h.date) === prevDateStr);
+    if (!prevEntry?.breakdown) return 100;
+
+    const { caloriesIn, caloriesOut } = prevEntry.breakdown;
+    const activeBurnFallback = Math.max(0, caloriesOut - 1800) * 0.65;
+    const totalCarbKcal  = caloriesIn * 0.35;
+    const muscleCarbs    = Math.max(0, totalCarbKcal - 120);
+    const endMuscleKcal  = Math.max(0, Math.min(muscleMax, muscleMax - activeBurnFallback + muscleCarbs));
+    return Math.round((endMuscleKcal / muscleMax) * 100);
+  }, [prevFoodLogs, prevExerciseLogs, data?.history, data?.weightKg, data?.bodyFatPct, prevDateStr]);
 
   // Sum from non-ignored entries
   const computedTotals = React.useMemo(() => {
@@ -208,6 +254,18 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
+
+  // Alpert daily score
+  const alpertNumber = computeAlpertNumber(data.weightKg, data.bodyFatPct);
+  const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
+  // For past days use stored score if available, otherwise compute
+  const dailyAlpertScore = !isViewingToday && historyEntry
+    ? historyEntry.gain
+    : (dailyCaloriesOut > 0 && dailyCaloriesIn > 0)
+      ? Math.min(100, Math.round((alpertDeficit / alpertNumber) * 100))
+      : null;
+  const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
+  const scoreHasDevicePending = isViewingToday && !data.isDeviceVerified;
 
   const handleConnectFitbit = async () => {
     if (!user) return;
@@ -382,6 +440,49 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Alpert Daily Score */}
+        <Card className="border-none shadow-xl overflow-hidden">
+          <CardContent className="p-0">
+            <div className={`p-6 ${dailyAlpertScore !== null && dailyAlpertScore >= 0 ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : dailyAlpertScore !== null ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-slate-600 to-slate-800'} text-white`}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.25em] opacity-70">{isViewingToday ? "Today's Score" : "Day's Score"}</p>
+                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Alpert Fat Burn Index</p>
+                </div>
+                <div className="p-2.5 bg-white/15 rounded-xl">
+                  <Zap className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="flex items-end gap-3 mb-4">
+                <div className="text-6xl font-black italic tracking-tighter">
+                  {dailyAlpertScore !== null ? (
+                    <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending) && <span className="text-2xl opacity-60">*</span>}</>
+                  ) : '—'}
+                </div>
+                <div className="text-sm font-bold opacity-60 mb-2">/ 100</div>
+              </div>
+              <div className="h-1.5 bg-white/20 rounded-full mb-4">
+                {dailyAlpertScore !== null && dailyAlpertScore > 0 && (
+                  <div className="h-full bg-white rounded-full transition-all duration-500" style={{ width: `${Math.min(100, dailyAlpertScore)}%` }} />
+                )}
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
+                <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0 ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}` : 'Log food to calculate'}</span>
+                <span>Alpert max: {alpertNumber.toLocaleString()} kcal</span>
+              </div>
+            </div>
+            {(scoreHasFoodPending || scoreHasDevicePending) && (
+              <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
+                  {scoreHasFoodPending && scoreHasDevicePending ? 'Pending food log + device sync' :
+                   scoreHasFoodPending ? 'Pending food log' : 'Pending device sync — burn estimated'}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
           <CardContent className="p-6 sm:p-10 flex items-center gap-8">

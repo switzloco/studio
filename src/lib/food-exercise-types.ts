@@ -33,6 +33,8 @@ export interface ExerciseLogEntry {
   durationMin?: number;
   weightKg?: number;
   estimatedCaloriesBurned?: number;
+  adjustedCalories?: number;   // post-tier-discount calorie burn stored by log_exercise
+  activityTier?: 'tier1_walking' | 'tier2_steady_state' | 'tier3_anaerobic';
   pointsDelta: number;
   notes?: string;
   ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
