@@ -52,4 +52,5 @@ export interface UserProfile {
   injuries?: string[];
   dietaryRestrictions?: string[];
   lastConversationSummary?: string;
+  motivationalWhy?: string; // The user's personal "why" — their deeper reason for pursuing their goals
 }
