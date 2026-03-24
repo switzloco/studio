@@ -53,6 +53,15 @@ export interface HealthLog {
   verified?: boolean;
 }
 
+/** Per-day Fitbit metrics snapshot — keyed by YYYY-MM-DD in fitbitByDate. */
+export interface FitbitDailySnapshot {
+  steps?: number;
+  hrv?: number;
+  sleepHours?: number;
+  recoveryStatus?: 'low' | 'medium' | 'high';
+  caloriesOut?: number;
+}
+
 export interface HealthData {
   id?: string;
   steps: number;
@@ -68,6 +77,7 @@ export interface HealthData {
   weightKg?: number;
   bodyFatPct?: number;    // 0-100, from DEXA/assessment; used for glycogen capacity estimate
   history: HistoryEntry[];
+  fitbitByDate?: Record<string, FitbitDailySnapshot>; // per-day Fitbit snapshots keyed by YYYY-MM-DD
   updatedAt?: FieldValue | Timestamp;
   createdAt?: FieldValue | Timestamp;
   isAnonymous: boolean;

@@ -102,6 +102,21 @@ export async function GET(request: NextRequest) {
 
     await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
 
+    // Store a daily snapshot so "previous day" view shows Fitbit data correctly.
+    const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
+    const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
+      steps: syncResult.steps.value,
+      sleepHours: syncResult.sleep.value,
+    };
+    if (syncResult.hrv.value > 0) {
+      snapshot.hrv = syncResult.hrv.value;
+      snapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
+    }
+    if (healthUpdate.dailyCaloriesOut) {
+      snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
+    }
+    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
+
     const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
     await adminHealthService.logActivity(firestore, userId, {
       category: 'health_sync',

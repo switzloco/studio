@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials } from './health-service';
+import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot } from './health-service';
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 
 /**
@@ -46,6 +46,12 @@ export const adminHealthService = {
   async updateHealthData(db: Firestore, userId: string, updates: Partial<HealthData>): Promise<void> {
     const docRef = db.doc(`users/${userId}`);
     await docRef.set({ ...updates, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  },
+
+  /** Writes a per-day Fitbit snapshot using dot-notation so other dates are not overwritten. */
+  async saveFitbitDailySnapshot(db: Firestore, userId: string, date: string, snapshot: FitbitDailySnapshot): Promise<void> {
+    const docRef = db.doc(`users/${userId}`);
+    await docRef.update({ [`fitbitByDate.${date}`]: snapshot, updatedAt: FieldValue.serverTimestamp() });
   },
 
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {

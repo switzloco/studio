@@ -239,6 +239,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     );
   }
 
+  // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
+  const fitbitForDate = !isViewingToday ? (data.fitbitByDate?.[selectedDateStr] ?? null) : null;
+
   // Use computed totals from food_log (accurate) or fall back to user doc counter
   const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
@@ -512,7 +515,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
               <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
-              <h4 className="text-4xl font-black italic">{isViewingToday ? (data.steps || 0).toLocaleString() : 'N/A'}</h4>
+              <h4 className="text-4xl font-black italic">
+                {isViewingToday
+                  ? (data.steps || 0).toLocaleString()
+                  : fitbitForDate?.steps != null ? fitbitForDate.steps.toLocaleString() : 'N/A'}
+              </h4>
               <div className="mt-4 h-1 w-12 bg-orange-200 rounded-full" />
             </CardContent>
           </Card>
@@ -526,8 +533,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({isViewingToday && data.hrv > 0 ? `${data.hrv}ms` : 'no reading'})</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{isViewingToday ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A') : 'N/A'}</h4>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">
+                Based on HRV ({isViewingToday
+                  ? (data.hrv > 0 ? `${data.hrv}ms` : 'no reading')
+                  : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : 'no reading')})
+              </p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">
+                {isViewingToday
+                  ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A')
+                  : (fitbitForDate?.recoveryStatus?.toUpperCase() ?? 'N/A')}
+              </h4>
               <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
             </CardContent>
           </Card>

@@ -78,8 +78,22 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     else healthUpdate.recoveryStatus = 'low';
   }
 
+  // Build the daily snapshot for historical lookups (steps/HRV visible on past days).
+  const dailySnapshot: import('./health-service').FitbitDailySnapshot = {
+    steps: result.steps.value,
+    sleepHours: result.sleep.value,
+  };
+  if (hrv > 0) {
+    dailySnapshot.hrv = hrv;
+    dailySnapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
+  }
+  if (healthUpdate.dailyCaloriesOut) {
+    dailySnapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
+  }
+
   try {
     await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, today, dailySnapshot);
     // Stamp lastSyncedAt — reuse latestCreds (already in memory) to avoid a redundant re-fetch.
     await adminHealthService.saveFitbitCredentials(firestore, userId, {
       ...latestCreds,
