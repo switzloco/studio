@@ -84,6 +84,7 @@ export interface HealthData {
   onboardingDay: number;
   onboardingComplete: boolean;
   isDeviceVerified: boolean;
+  connectedDevice?: 'fitbit' | 'oura'; // which wearable is currently linked
   lastActiveDate?: string;
 }
 
@@ -113,6 +114,14 @@ export interface FitbitCredentials {
   accessToken: string;
   refreshToken: string;
   fitbitUserId: string;
+  expiresAt: number; // Unix ms timestamp
+  lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
+}
+
+export interface OuraCredentials {
+  accessToken: string;
+  refreshToken: string;
+  ouraUserId: string;
   expiresAt: number; // Unix ms timestamp
   lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
 }
@@ -205,6 +214,22 @@ export const healthService = {
 
   async deleteFitbitCredentials(db: Firestore, userId: string): Promise<void> {
     const docRef = doc(db, 'users', userId, 'preferences', 'fitbit_tokens');
+    await deleteDoc(docRef);
+  },
+
+  async saveOuraCredentials(db: Firestore, userId: string, creds: OuraCredentials): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'oura_tokens');
+    await setDoc(docRef, creds);
+  },
+
+  async getOuraCredentials(db: Firestore, userId: string): Promise<OuraCredentials | null> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'oura_tokens');
+    const snap = await getDoc(docRef);
+    return snap.exists() ? (snap.data() as OuraCredentials) : null;
+  },
+
+  async deleteOuraCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'oura_tokens');
     await deleteDoc(docRef);
   },
 
