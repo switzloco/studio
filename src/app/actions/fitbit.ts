@@ -3,7 +3,7 @@
 
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { syncFitbitData as _syncFitbitData } from '@/lib/fitbit-sync';
+import { syncFitbitData as _syncFitbitData, syncFitbitSnapshot as _syncFitbitSnapshot } from '@/lib/fitbit-sync';
 import { fitbitService } from '@/lib/fitbit-service';
 import type { SyncResult } from '@/lib/fitbit-sync';
 
@@ -11,6 +11,11 @@ export type { SyncResult };
 
 export async function syncFitbitData(userId: string, localDate?: string): Promise<SyncResult> {
   return _syncFitbitData(userId, localDate);
+}
+
+/** Syncs a specific past date — snapshot only, never overwrites today's live metrics. */
+export async function syncFitbitSnapshot(userId: string, date: string): Promise<SyncResult> {
+  return _syncFitbitSnapshot(userId, date);
 }
 
 /**

@@ -9,7 +9,7 @@ import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightnin
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { ouraService } from '@/lib/oura-service';
-import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
+import { syncFitbitData, syncFitbitSnapshot, SyncResult } from '@/app/actions/fitbit';
 import { syncOuraData, OuraSyncResult } from '@/app/actions/oura';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
@@ -315,17 +315,27 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     setIsSyncing(true);
     let result: SyncResult | null = null;
     try {
-      const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
-      result = await syncFitbitData(user.uid, localDate);
+      if (isViewingToday) {
+        const localDate = new Date().toLocaleDateString('en-CA');
+        result = await syncFitbitData(user.uid, localDate);
+      } else {
+        // Viewing a past date — sync that date's snapshot only, never clobber today's live metrics.
+        result = await syncFitbitSnapshot(user.uid, selectedDateStr);
+      }
     } catch (e) {
-      console.error('[handleResync] syncFitbitData threw:', e);
+      console.error('[handleResync] Fitbit sync threw:', e);
     } finally {
       setIsSyncing(false);
     }
     if (!result) {
       toast({ variant: 'destructive', title: 'Sync Error', description: 'Unexpected error — check server logs.' });
     } else if (result.success) {
-      toast({ title: 'Sync Complete', description: 'Fitbit data refreshed from your device.' });
+      toast({
+        title: 'Sync Complete',
+        description: isViewingToday
+          ? 'Fitbit data refreshed from your device.'
+          : `${selectedDateStr} data refreshed from Fitbit.`,
+      });
     } else {
       const descriptions: Record<string, string> = {
         no_credentials: 'No Fitbit credentials found. Reconnect your Fitbit.',
@@ -536,7 +546,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </Button>
                 <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
                   {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                  Sync Now
+                  {isViewingToday ? 'Sync Now' : 'Sync Date'}
                 </Button>
               </div>
             </CardContent>
