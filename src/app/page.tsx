@@ -21,7 +21,7 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
-import { syncFitbitData, getFitbitLastSyncedAt } from '@/app/actions/fitbit';
+import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory } from '@/app/actions/fitbit';
 
 const ChatInterface = dynamic(() => import('@/components/chat-interface').then(m => ({ default: m.ChatInterface })), {
   ssr: false,
@@ -56,6 +56,7 @@ export default function Home() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const hasSyncedFitbit = useRef(false);
+  const hasBackfilledFitbit = useRef(false);
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
@@ -86,6 +87,19 @@ export default function Home() {
       }
     })();
   }, [user, healthData?.isDeviceVerified]);
+
+  // Backfill historical Fitbit snapshots once per session if yesterday is missing.
+  // Silently fires in the background — no toast, no spinner.
+  useEffect(() => {
+    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || hasBackfilledFitbit.current) return;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+    const hasYesterday = !!healthData?.fitbitByDate?.[yesterdayStr];
+    if (hasYesterday) return; // already populated, skip
+    hasBackfilledFitbit.current = true;
+    backfillFitbitHistory(user.uid).catch(e => console.error('[BackfillFitbit] Failed:', e));
+  }, [user, healthData?.isDeviceVerified, healthData?.fitbitByDate]);
 
   // Show toast for Fitbit OAuth callback result.
   useEffect(() => {
