@@ -6,9 +6,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw } from "lucide-react";
-import { HealthData, UserPreferences, FitbitCredentials, healthService } from '@/lib/health-service';
+import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
+import { ouraService } from '@/lib/oura-service';
 import { syncFitbitData, SyncResult } from '@/app/actions/fitbit';
+import { syncOuraData, OuraSyncResult } from '@/app/actions/oura';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber } from '@/lib/vf-scoring';
@@ -52,6 +54,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user]
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
+
+  // Read Oura credentials to show lastSyncedAt in the UI.
+  const ouraTokensRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'oura_tokens') : null,
+    [db, user]
+  );
+  const { data: ouraCreds } = useDoc<OuraCredentials>(ouraTokensRef);
 
   // Today's date string (YYYY-MM-DD)
   const todayStr = React.useMemo(() => {
@@ -195,6 +204,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   }, [todayFoodLogs]);
 
   const [isSyncing, setIsSyncing] = React.useState(false);
+  const [isOuraSyncing, setIsOuraSyncing] = React.useState(false);
 
   if (isLoading) {
     return (
@@ -238,6 +248,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       </div>
     );
   }
+
+  // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
+  const fitbitForDate = !isViewingToday ? (data.fitbitByDate?.[selectedDateStr] ?? null) : null;
 
   // Use computed totals from food_log (accurate) or fall back to user doc counter
   const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
@@ -334,10 +347,87 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       await healthService.deleteFitbitCredentials(db, user.uid);
       await healthService.updateHealthData(db, user.uid, {
         isDeviceVerified: false,
+        connectedDevice: undefined,
       });
       toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
     } catch (e) {
       console.error('[Fitbit Disconnect] Failed:', e);
+      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect properly.' });
+    }
+  };
+
+  const handleConnectOura = async () => {
+    if (!user) return;
+
+    const clientId = process.env.NEXT_PUBLIC_OURA_CLIENT_ID;
+    if (!clientId) {
+      try {
+        await healthService.saveOuraCredentials(db, user.uid, {
+          accessToken: 'mock_oura_token',
+          refreshToken: 'mock_oura_refresh',
+          ouraUserId: 'mock_oura_user',
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        });
+        await healthService.updateHealthData(db, user.uid, {
+          isDeviceVerified: true,
+          connectedDevice: 'oura',
+          steps: 7841,
+          sleepHours: 7.5,
+          hrv: 58,
+        });
+        toast({ title: 'Oura Ring Linked (Demo)', description: 'Mock device data loaded. Set NEXT_PUBLIC_OURA_CLIENT_ID for real integration.' });
+      } catch (e) {
+        console.error('[Oura Mock] Failed:', e);
+        toast({ variant: 'destructive', title: 'Connection Failed', description: 'Could not simulate Oura link.' });
+      }
+      return;
+    }
+
+    window.location.href = ouraService.getAuthUrl(user.uid);
+  };
+
+  const handleResyncOura = async () => {
+    if (!user || isOuraSyncing) return;
+    setIsOuraSyncing(true);
+    let result: OuraSyncResult | null = null;
+    try {
+      const localDate = new Date().toLocaleDateString('en-CA');
+      result = await syncOuraData(user.uid, localDate);
+    } catch (e) {
+      console.error('[handleResyncOura] syncOuraData threw:', e);
+    } finally {
+      setIsOuraSyncing(false);
+    }
+    if (!result) {
+      toast({ variant: 'destructive', title: 'Sync Error', description: 'Unexpected error — check server logs.' });
+    } else if (result.success) {
+      toast({ title: 'Sync Complete', description: 'Oura data refreshed from your ring.' });
+    } else {
+      const descriptions: Record<string, string> = {
+        no_credentials: 'No Oura credentials found. Reconnect your Oura Ring.',
+        token_refresh_failed: 'Token expired and could not be refreshed. Reconnect your Oura Ring.',
+        api_failed: 'Oura API returned an error. Check server logs.',
+        write_failed: 'Data fetched but Firestore write failed. Check server logs.',
+      };
+      toast({
+        variant: 'destructive',
+        title: 'Sync Failed',
+        description: descriptions[result.reason] ?? 'Could not pull latest data.',
+      });
+    }
+  };
+
+  const handleDisconnectOura = async () => {
+    if (!user) return;
+    try {
+      await healthService.deleteOuraCredentials(db, user.uid);
+      await healthService.updateHealthData(db, user.uid, {
+        isDeviceVerified: false,
+        connectedDevice: undefined,
+      });
+      toast({ title: 'Oura Ring Disconnected', description: 'Your device connection has been removed.' });
+    } catch (e) {
+      console.error('[Oura Disconnect] Failed:', e);
       toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect properly.' });
     }
   };
@@ -393,7 +483,37 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           </div>
         </div>
 
-        {data.isDeviceVerified ? (
+        {data.isDeviceVerified && (data.connectedDevice === 'oura' || (!data.connectedDevice && ouraCreds)) ? (
+          // Oura Ring connected
+          <Card className="border-none bg-violet-50 ring-1 ring-violet-200 shadow-sm overflow-hidden">
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-violet-100 rounded-lg">
+                  <ShieldCheck className="w-5 h-5 text-violet-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-tight text-violet-800">Oura Ring Connected</p>
+                  <p className="text-[10px] font-bold text-violet-700/70">
+                    {ouraCreds?.lastSyncedAt
+                      ? `Last synced ${formatTimeAgo(ouraCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
+                      : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleDisconnectOura} className="text-violet-800 border-violet-200 hover:bg-violet-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                  <Unplug className="w-3 h-3 mr-1.5" />
+                  Reset
+                </Button>
+                <Button size="sm" onClick={handleResyncOura} disabled={isOuraSyncing} className="bg-violet-600 hover:bg-violet-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  {isOuraSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
+                  Sync Now
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : data.isDeviceVerified ? (
+          // Fitbit connected (default / connectedDevice === 'fitbit')
           <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
             <CardContent className="p-4 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -422,6 +542,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
         ) : (
+          // No device connected — offer both options
           <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
             <CardContent className="p-4 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -433,10 +554,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and HRV.</p>
                 </div>
               </div>
-              <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                Connect Fitbit
-                <CloudLightning className="w-3 h-3 ml-2" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={handleConnectOura} className="bg-violet-600 hover:bg-violet-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  Oura Ring
+                  <CloudLightning className="w-3 h-3 ml-2" />
+                </Button>
+                <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  Fitbit
+                  <CloudLightning className="w-3 h-3 ml-2" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -512,7 +639,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
               <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
-              <h4 className="text-4xl font-black italic">{isViewingToday ? (data.steps || 0).toLocaleString() : 'N/A'}</h4>
+              <h4 className="text-4xl font-black italic">
+                {isViewingToday
+                  ? (data.steps || 0).toLocaleString()
+                  : fitbitForDate?.steps != null ? fitbitForDate.steps.toLocaleString() : 'N/A'}
+              </h4>
               <div className="mt-4 h-1 w-12 bg-orange-200 rounded-full" />
             </CardContent>
           </Card>
@@ -526,8 +657,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Based on HRV ({isViewingToday && data.hrv > 0 ? `${data.hrv}ms` : 'no reading'})</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{isViewingToday ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A') : 'N/A'}</h4>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">
+                Based on HRV ({isViewingToday
+                  ? (data.hrv > 0 ? `${data.hrv}ms` : 'no reading')
+                  : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : 'no reading')})
+              </p>
+              <h4 className="text-4xl font-black italic uppercase tracking-tighter">
+                {isViewingToday
+                  ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A')
+                  : (fitbitForDate?.recoveryStatus?.toUpperCase() ?? 'N/A')}
+              </h4>
               <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
             </CardContent>
           </Card>

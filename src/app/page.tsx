@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -200,6 +201,15 @@ export default function Home() {
           <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-40">
             Strict Data Solvency • Encrypted Audit Trails • No Garbage Data
           </p>
+          <div className="flex items-center justify-center gap-4">
+            <Link href="/privacy" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              Privacy Policy
+            </Link>
+            <span className="text-muted-foreground/30 text-[9px]">•</span>
+            <Link href="/terms" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              Terms of Service
+            </Link>
+          </div>
         </div>
       </div>
     );

@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials } from './health-service';
+import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials } from './health-service';
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 
 /**
@@ -48,6 +48,12 @@ export const adminHealthService = {
     await docRef.set({ ...updates, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   },
 
+  /** Writes a per-day Fitbit snapshot using dot-notation so other dates are not overwritten. */
+  async saveFitbitDailySnapshot(db: Firestore, userId: string, date: string, snapshot: FitbitDailySnapshot): Promise<void> {
+    const docRef = db.doc(`users/${userId}`);
+    await docRef.update({ [`fitbitByDate.${date}`]: snapshot, updatedAt: FieldValue.serverTimestamp() });
+  },
+
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
     const docRef = db.doc(`users/${userId}`);
     await docRef.update({
@@ -88,6 +94,17 @@ export const adminHealthService = {
     const docRef = db.doc(`users/${userId}/preferences/fitbit_tokens`);
     const snap = await docRef.get();
     return snap.exists ? (snap.data() as FitbitCredentials) : null;
+  },
+
+  async saveOuraCredentials(db: Firestore, userId: string, creds: OuraCredentials): Promise<void> {
+    const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
+    await docRef.set(creds);
+  },
+
+  async getOuraCredentials(db: Firestore, userId: string): Promise<OuraCredentials | null> {
+    const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
+    const snap = await docRef.get();
+    return snap.exists ? (snap.data() as OuraCredentials) : null;
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>): Promise<void> {
