@@ -638,7 +638,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your {data.connectedDevice === 'oura' ? 'Oura Ring' : 'Fitbit'}</p>
               <h4 className="text-4xl font-black italic">
                 {isViewingToday
                   ? (data.steps || 0).toLocaleString()
