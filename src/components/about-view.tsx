@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -177,6 +178,17 @@ export function AboutView() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Legal links */}
+      <div className="flex items-center justify-center gap-4 pb-2">
+        <Link href="/privacy" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+          Privacy Policy
+        </Link>
+        <span className="text-muted-foreground/30 text-[9px]">•</span>
+        <Link href="/terms" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+          Terms of Service
+        </Link>
       </div>
 
     </div>
