@@ -256,10 +256,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
   const dailyCarbsG = computedTotals?.carbsG ?? (data.dailyCarbsG || 0);
-  // For past dates, use the history breakdown's calories out if available
+  // For past dates, prefer the history breakdown, then the Fitbit/Oura snapshot, then current doc value.
   const dailyCaloriesOut = isViewingToday
     ? (data.dailyCaloriesOut || 2000)
-    : (historyEntry?.breakdown?.caloriesOut || data.dailyCaloriesOut || 2000);
+    : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data.dailyCaloriesOut || 2000);
 
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
