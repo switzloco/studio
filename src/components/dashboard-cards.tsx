@@ -256,10 +256,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
   const dailyCarbsG = computedTotals?.carbsG ?? (data.dailyCarbsG || 0);
-  // For past dates, use the history breakdown's calories out if available
+  // For past dates, prefer the history breakdown, then the Fitbit/Oura snapshot, then current doc value.
   const dailyCaloriesOut = isViewingToday
     ? (data.dailyCaloriesOut || 2000)
-    : (historyEntry?.breakdown?.caloriesOut || data.dailyCaloriesOut || 2000);
+    : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data.dailyCaloriesOut || 2000);
 
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
@@ -638,7 +638,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your Fitbit</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your {data.connectedDevice === 'oura' ? 'Oura Ring' : 'Fitbit'}</p>
               <h4 className="text-4xl font-black italic">
                 {isViewingToday
                   ? (data.steps || 0).toLocaleString()
