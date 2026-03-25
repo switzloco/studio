@@ -106,3 +106,66 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
 
   return { success: true };
 }
+
+/**
+ * Syncs Fitbit data for a specific past date — updates ONLY the per-day
+ * snapshot, never the main health doc fields (steps/HRV/sleepHours).
+ *
+ * Used when viewing a past date (e.g., finalising yesterday's score the
+ * next morning) so you get the complete day's data without clobbering
+ * today's live metrics.
+ */
+export async function syncFitbitSnapshot(userId: string, date: string): Promise<SyncResult> {
+  const firestore = getAdminFirestore();
+
+  const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
+  if (!creds) return { success: false, reason: 'no_credentials' };
+
+  let accessToken = creds.accessToken;
+  let latestCreds = creds;
+  const fiveMinutes = 5 * 60 * 1000;
+  if (Date.now() + fiveMinutes >= creds.expiresAt) {
+    let refreshed;
+    try {
+      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+    } catch (error) {
+      console.error('[syncFitbitSnapshot] Token refresh error:', error);
+      return { success: false, reason: 'token_refresh_failed' };
+    }
+    if (!refreshed) return { success: false, reason: 'token_refresh_failed' };
+    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
+    await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+    accessToken = refreshed.accessToken;
+  }
+
+  let result;
+  try {
+    result = await fitbitService.syncTodayData(accessToken, date);
+  } catch (error) {
+    console.error('[syncFitbitSnapshot] Fitbit API call failed:', error);
+    return { success: false, reason: 'api_failed' };
+  }
+  if (!result.success) return { success: false, reason: 'api_failed' };
+
+  const hrv = result.hrv.value;
+  const snapshot: import('./health-service').FitbitDailySnapshot = {
+    steps: result.steps.value,
+    sleepHours: result.sleep.value,
+  };
+  if (hrv > 0) {
+    snapshot.hrv = hrv;
+    snapshot.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
+  }
+  if (result.caloriesOut && result.caloriesOut.value > 0) {
+    snapshot.caloriesOut = Math.round(result.caloriesOut.value * 0.90);
+  }
+
+  try {
+    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snapshot);
+  } catch (error) {
+    console.error('[syncFitbitSnapshot] Firestore write failed:', error);
+    return { success: false, reason: 'write_failed' };
+  }
+
+  return { success: true };
+}

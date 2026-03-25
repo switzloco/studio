@@ -27,6 +27,8 @@ export interface FitbitInitialSyncResult extends FitbitSyncResult {
   heightCm?: number;
   /** Most recent day that had actual data (YYYY-MM-DD), if any. */
   dataDate?: string;
+  /** Per-day snapshots for the last 7 days, keyed by YYYY-MM-DD. */
+  dailySnapshots?: Record<string, import('./health-service').FitbitDailySnapshot>;
 }
 
 interface FitbitTokenResponse {
@@ -272,11 +274,67 @@ export const fitbitService = {
     const weightKg = profile?.weight ? parseFloat(profile.weight) : undefined;
     const heightCm = profile?.height ? parseFloat(profile.height) : undefined;
 
-    // Mock calories logic on initial
+    // Fetch per-day activity summaries (calories) for each date in the range.
+    // These can't be fetched as a single time-series for caloriesOut (TDEE),
+    // so we batch 7 individual calls in parallel — well within the free-tier rate limit.
+    const dates: string[] = [];
+    for (let d = new Date(weekAgo); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(toFitbitDate(new Date(d)));
+    }
+    const activityByDate = await Promise.all(
+      dates.map(date =>
+        fitbitFetch(`/1/user/-/activities/date/${date}.json`, accessToken)
+          .catch(() => null)
+          .then(data => ({ date, data }))
+      )
+    );
+
+    // Build per-day snapshot map — steps from time series, calories from daily summary,
+    // sleep from sleep records keyed by date, HRV from HRV series keyed by date.
+    const sleepByDate: Record<string, number> = {};
+    for (const rec of sleepRecords) {
+      if (rec.isMainSleep && rec.minutesAsleep > 0 && rec.dateOfSleep) {
+        sleepByDate[rec.dateOfSleep] = rec.minutesAsleep;
+      }
+    }
+    const hrvByDate: Record<string, number> = {};
+    for (const entry of hrvSeries) {
+      const rmssd = entry?.value?.dailyRmssd;
+      if (rmssd > 0 && entry.dateTime) {
+        hrvByDate[entry.dateTime] = Math.round(rmssd);
+      }
+    }
+    const stepsMap: Record<string, number> = {};
+    for (const entry of stepsSeries) {
+      const v = parseInt(entry.value, 10);
+      if (v > 0) stepsMap[entry.dateTime] = v;
+    }
+
+    const dailySnapshots: Record<string, import('./health-service').FitbitDailySnapshot> = {};
     let bestCalories = 0;
-    const activitiesDataInitial = await fitbitFetch(`/1/user/-/activities/date/${endDate}.json`, accessToken).catch(() => null);
-    if (activitiesDataInitial) {
-      bestCalories = (activitiesDataInitial as any)?.summary?.caloriesOut ?? 0;
+    for (const { date, data } of activityByDate) {
+      const caloriesOut = (data as any)?.summary?.caloriesOut ?? 0;
+      const steps = stepsMap[date] ?? 0;
+      const sleepMinutes = sleepByDate[date] ?? 0;
+      const hrv = hrvByDate[date] ?? 0;
+      // Only write a snapshot if we have at least one meaningful data point.
+      if (steps > 0 || sleepMinutes > 0 || hrv > 0 || caloriesOut > 0) {
+        const snap: import('./health-service').FitbitDailySnapshot = {};
+        if (steps > 0) snap.steps = steps;
+        if (sleepMinutes > 0) snap.sleepHours = sleepMinutes / 60;
+        if (hrv > 0) {
+          snap.hrv = hrv;
+          snap.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
+        }
+        if (caloriesOut > 0) {
+          snap.caloriesOut = Math.round(caloriesOut * 0.90); // same 10% Fitbit adjustment
+        }
+        dailySnapshots[date] = snap;
+      }
+      // Track the most recent day's calories for the main health doc.
+      if (date === endDate && caloriesOut > 0) {
+        bestCalories = Math.round(caloriesOut * 0.90);
+      }
     }
 
     return {
@@ -288,6 +346,7 @@ export const fitbitService = {
       weightKg,
       heightCm,
       dataDate,
+      dailySnapshots,
       isVerified: true,
     };
   },
