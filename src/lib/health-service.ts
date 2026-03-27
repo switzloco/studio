@@ -99,6 +99,11 @@ export interface FoodNickname {
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
 }
 
+export interface TemporaryContext {
+  context: string;   // free-text description, e.g. "Traveling to Vegas for 4 days"
+  expiresAt: string; // "YYYY-MM-DD" — context is ignored after this date
+}
+
 export interface UserPreferences {
   weeklySchedule: string;
   equipment: string[];
@@ -108,6 +113,7 @@ export interface UserPreferences {
   };
   profile: UserProfile;
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
+  temporaryContext?: TemporaryContext;           // short-term schedule/situation override
 }
 
 export interface FitbitCredentials {

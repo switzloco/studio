@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials } from './health-service';
-import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from './food-exercise-types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -185,5 +185,50 @@ export const adminHealthService = {
     if (!snap.exists) return null;
     await docRef.update({ ignored });
     return { ...snap.data(), id: snap.id, ignored } as ExerciseLogEntry;
+  },
+
+  // --- Structured Fast Log ---
+
+  async logFast(db: Firestore, userId: string, entry: Omit<FastLogEntry, 'timestamp'>): Promise<string> {
+    const ref = db.collection(`users/${userId}/fast_log`);
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await ref.add(clean);
+    return docRef.id;
+  },
+
+  async queryFastLog(db: Firestore, userId: string, date?: string, limitCount = 20): Promise<FastLogEntry[]> {
+    const ref = db.collection(`users/${userId}/fast_log`);
+    let q: FirebaseFirestore.Query = ref;
+    if (date) {
+      q = q.where('date', '==', date).limit(limitCount);
+    } else {
+      q = q.orderBy('timestamp', 'desc').limit(limitCount);
+    }
+    const snapshot = await q.get();
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as FastLogEntry)
+      .filter(e => !e.ignored);
+  },
+
+  async queryFastLogRange(db: Firestore, userId: string, startDate: string, endDate: string, limitCount = 50): Promise<FastLogEntry[]> {
+    const ref = db.collection(`users/${userId}/fast_log`);
+    const snapshot = await ref
+      .where('date', '>=', startDate)
+      .where('date', '<=', endDate)
+      .limit(limitCount)
+      .get();
+    return snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as FastLogEntry)
+      .filter(e => !e.ignored);
+  },
+
+  async setFastEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<FastLogEntry | null> {
+    const docRef = db.doc(`users/${userId}/fast_log/${entryId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as FastLogEntry;
   },
 };

@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2 } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap } from "lucide-react";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
@@ -25,6 +25,7 @@ export function ChatInterface() {
   const db = useFirestore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [initDone, setInitDone] = useState(false);
+  const [coachingRequested, setCoachingRequested] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -35,9 +36,16 @@ export function ChatInterface() {
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
 
-  // Send a hidden __init__ message to let the AI greet based on profile state
+  // Determine if this is a known user (past onboarding) — they get "tap for coaching" instead of auto-init
+  const isKnownUser = !!(healthData?.onboardingComplete || (healthData?.visceralFatPoints && healthData.visceralFatPoints > 1250));
+
+  // Send a hidden __init__ message to let the AI greet based on profile state.
+  // For known users this only fires when they explicitly tap "Get Coaching".
+  // For new users it fires automatically to start onboarding.
   useEffect(() => {
     if (initDone || healthData === undefined || !user) return;
+    // Known users: wait until they tap the coaching button
+    if (isKnownUser && !coachingRequested) return;
     setInitDone(true);
 
     const runInit = async () => {
@@ -69,7 +77,7 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, initDone, user]);
+  }, [healthData, initDone, user, isKnownUser, coachingRequested]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -139,6 +147,60 @@ export function ChatInterface() {
   const placeholder = hasTargets
     ? "Log a meal, workout, or ask The CFO..."
     : "Tell me about your goals, equipment, routine...";
+
+  // "Tap for coaching" idle screen — shown to known users before they start the session
+  if (isKnownUser && messages.length === 0 && !isLoading) {
+    return (
+      <div className="flex flex-col flex-1 h-0">
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
+          <div className="p-4 bg-primary/10 rounded-3xl">
+            <Zap className="w-10 h-10 text-primary" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-lg font-black uppercase tracking-tight text-foreground italic">The CFO is standing by</p>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your portfolio, your call</p>
+          </div>
+          <Button
+            className="h-14 px-10 rounded-2xl text-sm font-black uppercase tracking-widest shadow-xl"
+            onClick={() => setCoachingRequested(true)}
+          >
+            <Zap className="w-4 h-4 mr-2" />
+            Get Coaching
+          </Button>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-50">
+            Or type below to log a meal or workout
+          </p>
+        </div>
+
+        <div className="p-4 glass-morphism border-t shadow-2xl safe-area-bottom">
+          <div className="flex items-center gap-2">
+            <input type="file" accept="image/*" hidden ref={fileInputRef} onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                const reader = new FileReader();
+                reader.onloadend = () => setSelectedImage(reader.result as string);
+                reader.readAsDataURL(file);
+              }
+            }} />
+            <Button variant="secondary" size="icon" className="rounded-full shrink-0 w-12 h-12" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+              <Camera className="w-5 h-5 text-muted-foreground" />
+            </Button>
+            <Input
+              placeholder="Log a meal, workout, or start a fast..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              onPaste={handlePaste}
+              className="flex-1 rounded-full border-muted bg-white/50"
+            />
+            <Button size="icon" className="rounded-full w-12 h-12" onClick={handleSend} disabled={isLoading || (!input.trim() && !selectedImage)}>
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 h-0">

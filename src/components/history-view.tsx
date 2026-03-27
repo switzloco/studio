@@ -2,11 +2,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell } from "lucide-react";
+import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell, Timer } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { HealthData, HistoryEntry } from '@/lib/health-service';
-import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from '@/lib/food-exercise-types';
 import { VFScoreChart } from './vf-score-chart';
 import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
@@ -14,7 +14,7 @@ import { LedgerChat } from './ledger-chat';
 
 type LedgerEntry = {
   id: string;
-  type: 'food' | 'exercise';
+  type: 'food' | 'exercise' | 'fast';
   name: string;
   detail: string;
   date: string;
@@ -72,6 +72,13 @@ export function HistoryView() {
   ) : null, [db, user]);
   const { data: exerciseLogs, isLoading: isExerciseLoading } = useCollection<ExerciseLogEntry>(exerciseQuery);
 
+  const fastQuery = useMemoFirebase(() => user ? query(
+    collection(db, 'users', user.uid, 'fast_log'),
+    orderBy('timestamp', 'desc'),
+    limit(20)
+  ) : null, [db, user]);
+  const { data: fastLogs, isLoading: isFastLoading } = useCollection<FastLogEntry>(fastQuery);
+
   // Merge, filter ignored, and sort by most recent
   const ledgerEntries = useMemo<LedgerEntry[]>(() => {
     const entries: LedgerEntry[] = [];
@@ -110,11 +117,29 @@ export function HistoryView() {
       }
     }
 
+    if (fastLogs) {
+      for (const f of fastLogs) {
+        if (f.ignored) continue;
+        const status = f.endedAt
+          ? `${f.durationHours?.toFixed(1) ?? '?'}h fast — ${f.startedAt} → ${f.endedAt}`
+          : `Active fast — started ${f.startedAt}`;
+        entries.push({
+          id: f.id,
+          type: 'fast',
+          name: f.endedAt ? `${f.durationHours?.toFixed(1) ?? '?'}h Fast` : 'Active Fast',
+          detail: status + (f.notes ? ` (${f.notes})` : ''),
+          date: f.date,
+          displayTime: formatDisplayTime(f.date, f.startedAt, f.timestamp),
+          timestamp: f.timestamp instanceof Timestamp ? f.timestamp : null,
+        });
+      }
+    }
+
     entries.sort((a, b) => sortKey(b) - sortKey(a));
     return entries;
-  }, [foodLogs, exerciseLogs]);
+  }, [foodLogs, exerciseLogs, fastLogs]);
 
-  const isLogsLoading = isFoodLoading || isExerciseLoading;
+  const isLogsLoading = isFoodLoading || isExerciseLoading || isFastLoading;
 
   const history = healthData?.history || [];
 
@@ -183,9 +208,11 @@ export function HistoryView() {
               <Card key={entry.id} className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:bg-white hover:ring-primary/20 transition-all duration-300">
                 <CardContent className="p-5 flex items-center justify-between">
                   <div className="flex items-center gap-5">
-                    <div className={`p-3 rounded-xl shadow-sm ${entry.type === 'food' ? 'bg-purple-100' : 'bg-orange-100'}`}>
+                    <div className={`p-3 rounded-xl shadow-sm ${entry.type === 'food' ? 'bg-purple-100' : entry.type === 'fast' ? 'bg-teal-100' : 'bg-orange-100'}`}>
                       {entry.type === 'food'
                         ? <Briefcase className="w-5 h-5 text-accent" />
+                        : entry.type === 'fast'
+                        ? <Timer className="w-5 h-5 text-teal-600" />
                         : <Dumbbell className="w-5 h-5 text-orange-600" />}
                     </div>
                     <div>
@@ -193,8 +220,8 @@ export function HistoryView() {
                         <p className="text-sm font-black italic">
                           {entry.displayTime}
                         </p>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full tracking-tighter ${entry.type === 'food' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
-                          {entry.type}
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full tracking-tighter ${entry.type === 'food' ? 'bg-purple-50 text-purple-700 border border-purple-200' : entry.type === 'fast' ? 'bg-teal-50 text-teal-700 border border-teal-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
+                          {entry.type === 'fast' ? 'fast' : entry.type}
                         </span>
                       </div>
                       <p className="text-sm text-muted-foreground font-medium truncate max-w-[250px] sm:max-w-md">{entry.detail}</p>
