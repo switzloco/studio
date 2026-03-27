@@ -24,6 +24,9 @@ service cloud.firestore {
       match /exercise_log/{entryId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
+      match /fast_log/{entryId} {
+        allow get, list, create, update, delete: if isOwner(userId);
+      }
       match /chat_sessions/{chatId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
