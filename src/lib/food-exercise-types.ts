@@ -43,6 +43,18 @@ export interface ExerciseLogEntry {
   date: string; // "YYYY-MM-DD"
 }
 
+export interface FastLogEntry {
+  id?: string;
+  startedAt: string;        // "HH:MM" (24h) — when the fast began
+  endedAt?: string;         // "HH:MM" (24h) — when the fast ended (omit = ongoing)
+  durationHours?: number;   // computed duration; omit when fast is still active
+  date: string;             // "YYYY-MM-DD" of the start day
+  endDate?: string;         // "YYYY-MM-DD" only if fast spans midnight
+  notes?: string;
+  ignored?: boolean;
+  timestamp: FieldValue | Timestamp;
+}
+
 export interface UserProfile {
   heightCm?: number;
   weightKg?: number;

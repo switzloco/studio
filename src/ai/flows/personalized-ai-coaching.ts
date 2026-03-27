@@ -9,7 +9,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
-import type { HealthData, UserPreferences, FoodNickname } from '@/lib/health-service';
+import type { HealthData, UserPreferences, FoodNickname, TemporaryContext } from '@/lib/health-service';
 import { calculateDailyVFScore } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { webSearchTool } from '@/ai/tools/web-search';
@@ -54,13 +54,14 @@ const getUserContextTool = ai.defineTool(
     const yesterdayDate = new Date(y, m - 1, d - 1);
     const yesterday = yesterdayDate.toLocaleDateString('en-CA'); // YYYY-MM-DD
 
-    const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds] = await Promise.all([
+    const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts] = await Promise.all([
       healthService.getUserPreferences(firestore, input.userId),
       healthService.getHealthSummary(firestore, input.userId),
       healthService.queryFoodLog(firestore, input.userId, today, 10),
       healthService.queryExerciseLog(firestore, input.userId, today, 10),
       healthService.queryFoodLog(firestore, input.userId, yesterday, 10),
       healthService.getFitbitCredentials(firestore, input.userId),
+      healthService.queryFastLogRange(firestore, input.userId, yesterday, today, 10),
     ]);
     // Apply the same isNewDay guard the dashboard uses so the AI never sees
     // yesterday's logged intake as today's data.
@@ -106,6 +107,16 @@ const getUserContextTool = ai.defineTool(
       yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
       yesterdaysCalorieTotal: yesterdayFood.reduce((s, e) => s + (e.calories || 0), 0),
       foodNicknames: prefs?.foodNicknames || {},
+      // Fasting history (today + yesterday)
+      recentFasts: recentFasts,
+      activeFast: recentFasts.find(f => !f.endedAt) || null,
+      // Temporary context/schedule override (e.g. "Traveling to Vegas")
+      temporaryContext: (() => {
+        const tc = prefs?.temporaryContext;
+        if (!tc) return null;
+        if (tc.expiresAt < today) return null; // expired
+        return tc;
+      })(),
     };
   }
 );
@@ -347,11 +358,11 @@ const logExerciseTool = ai.defineTool(
 const getRecentLogsTool = ai.defineTool(
   {
     name: 'get_recent_logs',
-    description: 'Retrieves food and/or exercise logs. Use this to check what the user logged today, review recent history, or answer questions about past performance (e.g. heaviest weight lifted, PRs, weekly patterns). Set days=7 for a week, days=30 for a month, etc. Exercise entries include weightKg, sets, reps, durationMin, and category.',
+    description: 'Retrieves food, exercise, and/or fasting logs. Use this to check what the user logged today, review recent history, or answer questions about past performance (e.g. heaviest weight lifted, PRs, weekly patterns, fasting streaks). Set days=7 for a week, days=30 for a month, etc. Exercise entries include weightKg, sets, reps, durationMin, and category.',
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('The current local date YYYY-MM-DD from the client, used as the anchor for "today"'),
-      type: z.enum(['food', 'exercise', 'all']),
+      type: z.enum(['food', 'exercise', 'fasting', 'all']),
       days: z.number().optional().describe('Number of days to look back, default 1 (today only). Use 7 for a week, 30 for a month, 90 for a quarter.'),
     }),
     outputSchema: z.any(),
@@ -433,6 +444,31 @@ const getRecentLogsTool = ai.defineTool(
       results.exerciseByDate = exerciseByDate;
       results.todayExercise = exerciseByDate[input.localDate] || [];
       results.todayPointsTotal = results.todayExercise.reduce((sum: number, e: any) => sum + (e.pointsDelta || 0), 0);
+    }
+
+    if (input.type === 'fasting' || input.type === 'all') {
+      const fastLogs = await healthService.queryFastLogRange(
+        firestore,
+        input.userId,
+        startDateStr,
+        input.localDate,
+        100
+      );
+      // Group by start date
+      const fastByDate: Record<string, any[]> = {};
+      for (const entry of fastLogs) {
+        const d = entry.date || 'unknown';
+        if (!fastByDate[d]) fastByDate[d] = [];
+        fastByDate[d].push(entry);
+      }
+      results.fastByDate = fastByDate;
+      results.totalFastsLogged = fastLogs.length;
+      const completedFasts = fastLogs.filter(f => f.durationHours != null);
+      results.avgFastingHours = completedFasts.length > 0
+        ? completedFasts.reduce((s, f) => s + (f.durationHours || 0), 0) / completedFasts.length
+        : 0;
+      results.longestFastHours = completedFasts.reduce((max, f) => Math.max(max, f.durationHours || 0), 0);
+      results.activeFast = fastLogs.find(f => !f.endedAt) || null;
     }
 
     results.queryDate = input.localDate;
@@ -658,12 +694,64 @@ const recallFoodNicknameTool = ai.defineTool(
   }
 );
 
+const logFastTool = ai.defineTool(
+  {
+    name: 'log_fast',
+    description: 'Records a fasting window — either a completed fast (start + end time + duration) or the start of an ongoing fast (start time only, no endedAt). Also use this to close an active fast by providing endedAt and durationHours. The fasting record feeds into VF scoring and the fasting history chart.',
+    inputSchema: z.object({
+      userId: z.string(),
+      localDate: z.string().describe('YYYY-MM-DD — the date the fast STARTED'),
+      startedAt: z.string().describe('HH:MM (24h) — when the fast began. Infer from context (e.g. "finished dinner at 8pm" → "20:00"). If starting now, use localTime.'),
+      endedAt: z.string().optional().describe('HH:MM (24h) — when the fast ended. Omit if still in progress.'),
+      endDate: z.string().optional().describe('YYYY-MM-DD — only required when the fast spans midnight (endedAt is next day).'),
+      durationHours: z.number().optional().describe('Computed duration in hours. Required when endedAt is provided; omit for active fasts.'),
+      notes: z.string().optional().describe('Optional note, e.g. "clean fast", "had black coffee", "travel day fast"'),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+    const entryId = await healthService.logFast(firestore, input.userId, {
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+      endDate: input.endDate,
+      durationHours: input.durationHours,
+      notes: input.notes,
+      date: input.localDate,
+    });
+
+    if (input.endedAt && input.durationHours != null) {
+      return `Fast logged (${entryId}): ${input.durationHours.toFixed(1)}h fast from ${input.startedAt} to ${input.endedAt} on ${input.localDate}.`;
+    }
+    return `Active fast started at ${input.startedAt} on ${input.localDate}. I'll track this — let me know when you break it.`;
+  }
+);
+
+const setTemporaryContextTool = ai.defineTool(
+  {
+    name: 'set_temporary_context',
+    description: "Saves a short-term schedule or situation override that the CFO should factor into coaching until it expires. Use this when the user describes a temporary deviation from their normal routine — travel, conferences, holidays, injury recovery, visiting family, etc. The context overrides the normal weekly schedule for coaching advice until expiresAt.",
+    inputSchema: z.object({
+      userId: z.string(),
+      context: z.string().describe('Plain-text description of the situation. E.g. "Traveling to Vegas for 4 days — limited kitchen, lots of walking, restaurant meals, late nights."'),
+      expiresAt: z.string().describe('YYYY-MM-DD — the last day this context applies. E.g. if traveling Fri-Mon, set expiresAt to the Monday date.'),
+    }),
+    outputSchema: z.string(),
+  },
+  async (input) => {
+    const firestore = getAdminFirestore();
+    const tc: TemporaryContext = { context: input.context, expiresAt: input.expiresAt };
+    await healthService.updateUserPreferences(firestore, input.userId, { temporaryContext: tc });
+    return `Temporary context saved through ${input.expiresAt}: "${input.context}"`;
+  }
+);
+
 // --- PROMPT DEFINITION ---
 
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, logFastTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, setTemporaryContextTool, nutritionLookupTool, webSearchTool],
   system: `You are "The CFO" — Chief Fitness Officer. A sharp, authoritative Wall Street-style fitness analyst who delivers structured audits, forward-looking forecasts, and actionable directives using deep financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
@@ -738,6 +826,30 @@ CONSUMPTION TIME:
 - When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
 - When logging exercise via log_exercise, ALWAYS set performedAt using the same logic.
 - The ledger displays consumedAt/performedAt to the user, NOT the time of entry, so getting this right matters.
+
+FASTING PROTOCOL:
+The CFO tracks fasting windows just like Zero or any IF tracker. Use log_fast to record them.
+
+- When the user says they're starting a fast ("starting my fast now", "done eating for the night"), call log_fast with only startedAt — no endedAt. Confirm: "Fast clock started at [time]. I'll log the duration when you break it."
+- When the user breaks their fast ("broke my fast", "just had breakfast", "first meal"), compute the elapsed hours from the recorded start and call log_fast with endedAt and durationHours. Use the existing fast entry if possible (note the date and time), or create a new completed entry if the user tells you their start/end times retroactively.
+- When the user reports a completed fast ("did an 18-hour fast", "fasted from 8pm to noon"), call log_fast with both startedAt and endedAt and the computed durationHours.
+- The activeFast field in get_user_context tells you if a fast is currently in progress. Reference it when relevant: "You're X hours into your current fast."
+- Surface fasting data naturally: streak length, average duration, longest fast, how today's fast compares to their usual. Pull multi-day history via get_recent_logs when doing a weekly/monthly fasting analysis.
+- Fasting integrates with VF scoring: when calling score_daily_vf, use the durationHours from the day's completed fast(s) as fastingHours.
+
+TEMPORARY CONTEXT PROTOCOL:
+When the user tells you about a temporary situation that changes their normal routine (travel, conferences, injury, visiting family, holidays, a special event week), IMMEDIATELY call set_temporary_context to save it.
+
+- Extract: what the situation is, how it affects their food/exercise environment, and when it ends.
+- Set expiresAt to the last day the situation applies (if unclear, ask — "When do you get back from Vegas?").
+- From that point on, get_user_context returns temporaryContext with the saved note. Use it to adapt ALL coaching: meal suggestions, workout options, expectations, goal-setting.
+- Examples:
+  - "Traveling to Vegas for 4 days" → adjust for restaurant meals, more walking, irregular sleep, alcohol risk, skip gym programming
+  - "Conference week in NYC" → high-step walking days, limited food control, stress eating risk, prioritize protein at restaurant meals
+  - "Recovering from knee surgery" → no lower body, substitute upper body and conditioning, adjust calorie targets for lower NEAT
+  - "Mom visiting for a week" → social meals, different food environment, may have less time for workouts
+- When temporaryContext is active, reference it naturally in coaching: "Given you're in Vegas this week, here's what I'd work with..." Do NOT pretend the normal weekly schedule applies.
+- When the context expires (expiresAt is in the past), ignore it. On first session after return, welcome them back: "Vegas is behind us — back to the standard playbook."
 
 SITUATIONAL AWARENESS (check these on every __init__ via get_user_context):
 
