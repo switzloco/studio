@@ -21,7 +21,14 @@ const PersonalizedAICoachingInputSchema = z.object({
   currentDay: z.string().describe('The current day of the week (e.g., Monday).'),
   localDate: z.string().describe('The current local date string YYYY-MM-DD from the client.'),
   localTime: z.string().describe('The current local time string from the client.'),
+  /** Legacy single-photo field — kept for backward compat; prefer photoDataUris. */
   photoDataUri: z.string().optional(),
+  /** Multiple photos — base64 data URIs. */
+  photoDataUris: z.array(z.string()).optional(),
+  /** Parallel array: EXIF-derived HH:MM (24h) time for each photo; empty string = unknown. */
+  photoTimestamps: z.array(z.string()).optional(),
+  /** Parallel array: EXIF-derived YYYY-MM-DD for each photo; empty string = same as localDate. */
+  photoDates: z.array(z.string()).optional(),
   currentHealth: z.any().optional(),
   chatHistory: z.array(z.object({
     role: z.enum(['user', 'model']),
@@ -765,7 +772,10 @@ VOICE & STYLE:
 - Address the client as {{{userName}}} or "Partner."
 - No raw JSON, no code blocks. Use markdown formatting: **bold** for emphasis, numbered lists, and bullet points for structure. Keep it conversational — you're a sharp analyst dictating a memo, not filling out a form.
 - Sarcasm targets market inefficiencies and nutrition myths, NEVER the client's body or equipment.
-- You are multimodal: when a photo is attached you CAN and SHOULD describe and analyze it (food portions, body composition progress, exercise form, etc.). Never claim you cannot see images.
+- You are multimodal: when photos are attached you CAN and MUST describe and analyze ALL of them (food portions, body composition progress, exercise form, etc.). Never claim you cannot see images.
+- When multiple food photos arrive, the user likely photographed a meal spread or multiple dishes — analyze each and log them together as one or separate food entries as appropriate.
+- Each photo may include an EXIF timestamp in the message context (e.g. "[Photo 1: taken at 12:30 | Photo 2: taken at 12:33]"). Use these times as consumedAt when logging food — the photo timestamp is when they actually ate, not the time of the conversation.
+- If the EXIF date differs from today's date, log to that past date instead of today.
 
 RESPONSE LENGTH:
 - Keep responses CONCISE. Aim for 3-6 short paragraphs max for meal logs. 2-3 sentences for simple acknowledgments.
@@ -985,8 +995,13 @@ LIVE HEALTH SNAPSHOT:
 - Visceral fat equity: {{#if currentHealth.visceralFatPoints}}{{currentHealth.visceralFatPoints}} pts{{else}}unknown{{/if}}
 - Device verified: {{#if currentHealth.isDeviceVerified}}YES (Fitbit){{else}}NO{{/if}}
 
-{{#if photoDataUri}}
-[The user has attached a photo — you CAN see it. Describe relevant details (food, body composition, exercise form, progress pic, etc.) and use them directly in your coaching response.]
+{{#if photoDataUris}}
+[The user has attached {{photoDataUris.length}} photo(s). You CAN and MUST analyze ALL of them — food portions, ingredients, meal composition, body composition, exercise form, progress, etc. EXIF timestamps are prepended in the message text so you know when each was taken — use them as consumedAt when logging food. Never claim you cannot see images.]
+{{#each photoDataUris}}
+{{media url=this}}
+{{/each}}
+{{else if photoDataUri}}
+[The user has attached a photo — you CAN see it. Describe and analyze it — food portions, body composition, exercise form, etc. Never claim you cannot see images.]
 {{media url=photoDataUri}}
 {{/if}}
 New message from {{{userName}}}: {{{message}}}`,
