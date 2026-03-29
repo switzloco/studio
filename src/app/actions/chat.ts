@@ -15,27 +15,36 @@ export async function sendChatMessage(
   message: string,
   chatHistory: { role: 'user' | 'model', content: string }[],
   currentHealth: any,
+  /** @deprecated Use photoDataUris instead. Kept for backward compat. */
   photoDataUri?: string,
   userId?: string,
   userName?: string,
   localDate?: string,
-  localTime?: string
+  localTime?: string,
+  /** Array of base64 data URIs for multi-photo support. */
+  photoDataUris?: string[],
+  /** Parallel array of EXIF-derived times (HH:MM 24h) — one per photo, empty string if unknown. */
+  photoTimestamps?: string[],
+  /** Parallel array of EXIF-derived dates (YYYY-MM-DD) — one per photo, empty string if same as localDate. */
+  photoDates?: string[],
 ) {
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
 
-    // Derive day-of-week from the client's local date, not the server clock
     const [yr, mo, dy] = resolvedDate.split('-').map(Number);
     const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date(yr, mo - 1, dy));
 
-    // Zero out daily user-logged intake if it's a new day, matching the
-    // dashboard's isNewDay guard so the AI never sees yesterday's protein/calories.
     const isNewDay = currentHealth?.lastActiveDate !== resolvedDate;
     const sanitizedHealth = isNewDay
       ? { ...currentHealth, dailyProteinG: 0, dailyCaloriesIn: 0, dailyCarbsG: 0 }
       : currentHealth;
+
+    // Normalise to array — legacy single-photo callers still work
+    const resolvedPhotoUris: string[] = photoDataUris && photoDataUris.length > 0
+      ? photoDataUris
+      : photoDataUri ? [photoDataUri] : [];
 
     const aiPromise = personalizedAICoaching({
       userId,
@@ -44,9 +53,11 @@ export async function sendChatMessage(
       currentDay,
       localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
-      photoDataUri,
       chatHistory,
       currentHealth: sanitizedHealth,
+      photoDataUris: resolvedPhotoUris.length > 0 ? resolvedPhotoUris : undefined,
+      photoTimestamps: photoTimestamps?.length ? photoTimestamps : undefined,
+      photoDates: photoDates?.length ? photoDates : undefined,
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
