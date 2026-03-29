@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Briefcase, TrendingUp, AlertCircle, ArrowRight, History as HistoryIcon, Dumbbell, Timer } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
-import { doc, collection, query, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { doc, collection, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 import { HealthData, HistoryEntry } from '@/lib/health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from '@/lib/food-exercise-types';
 import { VFScoreChart } from './vf-score-chart';
@@ -72,12 +72,21 @@ export function HistoryView() {
   ) : null, [db, user]);
   const { data: exerciseLogs, isLoading: isExerciseLoading } = useCollection<ExerciseLogEntry>(exerciseQuery);
 
-  const fastQuery = useMemoFirebase(() => user ? query(
-    collection(db, 'users', user.uid, 'fast_log'),
-    orderBy('timestamp', 'desc'),
-    limit(20)
-  ) : null, [db, user]);
-  const { data: fastLogs, isLoading: isFastLoading } = useCollection<FastLogEntry>(fastQuery);
+  // fast_log uses a plain getDocs (not useCollection) so that a permission
+  // error — e.g. rules not yet deployed — fails silently rather than crashing
+  // the whole page through FirebaseErrorListener.
+  const [fastLogs, setFastLogs] = useState<FastLogEntry[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'users', user.uid, 'fast_log'),
+      orderBy('timestamp', 'desc'),
+      limit(20),
+    );
+    getDocs(q)
+      .then(snap => setFastLogs(snap.docs.map(d => ({ ...d.data(), id: d.id } as FastLogEntry)).filter(e => !e.ignored)))
+      .catch(() => { /* collection missing or rules not yet deployed — show empty */ });
+  }, [db, user]);
 
   // Merge, filter ignored, and sort by most recent
   const ledgerEntries = useMemo<LedgerEntry[]>(() => {
@@ -124,7 +133,7 @@ export function HistoryView() {
           ? `${f.durationHours?.toFixed(1) ?? '?'}h fast — ${f.startedAt} → ${f.endedAt}`
           : `Active fast — started ${f.startedAt}`;
         entries.push({
-          id: f.id,
+          id: f.id ?? `fast-${f.date}-${f.startedAt}`,
           type: 'fast',
           name: f.endedAt ? `${f.durationHours?.toFixed(1) ?? '?'}h Fast` : 'Active Fast',
           detail: status + (f.notes ? ` (${f.notes})` : ''),
@@ -139,7 +148,7 @@ export function HistoryView() {
     return entries;
   }, [foodLogs, exerciseLogs, fastLogs]);
 
-  const isLogsLoading = isFoodLoading || isExerciseLoading || isFastLoading;
+  const isLogsLoading = isFoodLoading || isExerciseLoading;
 
   const history = healthData?.history || [];
 
