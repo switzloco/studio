@@ -30,9 +30,8 @@ export const webSearchTool = ai.defineTool(
   async (input) => {
     const apiKey = process.env.SERPER_API_KEY;
     if (!apiKey) {
-      throw new Error(
-        'SERPER_API_KEY is not set. Add it to your .env.local to enable web search.'
-      );
+      // No API key — return gracefully so the LLM falls back to built-in knowledge
+      return [{ title: 'Web search unavailable', url: '', snippet: 'Search is not configured. Use built-in knowledge to answer.' }];
     }
 
     const res = await fetch('https://google.serper.dev/search', {

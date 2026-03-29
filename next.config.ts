@@ -1,5 +1,13 @@
 
 import type {NextConfig} from 'next';
+import { execSync } from 'child_process';
+
+let buildId = 'dev';
+try {
+  buildId = execSync('git rev-parse --short HEAD').toString().trim();
+} catch {
+  // Not in a git repo or git not available
+}
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -7,6 +15,9 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '20mb',
     },
+  },
+  env: {
+    NEXT_PUBLIC_BUILD_ID: buildId,
   },
   images: {
     remotePatterns: [

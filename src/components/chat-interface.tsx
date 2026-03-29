@@ -99,7 +99,7 @@ export function ChatInterface() {
   const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
-  const { data: healthData } = useDoc<HealthData>(userDocRef);
+  const { data: healthData, isLoading: healthLoading } = useDoc<HealthData>(userDocRef);
 
   // A user is "known" once they have any activity beyond the initial portfolio creation.
   // history starts with 1 entry ("Portfolio Initialized") — any real activity adds more.
@@ -109,7 +109,8 @@ export function ChatInterface() {
   );
 
   useEffect(() => {
-    if (initDone || healthData === undefined || !user) return;
+    // Wait until auth and Firestore data are both ready
+    if (initDone || !user || healthLoading) return;
     if (isKnownUser && !coachingRequested) return;
     setInitDone(true);
 
@@ -139,7 +140,7 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, initDone, user, isKnownUser, coachingRequested]);
+  }, [healthData, healthLoading, initDone, user, isKnownUser, coachingRequested]);
 
   useEffect(() => {
     if (scrollRef.current) {
