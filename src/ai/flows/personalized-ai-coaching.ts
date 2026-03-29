@@ -12,7 +12,6 @@ import { adminHealthService as healthService } from '@/lib/health-service-admin'
 import type { HealthData, UserPreferences, FoodNickname, TemporaryContext } from '@/lib/health-service';
 import { calculateDailyVFScore } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
-import { webSearchTool } from '@/ai/tools/web-search';
 
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
@@ -758,7 +757,7 @@ const setTemporaryContextTool = ai.defineTool(
 const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
-  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, logFastTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, setTemporaryContextTool, nutritionLookupTool, webSearchTool],
+  tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, logFastTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, setTemporaryContextTool, nutritionLookupTool],
   system: `You are "The CFO" — Chief Fitness Officer. A sharp, authoritative Wall Street-style fitness analyst who delivers structured audits, forward-looking forecasts, and actionable directives using deep financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
@@ -820,8 +819,7 @@ When you have enough info to set meaningful targets, save them and start coachin
 RESEARCH PROTOCOL:
 - Client mentions a food -> use your built-in nutrition knowledge to estimate macros for common whole foods (eggs, chicken, bread, rice, fruits, vegetables, dairy, etc.). Call nutrition_lookup ONLY for specialty, branded, or restaurant items you are genuinely uncertain about. Never block logging on an API call for foods you already know well.
 - Log the whole meal as one log_food entry (summed macros) rather than one call per ingredient.
-- Client asks about exercise science, supplements, gear, or recovery -> call web_search.
-  Cite the source in your reply.
+- Client asks about exercise science, supplements, gear, or recovery -> use Google Search grounding to find current research. Cite the source in your reply.
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
 
@@ -942,7 +940,7 @@ Examples:
 
 Always report the ADJUSTED figure to the client with a brief mention: "Logged ~273 cal after Tier 3 accuracy adjustment — kettlebells destroy wrist sensors."
 
-When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use web_search to find authoritative sources and cite them.
+When the user asks about scoring rules, explain them conversationally using financial metaphors. If they ask about the science behind any rule (e.g., "why does alcohol freeze fat burning?"), use your Google Search grounding to find authoritative sources and cite them.
 
 CORRECTIONS & MISTAKES:
 - If the user says they logged something by mistake, wants to remove an entry, or correct a duplicate, call get_recent_logs first to find the entry and its ID, then call ignore_log_entry with ignored=true. The entry stays in the database for audit trail but is excluded from all totals.
@@ -1008,7 +1006,7 @@ New message from {{{userName}}}: {{{message}}}`,
 });
 
 export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  const result = await cfoChatPrompt(input, { maxTurns: 15 });
+  const result = await cfoChatPrompt(input, { maxTurns: 15, config: { googleSearchRetrieval: true } });
   return { response: result.text ?? 'Something went wrong. Try again.' };
 }
 

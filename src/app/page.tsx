@@ -251,7 +251,7 @@ export default function Home() {
           <div>
             <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">The CFO</h1>
             <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">
-              Chief Fitness Officer
+              Chief Fitness Officer <span className="opacity-50 font-mono normal-case">· {process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev'}</span>
             </p>
           </div>
         </div>
