@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import { HealthData } from '@/lib/health-service';
+import {
+  loadGIS,
+  getPhotosPickerToken,
+  createPickerSession,
+  waitForPickerSelection,
+  getPickerMediaItems,
+  downloadMediaItem,
+  deletePickerSession,
+  extractTimestampFromMediaItem,
+} from '@/lib/google-photos-picker';
 
 interface Message {
   role: 'user' | 'model';
@@ -76,11 +86,17 @@ export function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
 
+  // picker state
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const pickerAbortRef = useRef<AbortController | null>(null);
+
   // Separate refs: one for camera (capture), one for gallery (multiple)
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
@@ -166,6 +182,69 @@ export function ChatInterface() {
     setSelectedPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
+  const cancelPicker = useCallback(() => {
+    pickerAbortRef.current?.abort();
+    pickerAbortRef.current = null;
+    setIsPickerOpen(false);
+  }, []);
+
+  const handleGooglePhotos = async () => {
+    if (!GOOGLE_CLIENT_ID) {
+      toast({ variant: 'destructive', title: 'Google Photos not configured', description: 'Set NEXT_PUBLIC_GOOGLE_CLIENT_ID in your environment.' });
+      return;
+    }
+    const slots = MAX_PHOTOS - selectedPhotos.length;
+    if (slots <= 0) {
+      toast({ title: `Max ${MAX_PHOTOS} photos per message`, variant: 'destructive' });
+      return;
+    }
+
+    try {
+      // Warm up GIS while showing spinner
+      await loadGIS();
+      const accessToken = await getPhotosPickerToken(GOOGLE_CLIENT_ID);
+      const session = await createPickerSession(accessToken);
+
+      // Open picker in new tab
+      window.open(session.pickerUri, '_blank');
+      setIsPickerOpen(true);
+
+      // Set up abort controller so the user can cancel
+      const abort = new AbortController();
+      pickerAbortRef.current = abort;
+
+      const selected = await waitForPickerSelection(session, accessToken, abort.signal);
+      setIsPickerOpen(false);
+      pickerAbortRef.current = null;
+
+      if (!selected) {
+        // Timed out or user cancelled — clean up silently
+        deletePickerSession(session.id, accessToken);
+        return;
+      }
+
+      // Fetch + download selected items
+      const items = await getPickerMediaItems(session.id, accessToken);
+      deletePickerSession(session.id, accessToken); // best-effort async cleanup
+
+      const photos = await Promise.all(
+        items.slice(0, slots).map(async (item) => {
+          const dataUri = await downloadMediaItem(item.mediaFile.baseUrl);
+          const { time, date } = extractTimestampFromMediaItem(item);
+          return { dataUri, exifTime: time, exifDate: date } satisfies SelectedPhoto;
+        })
+      );
+      setSelectedPhotos(prev => [...prev, ...photos]);
+    } catch (err: any) {
+      setIsPickerOpen(false);
+      pickerAbortRef.current = null;
+      // OAuth popup closed by user — don't show error
+      if (err?.message?.includes('popup_closed') || err?.type === 'popup_closed') return;
+      console.error('[GooglePhotos]', err);
+      toast({ variant: 'destructive', title: 'Google Photos failed', description: err?.message ?? 'Unknown error' });
+    }
+  };
+
   const handleSend = async () => {
     const hasPhotos = selectedPhotos.length > 0;
     if (!user || (!input.trim() && !hasPhotos) || isLoading) return;
@@ -230,9 +309,26 @@ export function ChatInterface() {
     ? "Log a meal, workout, or ask The CFO..."
     : "Tell me about your goals, equipment, routine...";
 
+  /** Google Photos colorful pinwheel icon. */
+  const GooglePhotosIcon = ({ className }: { className?: string }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 12 L12 3.5 A8.5 8.5 0 0 1 20.5 12 Z" fill="#4285F4"/>
+      <path d="M12 12 L20.5 12 A8.5 8.5 0 0 1 12 20.5 Z" fill="#34A853"/>
+      <path d="M12 12 L12 20.5 A8.5 8.5 0 0 1 3.5 12 Z" fill="#FBBC05"/>
+      <path d="M12 12 L3.5 12 A8.5 8.5 0 0 1 12 3.5 Z" fill="#EA4335"/>
+    </svg>
+  );
+
   /** Shared photo thumbnail strip shown above the input bar. */
-  const PhotoStrip = selectedPhotos.length > 0 ? (
+  const PhotoStrip = selectedPhotos.length > 0 || isPickerOpen ? (
     <div className="mb-3 flex gap-2 overflow-x-auto pb-1 px-1">
+      {isPickerOpen && (
+        <div className="flex-shrink-0 flex flex-col items-center justify-center gap-1 w-20 h-20 rounded-xl border-2 border-dashed border-primary/40 bg-primary/5">
+          <Loader2 className="w-4 h-4 text-primary animate-spin" />
+          <span className="text-[7px] font-bold text-primary/60 uppercase text-center leading-tight px-1">Picking…</span>
+          <button onClick={cancelPicker} className="text-[7px] font-black text-destructive/60 uppercase underline leading-none">cancel</button>
+        </div>
+      )}
       {selectedPhotos.map((photo, i) => (
         <div key={i} className="relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 border-primary shadow-md">
           <Image src={photo.dataUri} alt={`Photo ${i + 1}`} width={80} height={80} className="w-full h-full object-cover" unoptimized />
@@ -286,7 +382,7 @@ export function ChatInterface() {
           variant="secondary" size="icon"
           className="rounded-full shrink-0 w-12 h-12"
           onClick={() => cameraInputRef.current?.click()}
-          disabled={isLoading || selectedPhotos.length >= MAX_PHOTOS}
+          disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Take photo"
         >
           <Camera className="w-5 h-5 text-muted-foreground" />
@@ -297,11 +393,24 @@ export function ChatInterface() {
           variant="secondary" size="icon"
           className="rounded-full shrink-0 w-12 h-12"
           onClick={() => galleryInputRef.current?.click()}
-          disabled={isLoading || selectedPhotos.length >= MAX_PHOTOS}
+          disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Choose from library"
         >
           <Images className="w-5 h-5 text-muted-foreground" />
         </Button>
+
+        {/* Google Photos Picker */}
+        {GOOGLE_CLIENT_ID && (
+          <Button
+            variant="secondary" size="icon"
+            className="rounded-full shrink-0 w-12 h-12"
+            onClick={handleGooglePhotos}
+            disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
+            title="Pick from Google Photos"
+          >
+            <GooglePhotosIcon className="w-5 h-5" />
+          </Button>
+        )}
 
         <Input
           placeholder={placeholder}
@@ -314,7 +423,7 @@ export function ChatInterface() {
         <Button
           size="icon" className="rounded-full w-12 h-12"
           onClick={handleSend}
-          disabled={isLoading || (!input.trim() && selectedPhotos.length === 0)}
+          disabled={isLoading || isPickerOpen || (!input.trim() && selectedPhotos.length === 0)}
         >
           <Send className="w-4 h-4" />
         </Button>
