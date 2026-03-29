@@ -101,7 +101,12 @@ export function ChatInterface() {
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
 
-  const isKnownUser = !!(healthData?.onboardingComplete || (healthData?.visceralFatPoints && healthData.visceralFatPoints > 1250));
+  // A user is "known" once they have any activity beyond the initial portfolio creation.
+  // history starts with 1 entry ("Portfolio Initialized") — any real activity adds more.
+  const isKnownUser = !!healthData && (
+    healthData.onboardingComplete ||
+    (healthData.history && healthData.history.length > 1)
+  );
 
   useEffect(() => {
     if (initDone || healthData === undefined || !user) return;
