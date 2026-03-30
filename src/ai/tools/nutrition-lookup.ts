@@ -4,8 +4,8 @@
  * API key: optional USDA_FOOD_API_KEY env var, falls back to DEMO_KEY (100 req/hr).
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { tool } from 'ai';
+import { z } from 'zod';
 
 const USDA_BASE = 'https://api.nal.usda.gov/fdc/v1';
 
@@ -47,42 +47,19 @@ function extractMacros(food: UsdaFood) {
   };
 }
 
-export const nutritionLookupTool = ai.defineTool(
-  {
-    name: 'nutrition_lookup',
-    description:
-      'Looks up accurate macro data (protein, carbs, fat, calories) for a food from the USDA database. ' +
-      'Use this PROACTIVELY whenever the client mentions eating something or asks about macros. ' +
-      'Do NOT guess macros — look them up. Returns per-100g values.',
-    inputSchema: z.object({
-      query: z.string().describe('Food name to look up, e.g. "chicken breast" or "Greek yogurt"'),
-      portionG: z
-        .number()
-        .optional()
-        .describe('Optional portion size in grams to calculate totals for that portion'),
-    }),
-    outputSchema: z.object({
-      foodName: z.string(),
-      per100g: z.object({
-        calories: z.number(),
-        proteinG: z.number(),
-        carbsG: z.number(),
-        fatG: z.number(),
-        fiberG: z.number(),
-      }),
-      portionTotals: z
-        .object({
-          portionG: z.number(),
-          calories: z.number(),
-          proteinG: z.number(),
-          carbsG: z.number(),
-          fatG: z.number(),
-        })
-        .optional(),
-      source: z.string(),
-    }),
-  },
-  async (input) => {
+export const nutritionLookupTool = tool({
+  description:
+    'Looks up accurate macro data (protein, carbs, fat, calories) for a food from the USDA database. ' +
+    'Use this PROACTIVELY whenever the client mentions eating something or asks about macros. ' +
+    'Do NOT guess macros — look them up. Returns per-100g values.',
+  parameters: z.object({
+    query: z.string().describe('Food name to look up, e.g. "chicken breast" or "Greek yogurt"'),
+    portionG: z
+      .number()
+      .optional()
+      .describe('Optional portion size in grams to calculate totals for that portion'),
+  }),
+  execute: async (input) => {
     const apiKey = process.env.USDA_FOOD_API_KEY ?? 'DEMO_KEY';
 
     const searchParams = new URLSearchParams({
@@ -133,5 +110,5 @@ export const nutritionLookupTool = ai.defineTool(
     }
 
     return result;
-  }
-);
+  },
+});
