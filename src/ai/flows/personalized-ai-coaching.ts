@@ -1006,7 +1006,7 @@ New message from {{{userName}}}: {{{message}}}`,
 });
 
 export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  const result = await cfoChatPrompt(input, { maxTurns: 15, config: { googleSearchRetrieval: true } });
+  const result = await cfoChatPrompt(input, { maxTurns: 15 });
   return { response: result.text ?? 'Something went wrong. Try again.' };
 }
 
