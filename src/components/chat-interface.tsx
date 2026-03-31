@@ -253,6 +253,7 @@ export function ChatInterface() {
   const handleSend = async () => {
     const hasPhotos = selectedPhotos.length > 0;
     if (!user || (!input.trim() && !hasPhotos) || isLoading) return;
+    setInitDone(true); // prevent init effect from firing after a manual send
 
     const userMessage = input.trim();
     const photos = selectedPhotos;
