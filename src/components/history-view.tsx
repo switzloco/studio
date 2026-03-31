@@ -157,6 +157,13 @@ export function HistoryView() {
     setSheetOpen(true);
   };
 
+  const handleLedgerClick = (entry: LedgerEntry) => {
+    const hEntry = history.find(h => h.isoDate === entry.date || h.date === entry.date);
+    if (hEntry) {
+      handleDayClick(hEntry);
+    }
+  };
+
   if (isHealthLoading || isLogsLoading) {
     return (
       <div className="p-6 sm:p-10 space-y-10">
@@ -214,7 +221,11 @@ export function HistoryView() {
         {ledgerEntries.length > 0 ? (
           <div className="space-y-4">
             {ledgerEntries.map((entry) => (
-              <Card key={entry.id} className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:bg-white hover:ring-primary/20 transition-all duration-300">
+              <Card 
+                key={entry.id} 
+                className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:bg-white hover:ring-primary/20 transition-all duration-300 cursor-pointer group"
+                onClick={() => handleLedgerClick(entry)}
+              >
                 <CardContent className="p-5 flex items-center justify-between">
                   <div className="flex items-center gap-5">
                     <div className={`p-3 rounded-xl shadow-sm ${entry.type === 'food' ? 'bg-purple-100' : entry.type === 'fast' ? 'bg-teal-100' : 'bg-orange-100'}`}>
@@ -233,10 +244,10 @@ export function HistoryView() {
                           {entry.type === 'fast' ? 'fast' : entry.type}
                         </span>
                       </div>
-                      <p className="text-sm text-muted-foreground font-medium truncate max-w-[250px] sm:max-w-md">{entry.detail}</p>
+                      <p className="text-sm text-muted-foreground font-medium truncate max-w-[250px] sm:max-w-md group-hover:text-foreground transition-colors">{entry.detail}</p>
                     </div>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground opacity-30" />
+                  <ArrowRight className="w-4 h-4 text-muted-foreground opacity-30 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
                 </CardContent>
               </Card>
             ))}
