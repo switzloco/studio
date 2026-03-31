@@ -12,7 +12,7 @@ import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
-import { HealthData } from '@/lib/health-service';
+import { HealthData, UserPreferences } from '@/lib/health-service';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -101,17 +101,16 @@ export function ChatInterface() {
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: healthLoading } = useDoc<HealthData>(userDocRef);
 
-  // A user is "known" once they have any activity beyond the initial portfolio creation.
-  // history starts with 1 entry ("Portfolio Initialized") — any real activity adds more.
-  const isKnownUser = !!healthData && (
-    healthData.onboardingComplete ||
-    (healthData.history && healthData.history.length > 1)
-  );
+  const prefsDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
+  const { data: prefs, isLoading: prefsLoading } = useDoc<UserPreferences>(prefsDocRef);
+
+  // undefined (prefs not yet loaded or no doc) treated as true so new users auto-start
+  const autoChatEnabled = prefs?.autoChatEnabled ?? true;
 
   useEffect(() => {
     // Wait until auth and Firestore data are both ready
-    if (initDone || !user || healthLoading) return;
-    if (isKnownUser && !coachingRequested) return;
+    if (initDone || !user || healthLoading || prefsLoading) return;
+    if (!autoChatEnabled && !coachingRequested) return;
     setInitDone(true);
 
     const runInit = async () => {
@@ -140,7 +139,7 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, healthLoading, initDone, user, isKnownUser, coachingRequested]);
+  }, [healthData, healthLoading, prefsLoading, initDone, user, autoChatEnabled, coachingRequested]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -437,8 +436,8 @@ export function ChatInterface() {
     </div>
   );
 
-  // Idle screen for known users
-  if (isKnownUser && messages.length === 0 && !isLoading) {
+  // Idle screen when auto-chat is disabled and no messages yet
+  if (!autoChatEnabled && messages.length === 0 && !isLoading) {
     return (
       <div className="flex flex-col flex-1 h-0">
         <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
