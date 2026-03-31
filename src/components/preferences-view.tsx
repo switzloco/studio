@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity, MessageSquare } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import { healthService, UserPreferences, HealthData } from '@/lib/health-service';
@@ -461,6 +462,30 @@ export function PreferencesView() {
                 {isSavingBodyComp ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : bodyCompSavedRecently ? <Check className="w-4 h-4 mr-2" /> : null}
                 {isSavingBodyComp ? 'Saving…' : bodyCompSavedRecently ? 'Saved' : 'Save Body Comp'}
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* Coach Settings */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <MessageSquare className="w-4 h-4" />
+                Coach Settings
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Auto-Brief</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Start coaching session automatically when you open the Coach tab
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.autoChatEnabled ?? true}
+                  onCheckedChange={(checked) => setPrefs({ ...prefs, autoChatEnabled: checked })}
+                />
+              </div>
             </CardContent>
           </Card>
 

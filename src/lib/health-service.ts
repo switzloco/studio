@@ -114,6 +114,7 @@ export interface UserPreferences {
   profile: UserProfile;
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
   temporaryContext?: TemporaryContext;           // short-term schedule/situation override
+  autoChatEnabled?: boolean;                    // auto-start chat on Coach tab mount (default true)
 }
 
 export interface FitbitCredentials {
@@ -196,7 +197,8 @@ export const healthService = {
       }, null, 2),
       equipment: [],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 },
-      profile: {}
+      profile: {},
+      autoChatEnabled: true,
     };
     await setDoc(docRef, defaultPrefs, { merge: true });
     return defaultPrefs;
