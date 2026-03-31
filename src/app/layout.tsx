@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { ServiceWorkerRegister } from '@/components/sw-register';
+import pkg from '../../package.json';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -45,6 +46,9 @@ export default function RootLayout({
         </FirebaseClientProvider>
         <Toaster />
         <ServiceWorkerRegister />
+        <footer className="w-full text-center text-xs text-muted-foreground py-4 mt-auto border-t">
+          v{pkg.version}{process.env.NEXT_PUBLIC_PR_NUMBER ? ` | PR #${process.env.NEXT_PUBLIC_PR_NUMBER}` : ''}
+        </footer>
       </body>
     </html>
   );
