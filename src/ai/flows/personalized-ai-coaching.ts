@@ -754,7 +754,7 @@ const setTemporaryContextTool = ai.defineTool(
 
 // --- PROMPT DEFINITION ---
 
-const cfoChatPrompt = ai.definePrompt({
+export const cfoChatPrompt = ai.definePrompt({
   name: 'cfoChatPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   tools: [getUserContextTool, updatePreferencesTool, logFoodTool, logExerciseTool, logFastTool, getRecentLogsTool, ignoreLogEntryTool, scoreDailyVFTool, saveFoodNicknameTool, recallFoodNicknameTool, setTemporaryContextTool, nutritionLookupTool],
@@ -1015,7 +1015,7 @@ export async function personalizedAICoaching(input: PersonalizedAICoachingInput)
 // Tools: get_user_context, get_recent_logs, ignore_log_entry only.
 // No logging, no onboarding, no profile changes.
 
-const ledgerAnalystPrompt = ai.definePrompt({
+export const ledgerAnalystPrompt = ai.definePrompt({
   name: 'ledgerAnalystPrompt',
   input: { schema: PersonalizedAICoachingInputSchema },
   tools: [getUserContextTool, getRecentLogsTool, ignoreLogEntryTool],

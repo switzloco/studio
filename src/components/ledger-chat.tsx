@@ -48,11 +48,41 @@ export function LedgerChat() {
       setIsLoading(true);
       try {
         const localDate = new Date().toLocaleDateString('en-CA');
-        const result = await sendLedgerMessage('__init__', [], user.uid, user.displayName || undefined, localDate);
-        if (result.success && result.response) {
-          setMessages([{ role: 'model', content: result.response }]);
-        } else {
-          setMessages([{ role: 'model', content: 'Ledger Analyst online. Ask me anything about your history.' }]);
+        const payload = {
+          message: '__init__',
+          chatHistory: [],
+          userId: user.uid,
+          userName: user.displayName || undefined,
+          localDate,
+        };
+
+        const res = await fetch('/api/ledger-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) throw new Error('Init failed');
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("Stream not available");
+
+        setMessages([{ role: 'model', content: '' }]);
+        setIsLoading(false);
+
+        const decoder = new TextDecoder();
+        let streamText = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          streamText += decoder.decode(value, { stream: true });
+          
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1].content = streamText;
+            return updated;
+          });
         }
       } catch {
         setMessages([{ role: 'model', content: 'Ledger Analyst online. Ask me anything about your history.' }]);
@@ -74,20 +104,47 @@ export function LedgerChat() {
 
     try {
       const localDate = new Date().toLocaleDateString('en-CA');
-      const result = await sendLedgerMessage(
-        messageText,
-        messages.map(m => ({ role: m.role, content: m.content })),
-        user.uid,
-        user.displayName || undefined,
+      const payload = {
+        message: messageText,
+        chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
+        userId: user.uid,
+        userName: user.displayName || undefined,
         localDate,
-      );
-      if (result.success && result.response) {
-        setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
-      } else {
-        toast({ variant: 'destructive', title: 'Analyst Error', description: result.error });
+      };
+
+      const res = await fetch('/api/ledger-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Analyst Error');
       }
-    } catch {
-      toast({ variant: 'destructive', title: 'Analyst Error', description: 'Could not reach the Ledger Analyst.' });
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("Stream not available");
+
+      setMessages(prev => [...prev, { role: 'model', content: '' }]);
+      setIsLoading(false);
+
+      const decoder = new TextDecoder();
+      let streamText = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        streamText += decoder.decode(value, { stream: true });
+        
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1].content = streamText;
+          return updated;
+        });
+      }
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Analyst Error', description: err.message || 'Could not reach the Ledger Analyst.' });
     } finally {
       setIsLoading(false);
     }

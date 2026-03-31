@@ -47,7 +47,7 @@ export default function RootLayout({
         <Toaster />
         <ServiceWorkerRegister />
         <footer className="w-full text-center text-xs text-muted-foreground py-4 mt-auto border-t">
-          v{pkg.version}{process.env.NEXT_PUBLIC_PR_NUMBER ? ` | PR #${process.env.NEXT_PUBLIC_PR_NUMBER}` : ''}
+          v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}
         </footer>
       </body>
     </html>

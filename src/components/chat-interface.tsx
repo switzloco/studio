@@ -109,7 +109,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     // Wait until auth and Firestore data are both ready
-    if (initDone || !user || healthLoading || prefsLoading) return;
+    if (initDone || !user || healthLoading || prefsLoading || !prefs || !healthData) return;
     if (!autoChatEnabled && !coachingRequested) return;
     setInitDone(true);
 
@@ -118,20 +118,49 @@ export function ChatInterface() {
       try {
         const now = new Date();
         const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
-        const result = await sendChatMessage(
-          '__init__', [], sanitizedHealth, undefined, user.uid,
-          user.displayName || undefined,
-          now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
-          now.toLocaleTimeString('en-US'),
-        );
-        setMessages([{
-          role: 'model',
-          content: result.success && result.response
-            ? result.response
-            : "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?",
-        }]);
+        
+        const payload = {
+          message: '__init__',
+          chatHistory: [],
+          currentHealth: sanitizedHealth,
+          userId: user.uid,
+          userName: user.displayName || undefined,
+          localDate: now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
+          localTime: now.toLocaleTimeString('en-US'),
+        };
+
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to initialize');
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("Stream not available");
+
+        setMessages([{ role: 'model', content: '' }]);
+        setIsLoading(false);
+
+        const decoder = new TextDecoder();
+        let streamText = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          streamText += decoder.decode(value, { stream: true });
+          
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1].content = streamText;
+            return updated;
+          });
+        }
       } catch (e) {
-        console.error('[ChatInit] sendChatMessage threw:', e);
+        console.error('[ChatInit] stream error:', e);
         setMessages([{ role: 'model', content: "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?" }]);
       } finally {
         setIsLoading(false);
@@ -284,27 +313,53 @@ export function ChatInterface() {
     const fullMessage = exifContext + userMessage;
 
     try {
-      const result = await sendChatMessage(
-        fullMessage,
-        messages.map(m => ({ role: m.role, content: m.content })),
-        sanitizedHealth,
-        undefined,
-        user.uid,
-        user.displayName || undefined,
+      const payload = {
+        message: fullMessage,
+        chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
+        currentHealth: sanitizedHealth,
+        userId: user.uid,
+        userName: user.displayName || undefined,
         localDate,
-        now.toLocaleTimeString('en-US'),
-        photos.map(p => p.dataUri),
+        localTime: now.toLocaleTimeString('en-US'),
+        photoDataUris: photos.map(p => p.dataUri),
         photoTimestamps,
         photoDates,
-      );
-      if (result.success && result.response) {
-        setMessages(prev => [...prev, { role: 'model', content: result.response! }]);
-      } else {
-        toast({ variant: "destructive", title: "Audit Failed", description: result.error });
+      };
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Audit Failed: ${res.statusText}`);
       }
-    } catch (e) {
-      console.error('[ChatSend] sendChatMessage threw:', e);
-      toast({ variant: "destructive", title: "Audit Failed", description: "The CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("Stream not available");
+
+      setMessages(prev => [...prev, { role: 'model', content: '' }]);
+      setIsLoading(false);
+
+      const decoder = new TextDecoder();
+      let streamText = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        streamText += decoder.decode(value, { stream: true });
+        
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1].content = streamText;
+          return updated;
+        });
+      }
+    } catch (e: any) {
+      console.error('[ChatSend] Error:', e);
+      toast({ variant: "destructive", title: "Audit Failed", description: e.message || "The CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
     } finally {
       setIsLoading(false);
     }
