@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
     // Build the health data update — include weight/height from profile if available.
     const healthUpdate: Record<string, unknown> = {
       isDeviceVerified: true,
+      connectedDevice: 'fitbit',
       onboardingDay: 1,
       steps: syncResult.steps.value,
       sleepHours: syncResult.sleep.value,
