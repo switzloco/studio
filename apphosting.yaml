@@ -20,11 +20,6 @@ env:
     availability:
       - RUNTIME
 
-  - variable: SERPER_API_KEY
-    secret: SERPER_API_KEY
-    availability:
-      - RUNTIME
-
 runConfig:
   # --- SCALING CONFIGURATION ---
   # minInstances: Minimum number of instances kept warm at all times.
