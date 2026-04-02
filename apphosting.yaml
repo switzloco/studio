@@ -4,6 +4,47 @@
 # Secrets injected into the Cloud Run container at runtime.
 # Store the value first: firebase apphosting:secrets:set CRON_SECRET
 env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyDqnzXqOR6Hgy-89JrHXvN5WW_2Cg6b9Ho"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "studio-4236902803-1eba2.firebaseapp.com"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "studio-4236902803-1eba2"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: "studio-4236902803-1eba2.firebasestorage.app"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "473903412658"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:473903412658:web:eef5c9dedfc81194f020ab"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FITBIT_CLIENT_ID
+    value: "23V3PJ"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_OURA_CLIENT_ID
+    value: "c3acec4a-80cb-4b77-a202-a3899ee7079d"
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: GOOGLE_GENAI_API_KEY
     secret: GOOGLE_GENAI_API_KEY
     availability:
