@@ -328,7 +328,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       setIsSyncing(false);
     }
     if (!result) {
-      toast({ variant: 'destructive', title: 'Sync Error', description: 'Unexpected error — check server logs.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Sync Failed', 
+        description: 'The server did not respond. Check your internet connection or server status.' 
+      });
     } else if (result.success) {
       toast({
         title: 'Sync Complete',
@@ -338,15 +342,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       });
     } else {
       const descriptions: Record<string, string> = {
-        no_credentials: 'No Fitbit credentials found. Reconnect your Fitbit.',
-        token_refresh_failed: 'Token expired and could not be refreshed. Reconnect your Fitbit.',
-        api_failed: 'Fitbit API returned an error. Check server logs.',
-        write_failed: 'Data fetched but Firestore write failed. Check server logs.',
+        no_credentials: 'Security handshake missing. Please reconnect your Fitbit.',
+        token_refresh_failed: 'Fitbit access has expired. Re-authentication is required to restore sync.',
+        api_failed: 'Fitbit API is currently unavailable or returning an error. Please try again later.',
+        write_failed: 'Metadata retrieved but database update failed. Your progress is safe but unrecorded.',
       };
       toast({
         variant: 'destructive',
         title: 'Sync Failed',
-        description: descriptions[result.reason] ?? 'Could not pull latest data.',
+        description: descriptions[result.reason] ?? 'An unexpected error occurred during sync.',
       });
     }
   };
@@ -357,12 +361,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       await healthService.deleteFitbitCredentials(db, user.uid);
       await healthService.updateHealthData(db, user.uid, {
         isDeviceVerified: false,
-        connectedDevice: undefined,
+        connectedDevice: null,
       });
       toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Fitbit Disconnect] Failed:', e);
-      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect properly.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Disconnect Failed', 
+        description: e?.message || 'Could not remove Fitbit connection properly.' 
+      });
     }
   };
 
@@ -409,20 +417,24 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       setIsOuraSyncing(false);
     }
     if (!result) {
-      toast({ variant: 'destructive', title: 'Sync Error', description: 'Unexpected error — check server logs.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Sync Failed', 
+        description: 'Oura server did not respond. Check your ring connection or internet.' 
+      });
     } else if (result.success) {
       toast({ title: 'Sync Complete', description: 'Oura data refreshed from your ring.' });
     } else {
       const descriptions: Record<string, string> = {
-        no_credentials: 'No Oura credentials found. Reconnect your Oura Ring.',
-        token_refresh_failed: 'Token expired and could not be refreshed. Reconnect your Oura Ring.',
-        api_failed: 'Oura API returned an error. Check server logs.',
-        write_failed: 'Data fetched but Firestore write failed. Check server logs.',
+        no_credentials: 'Oura credentials missing. Please reconnect your Oura Ring.',
+        token_refresh_failed: 'Oura Ring session expired. Re-authentication is required.',
+        api_failed: 'Oura API error. The service may be briefly down.',
+        write_failed: 'Sync pulled data but could not save to your ledger.',
       };
       toast({
         variant: 'destructive',
         title: 'Sync Failed',
-        description: descriptions[result.reason] ?? 'Could not pull latest data.',
+        description: descriptions[result.reason] ?? 'Oura sync failed unexpectedly.',
       });
     }
   };
@@ -433,12 +445,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       await healthService.deleteOuraCredentials(db, user.uid);
       await healthService.updateHealthData(db, user.uid, {
         isDeviceVerified: false,
-        connectedDevice: undefined,
+        connectedDevice: null,
       });
       toast({ title: 'Oura Ring Disconnected', description: 'Your device connection has been removed.' });
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Oura Disconnect] Failed:', e);
-      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect properly.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Disconnect Failed', 
+        description: e?.message || 'Could not remove Oura connection properly.' 
+      });
     }
   };
 
