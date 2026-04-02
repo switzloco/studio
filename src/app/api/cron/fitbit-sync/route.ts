@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
 
   const firestore = getAdminFirestore();
 
-  // Query all users who have connected Fitbit.
+  // Query all verified users; skip Oura users in the loop below.
+  // Legacy Fitbit users may not have connectedDevice set, so we can't filter to 'fitbit' only.
   const usersSnapshot = await firestore
     .collection('users')
     .where('isDeviceVerified', '==', true)
@@ -51,9 +52,14 @@ export async function GET(request: NextRequest) {
   const staleUsers: string[] = [];
   for (const userDoc of usersSnapshot.docs) {
     const userId = userDoc.id;
+    // Skip Oura users — they have their own cron at /api/cron/oura-sync.
+    if (userDoc.data().connectedDevice === 'oura') {
+      results.push({ userId, status: 'skipped' });
+      continue;
+    }
     const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
     if (!creds) {
-      results.push({ userId, status: 'failed' });
+      results.push({ userId, status: 'skipped' });
       continue;
     }
     if (creds.lastSyncedAt && now - creds.lastSyncedAt < SYNC_INTERVAL_MS) {

@@ -71,7 +71,7 @@ export default function Home() {
   // Sync Fitbit data on load if the last sync was more than 6 hours ago
   // (or if we've never synced). Runs once per session.
   useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || hasSyncedFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || hasSyncedFitbit.current) return;
     hasSyncedFitbit.current = true;
 
     (async () => {
@@ -80,13 +80,16 @@ export default function Home() {
         const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
         if (stale) {
           const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
-          await syncFitbitData(user.uid, localDate);
+          const result = await syncFitbitData(user.uid, localDate);
+          if (!result.success && result.reason === 'token_refresh_failed') {
+            toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your Fitbit.' });
+          }
         }
       } catch (e) {
         console.error('[AutoSync] Failed:', e);
       }
     })();
-  }, [user, healthData?.isDeviceVerified]);
+  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice]);
 
   // Backfill historical Fitbit snapshots once per session if yesterday is missing.
   // Silently fires in the background — no toast, no spinner.
