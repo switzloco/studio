@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Antigravity when working with code in this repository.
 
 ## Commands
 
@@ -73,7 +73,7 @@ The Genkit flow defines 8 LLM-callable tools:
 - Server action body size limit is 20MB (for health data payloads)
 - Deployed via Firebase App Hosting (`apphosting.yaml`, max 1 instance)
 
-## Pre-Commit Rules for Claude Code
+## Pre-Commit Rules for Antigravity
 
 **Always run `npm run build` before committing and pushing.** The build catches errors that TypeScript alone misses, including:
 - `'use server'` files exporting non-async-function values (constants, types at runtime, etc.)
