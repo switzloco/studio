@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { ouraService } from '@/lib/oura-service';
@@ -279,6 +279,22 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       : null;
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && !data.isDeviceVerified;
+
+  // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
+  // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
+  // If deficit so far > (alpertNumber × hoursElapsed / 24), the pace is unsustainable.
+  const alpertPace = React.useMemo(() => {
+    if (!isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
+    const now = new Date();
+    const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+    if (hoursElapsed < 1) return null; // too early to project
+    const hourlyBudget = alpertNumber / 24;
+    const budgetSoFar = alpertNumber * (hoursElapsed / 24);
+    if (alpertDeficit <= budgetSoFar) return null; // on pace, no warning
+    const currentHourlyRate = alpertDeficit / hoursElapsed;
+    const projectedDaily = Math.round(currentHourlyRate * 24);
+    return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
+  }, [isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
 
   const handleConnectFitbit = async () => {
     if (!user) return;
@@ -634,6 +650,20 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </p>
               </div>
             )}
+            {alpertPace && (
+              <div className="px-4 py-2.5 bg-red-50 border-t border-red-200 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-black text-red-700 uppercase tracking-wide">
+                    Pace Breach — Muscle Loss Risk
+                  </p>
+                  <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
+                    Burning at {alpertPace.currentHourlyRate} kcal/hr vs {alpertPace.hourlyBudget} kcal/hr ceiling.
+                    Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds Alpert max of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -723,6 +753,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           bodyFatPct={data.bodyFatPct}
           isDeviceVerified={data.isDeviceVerified}
           isViewingToday={isViewingToday}
+          alpertNumber={alpertNumber}
         />
       </div>
 

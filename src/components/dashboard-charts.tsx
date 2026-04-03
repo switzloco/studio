@@ -24,6 +24,8 @@ interface DashboardChartsProps {
     isDeviceVerified?: boolean;
     /** True when showing today — enables the NOW line + projection shading. */
     isViewingToday?: boolean;
+    /** Max sustainable fat oxidation kcal/day — shown as a ceiling on the Energy Balance chart. */
+    alpertNumber?: number;
 }
 
 /** Liver glycogen capacity — fixed regardless of body size (~100g). */
@@ -237,6 +239,7 @@ export function DashboardCharts({
     weightKg, bodyFatPct,
     isDeviceVerified,
     isViewingToday = false,
+    alpertNumber,
 }: DashboardChartsProps) {
     const totalMaxKcal    = computeMaxGlycogenKcal(weightKg, bodyFatPct);
     const muscleMaxKcal   = Math.max(400, totalMaxKcal - LIVER_MAX_KCAL);
@@ -305,6 +308,15 @@ export function DashboardCharts({
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                                 <ReferenceLine y={0} stroke="#000" />
+                                {alpertNumber != null && alpertNumber > 0 && (
+                                    <ReferenceLine
+                                        y={alpertNumber}
+                                        stroke="#dc2626"
+                                        strokeDasharray="6 3"
+                                        strokeWidth={1.5}
+                                        label={{ value: `Alpert max ${alpertNumber}`, position: 'insideTopLeft', fontSize: 8, fontWeight: 800, fill: '#dc2626' }}
+                                    />
+                                )}
                                 <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                                     {calorieData.map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.color} />
