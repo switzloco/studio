@@ -261,6 +261,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     ? (data.dailyCaloriesOut || 2000)
     : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data.dailyCaloriesOut || 2000);
 
+  // Fitbit auto-detected activities — used as glycogen fallback when no manual exercise is logged.
+  // For today, use the live snapshot that was written on the last Fitbit sync.
+  const fitbitActivities = isViewingToday
+    ? data.fitbitByDate?.[new Date().toLocaleDateString('en-CA')]?.activities
+    : fitbitForDate?.activities;
+
   const visceralFatPoints = data.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
   const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
@@ -754,6 +760,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           isDeviceVerified={data.isDeviceVerified}
           isViewingToday={isViewingToday}
           alpertNumber={alpertNumber}
+          fitbitActivities={fitbitActivities}
         />
       </div>
 

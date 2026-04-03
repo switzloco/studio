@@ -53,6 +53,16 @@ export interface HealthLog {
   verified?: boolean;
 }
 
+/** A single auto-detected workout returned by the Fitbit activities list endpoint. */
+export interface FitbitActivity {
+  activityName: string;          // e.g. "Run", "Bike", "Weight Training"
+  startTime: string;             // HH:MM (24h), local time
+  durationMin: number;           // session duration in minutes
+  calories: number;              // Fitbit raw estimate (tier discount applied client-side)
+  averageHeartRate?: number;     // bpm average for the session
+  activityTier: 'tier1_walking' | 'tier2_steady_state' | 'tier3_anaerobic';
+}
+
 /** Per-day Fitbit metrics snapshot — keyed by YYYY-MM-DD in fitbitByDate. */
 export interface FitbitDailySnapshot {
   steps?: number;
@@ -60,6 +70,8 @@ export interface FitbitDailySnapshot {
   sleepHours?: number;
   recoveryStatus?: 'low' | 'medium' | 'high';
   caloriesOut?: number;
+  /** Auto-detected workouts from Fitbit's activity log for this day. */
+  activities?: FitbitActivity[];
 }
 
 export interface HealthData {
