@@ -7,6 +7,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Refere
 import { Flame, BatteryCharging, Info } from 'lucide-react';
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
+import type { FitbitActivity } from '@/lib/health-service';
 
 interface DashboardChartsProps {
     caloriesIn: number;
@@ -24,6 +25,10 @@ interface DashboardChartsProps {
     isDeviceVerified?: boolean;
     /** True when showing today — enables the NOW line + projection shading. */
     isViewingToday?: boolean;
+    /** Max sustainable fat oxidation kcal/day — shown as a ceiling on the Energy Balance chart. */
+    alpertNumber?: number;
+    /** Auto-detected Fitbit activities for this day — used as glycogen model fallback. */
+    fitbitActivities?: FitbitActivity[];
 }
 
 /** Liver glycogen capacity — fixed regardless of body size (~100g). */
@@ -47,6 +52,12 @@ const INTERVAL_MIN = 15;
 const START_MIN = 6 * 60;   // 360
 const END_MIN   = 22 * 60;  // 1320
 const NUM_SLOTS = (END_MIN - START_MIN) / INTERVAL_MIN + 1; // 65
+
+// X-axis ticks: 6 AM, 9 AM, 12 PM, 3 PM, 6 PM, 10 PM (shared across all charts)
+const X_TICKS = [0, 12, 24, 36, 48, 64];
+
+// Carb/food absorption window: ~90 min = 6 × 15-min slots
+const ABSORPTION_SLOTS = 6;
 
 // Brain glucose demand (~120g/day) satisfied almost entirely from liver glycogen during waking hours.
 // 120g × 4 kcal/g ÷ 16 h ÷ 4 slots/h ≈ 7.5 kcal per 15-min slot.
@@ -108,6 +119,7 @@ function buildGlycogenCurves(
     muscleMaxKcal: number,
     foodLogs?: FoodLogEntry[],
     exerciseLogs?: ExerciseLogEntry[],
+    fitbitActivities?: FitbitActivity[],
 ): { slot: number; liver: number; muscle: number }[] {
     const liverExerciseBurn  = new Array(NUM_SLOTS).fill(0);
     const muscleExerciseBurn = new Array(NUM_SLOTS).fill(0);
@@ -132,8 +144,37 @@ function buildGlycogenCurves(
                 muscleExerciseBurn[s] += musclePerSlot;
             }
         }
+    } else if (fitbitActivities && fitbitActivities.length > 0) {
+        // Fallback 1: Fitbit auto-detected activities — same slot logic as manual logs.
+        // Tier discount mirrors the wearable accuracy tiers used for manual logging.
+        const TIER_GLYCO_FRACTION: Record<string, number> = {
+            tier1_walking: 0.40,
+            tier2_steady_state: 0.65,
+            tier3_anaerobic: 0.85,
+        };
+        const TIER_DISCOUNT: Record<string, number> = {
+            tier1_walking: 1.0,
+            tier2_steady_state: 0.80,
+            tier3_anaerobic: 0.65,
+        };
+        for (const act of fitbitActivities) {
+            const adjustedCal = Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80));
+            const glycoFraction = TIER_GLYCO_FRACTION[act.activityTier] ?? 0.65;
+            const glycoCal = adjustedCal * glycoFraction;
+            if (glycoCal <= 0) continue;
+            const dur = Math.max(15, act.durationMin);
+            const startMin  = parseHHMM(act.startTime);
+            const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(startMin)));
+            const numSlots  = Math.max(1, Math.round(dur / INTERVAL_MIN));
+            const liverPerSlot  = (glycoCal * 0.15) / numSlots;
+            const musclePerSlot = (glycoCal * 0.85) / numSlots;
+            for (let s = startSlot; s < Math.min(startSlot + numSlots, NUM_SLOTS); s++) {
+                liverExerciseBurn[s]  += liverPerSlot;
+                muscleExerciseBurn[s] += musclePerSlot;
+            }
+        }
     } else {
-        // Fallback: active burn (above BMR) spread noon → 10 PM
+        // Fallback 2: crude TDEE spread (no exercise data at all).
         const activeBurnGlyco = Math.max(0, caloriesOut - 2000) * 0.70;
         if (activeBurnGlyco > 0) {
             const activeSlots = NUM_SLOTS - 24;
@@ -147,7 +188,6 @@ function buildGlycogenCurves(
     }
 
     // ── Carb refueling + alcohol drain (per food log entry) ────────────────────
-    const ABSORPTION_SLOTS = 6; // ~90 min absorption window
     const activeFoods = foodLogs?.filter(f => !f.ignored) ?? [];
     if (activeFoods.length > 0) {
         for (const food of activeFoods) {
@@ -237,6 +277,8 @@ export function DashboardCharts({
     weightKg, bodyFatPct,
     isDeviceVerified,
     isViewingToday = false,
+    alpertNumber,
+    fitbitActivities,
 }: DashboardChartsProps) {
     const totalMaxKcal    = computeMaxGlycogenKcal(weightKg, bodyFatPct);
     const muscleMaxKcal   = Math.max(400, totalMaxKcal - LIVER_MAX_KCAL);
@@ -257,8 +299,8 @@ export function DashboardCharts({
     ];
 
     const glycogenData = React.useMemo(
-        () => buildGlycogenCurves(caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs),
-        [caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs],
+        () => buildGlycogenCurves(caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs, fitbitActivities),
+        [caloriesOut, carbsG, morningGlycogenPct, muscleMaxKcal, foodLogs, exerciseLogs, fitbitActivities],
     );
 
     // Slot index for the current time — null when viewing a past/future date or outside chart hours
@@ -277,10 +319,8 @@ export function DashboardCharts({
     const endLiverKcal    = Math.round((endLiverPct  / 100) * LIVER_MAX_KCAL);
     const endMuscleKcal   = Math.round((endMusclePct / 100) * muscleMaxKcal);
 
-    // X-axis ticks: 6 AM, 9 AM, 12 PM, 3 PM, 6 PM, 10 PM
-    const X_TICKS = [0, 12, 24, 36, 48, 64];
-
     return (
+        <>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
             {/* ── Energy Balance ─────────────────────────────────────────────── */}
             <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
@@ -305,6 +345,15 @@ export function DashboardCharts({
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                                 <ReferenceLine y={0} stroke="#000" />
+                                {alpertNumber != null && alpertNumber > 0 && (
+                                    <ReferenceLine
+                                        y={alpertNumber}
+                                        stroke="#dc2626"
+                                        strokeDasharray="6 3"
+                                        strokeWidth={1.5}
+                                        label={{ value: `Alpert max ${alpertNumber}`, position: 'insideTopLeft', fontSize: 8, fontWeight: 800, fill: '#dc2626' }}
+                                    />
+                                )}
                                 <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                                     {calorieData.map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.color} />
@@ -473,6 +522,444 @@ export function DashboardCharts({
                             ⚠ {totalAlcoholDrinks} drink{totalAlcoholDrinks > 1 ? 's' : ''} logged — liver shown with accelerated glycogen drain (NAD⁺ depletion). Muscle stores unaffected directly but resynthesis is impaired.
                         </p>
                     )}
+                </CardContent>
+            </Card>
+        </div>
+
+        {/* Metabolic Buckets View */}
+        {alpertNumber != null && alpertNumber > 0 && (
+            <MetabolicBucketsView
+                caloriesIn={caloriesIn}
+                caloriesOut={caloriesOut}
+                alpertNumber={alpertNumber}
+                glycogenData={glycogenData}
+                foodLogs={foodLogs}
+                exerciseLogs={exerciseLogs}
+                fitbitActivities={fitbitActivities}
+                nowSlot={nowSlot}
+            />
+        )}
+        </>
+    );
+}
+
+// ─── Metabolic Bucket Curves ────────────────────────────────────────────────
+
+interface BucketSlot {
+    slot: number;
+    /** Food calories still in the gut (unabsorbed). */
+    gutKcal: number;
+    /** Liver glycogen kcal — taken directly from the glycogen model. */
+    liverKcal: number;
+    /** Alpert fat-oxidation budget remaining today (starts at alpertNumber). */
+    fatAllowanceKcal: number;
+    /** Lean tissue shield 0–100 % (100 = fully intact). */
+    muscleShieldPct: number;
+    /** Running total of kcal burned sustainably from fat. */
+    cumulativeFatBurned: number;
+    /** Running total of kcal lost from lean tissue (Alpert breach overage). */
+    cumulativeMuscleLost: number;
+}
+
+/**
+ * Derives per-slot gut / fat-allowance / muscle-shield curves from the same
+ * 15-min grid used by buildGlycogenCurves. Liver data comes directly from the
+ * already-computed glycogen curve to avoid redundant simulation.
+ */
+function buildBucketCurves(
+    caloriesOut: number,
+    caloriesIn: number,
+    alpertNumber: number,
+    glycogenData: { slot: number; liver: number; muscle: number }[],
+    foodLogs: FoodLogEntry[] | undefined,
+    exerciseLogs: ExerciseLogEntry[] | undefined,
+    fitbitActivities: FitbitActivity[] | undefined,
+): BucketSlot[] {
+    // ── Per-slot calorie absorption ──────────────────────────────────────────
+    const absorptionPerSlot = new Array(NUM_SLOTS).fill(0);
+    const activeFoods = foodLogs?.filter(f => !f.ignored) ?? [];
+
+    if (activeFoods.length > 0) {
+        for (const food of activeFoods) {
+            const eatMin  = food.consumedAt ? parseHHMM(food.consumedAt) : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
+            const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(eatMin)));
+            const perSlot = food.calories / ABSORPTION_SLOTS;
+            for (let s = startSlot; s < Math.min(startSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
+                absorptionPerSlot[s] += perSlot;
+            }
+        }
+    } else if (caloriesIn > 0) {
+        // Fallback shape: 25% breakfast / 35% lunch / 40% dinner
+        const meals = [
+            { slot: timeToSlot(7 * 60),        kcal: caloriesIn * 0.25 },
+            { slot: timeToSlot(12 * 60 + 30),  kcal: caloriesIn * 0.35 },
+            { slot: timeToSlot(18 * 60 + 30),  kcal: caloriesIn * 0.40 },
+        ];
+        for (const m of meals) {
+            const start = Math.max(0, Math.min(NUM_SLOTS - 1, m.slot));
+            const perSlot = m.kcal / ABSORPTION_SLOTS;
+            for (let s = start; s < Math.min(start + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
+                absorptionPerSlot[s] += perSlot;
+            }
+        }
+    }
+
+    // ── Per-slot exercise burn ────────────────────────────────────────────────
+    const exerciseBurnPerSlot = new Array(NUM_SLOTS).fill(0);
+    const activeLogs = exerciseLogs?.filter(e => !e.ignored) ?? [];
+    let totalExerciseCal = 0;
+
+    const logsToUse = activeLogs.length > 0 ? activeLogs.map(ex => ({
+        cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
+        durationMin: ex.durationMin || 30,
+        startMin: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
+    })) : (fitbitActivities ?? []).map(act => {
+        const TIER_DISCOUNT: Record<string, number> = { tier1_walking: 1.0, tier2_steady_state: 0.80, tier3_anaerobic: 0.65 };
+        return {
+            cal: Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80)),
+            durationMin: act.durationMin,
+            startMin: parseHHMM(act.startTime),
+        };
+    });
+
+    for (const ex of logsToUse) {
+        if (ex.cal <= 0) continue;
+        const dur = Math.max(15, ex.durationMin);
+        const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(ex.startMin)));
+        const numSlots  = Math.max(1, Math.round(dur / INTERVAL_MIN));
+        const perSlot   = ex.cal / numSlots;
+        for (let s = startSlot; s < Math.min(startSlot + numSlots, NUM_SLOTS); s++) {
+            exerciseBurnPerSlot[s] += perSlot;
+        }
+        totalExerciseCal += ex.cal;
+    }
+
+    // BMR component spread evenly across waking hours
+    const bmrTotal   = Math.max(0, caloriesOut - totalExerciseCal);
+    const bmrPerSlot = bmrTotal / NUM_SLOTS;
+
+    // ── Gut (unabsorbed food) per slot ────────────────────────────────────────
+    const gutBySlot = new Array(NUM_SLOTS).fill(0);
+    for (const food of activeFoods) {
+        const eatMin  = food.consumedAt ? parseHHMM(food.consumedAt) : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
+        const eatSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(eatMin)));
+        for (let s = eatSlot; s < Math.min(eatSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
+            const remaining = food.calories * (1 - (s - eatSlot) / ABSORPTION_SLOTS);
+            gutBySlot[s] += remaining;
+        }
+    }
+
+    // ── Slot-by-slot bucket accumulation ─────────────────────────────────────
+    const result: BucketSlot[] = [];
+    let fatAllowanceRemaining = alpertNumber;
+    let cumulativeFatBurned   = 0;
+    let cumulativeMuscleLost  = 0;
+
+    for (let s = 0; s < NUM_SLOTS; s++) {
+        const burnThisSlot = bmrPerSlot + exerciseBurnPerSlot[s];
+        const inThisSlot   = absorptionPerSlot[s];
+        const netDeficit   = burnThisSlot - inThisSlot;
+
+        if (netDeficit > 0) {
+            const fatBurn    = Math.min(netDeficit, fatAllowanceRemaining);
+            const muscleBurn = Math.max(0, netDeficit - fatAllowanceRemaining);
+            fatAllowanceRemaining  = Math.max(0, fatAllowanceRemaining - fatBurn);
+            cumulativeFatBurned   += fatBurn;
+            cumulativeMuscleLost  += muscleBurn;
+        }
+
+        // Shield: 100% until muscle lost = 10% of alpertNumber → 0%
+        const muscleShieldPct = Math.max(0, 100 - (cumulativeMuscleLost / (alpertNumber * 0.1)) * 100);
+
+        result.push({
+            slot: s,
+            gutKcal:            Math.round(gutBySlot[s]),
+            liverKcal:          Math.round((glycogenData[s]?.liver ?? 0) / 100 * LIVER_MAX_KCAL),
+            fatAllowanceKcal:   Math.round(fatAllowanceRemaining),
+            muscleShieldPct:    Math.round(muscleShieldPct),
+            cumulativeFatBurned:  Math.round(cumulativeFatBurned),
+            cumulativeMuscleLost: Math.round(cumulativeMuscleLost),
+        });
+    }
+
+    return result;
+}
+
+// ─── Metabolic Buckets View ──────────────────────────────────────────────────
+
+interface MetabolicBucketsViewProps {
+    caloriesIn: number;
+    caloriesOut: number;
+    alpertNumber: number;
+    glycogenData: { slot: number; liver: number; muscle: number }[];
+    foodLogs?: FoodLogEntry[];
+    exerciseLogs?: ExerciseLogEntry[];
+    fitbitActivities?: FitbitActivity[];
+    nowSlot: number | null;
+}
+
+/** Single vertical gauge card used in the top row. */
+function BucketGauge({
+    title, subtitle, value, max, fillColor, textColor, formatValue,
+}: {
+    title: string;
+    subtitle: string;
+    value: number;
+    max: number;
+    fillColor: string;
+    textColor: string;
+    formatValue: (v: number) => string;
+}) {
+    const pct = Math.max(0, Math.min(100, (value / max) * 100));
+    return (
+        <div className="flex flex-col items-center gap-1">
+            <p className={`text-[9px] font-black uppercase tracking-widest ${textColor}`}>{title}</p>
+            <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight">{subtitle}</p>
+            <div className="relative w-full h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40">
+                <div
+                    className={`absolute bottom-0 left-0 right-0 rounded-xl transition-all duration-700 ${fillColor}`}
+                    style={{ height: `${pct}%` }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-[10px] font-black text-foreground/80 drop-shadow-sm">
+                        {formatValue(value)}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export function MetabolicBucketsView({
+    caloriesIn, caloriesOut, alpertNumber, glycogenData,
+    foodLogs, exerciseLogs, fitbitActivities, nowSlot,
+}: MetabolicBucketsViewProps) {
+    const bucketData = React.useMemo(
+        () => buildBucketCurves(caloriesOut, caloriesIn, alpertNumber, glycogenData, foodLogs, exerciseLogs, fitbitActivities),
+        [caloriesOut, caloriesIn, alpertNumber, glycogenData, foodLogs, exerciseLogs, fitbitActivities],
+    );
+
+    const current = nowSlot != null ? bucketData[nowSlot] : bucketData[bucketData.length - 1];
+    const last     = bucketData[bucketData.length - 1];
+
+    // Max gut kcal seen today — for gauge scaling
+    const maxGut = Math.max(400, ...bucketData.map(d => d.gutKcal));
+
+    return (
+        <div className="mt-6 space-y-6">
+            {/* ── Bucket Gauges ──────────────────────────────────────────────── */}
+            <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">
+                        Metabolic Reserves
+                    </CardTitle>
+                    <CardDescription className="text-xs font-medium">
+                        Current energy bucket levels · Estimated model
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-4 gap-3">
+                        <BucketGauge
+                            title="Gut / Exog."
+                            subtitle="In transit"
+                            value={current.gutKcal}
+                            max={maxGut}
+                            fillColor="bg-gradient-to-t from-blue-400 to-blue-300"
+                            textColor="text-blue-500"
+                            formatValue={v => `${v} kcal`}
+                        />
+                        <BucketGauge
+                            title="Liver Glycogen"
+                            subtitle="400 kcal max"
+                            value={current.liverKcal}
+                            max={LIVER_MAX_KCAL}
+                            fillColor="bg-gradient-to-t from-orange-500 to-orange-400"
+                            textColor="text-orange-500"
+                            formatValue={v => `${v} kcal`}
+                        />
+                        <BucketGauge
+                            title="Fat Allowance"
+                            subtitle="Alpert budget left"
+                            value={current.fatAllowanceKcal}
+                            max={alpertNumber}
+                            fillColor="bg-gradient-to-t from-emerald-500 to-emerald-400"
+                            textColor="text-emerald-600"
+                            formatValue={v => `${v} kcal`}
+                        />
+                        <BucketGauge
+                            title="Muscle Shield"
+                            subtitle="Lean tissue"
+                            value={current.muscleShieldPct}
+                            max={100}
+                            fillColor="bg-gradient-to-t from-red-500 to-red-400"
+                            textColor="text-red-500"
+                            formatValue={v => `${v}% intact`}
+                        />
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* ── Bucket Drain Chart ──────────────────────────────────────────── */}
+            <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">
+                        Calories Remaining in Bucket
+                    </CardTitle>
+                    <CardDescription className="text-xs font-medium">
+                        How each reservoir fills and drains through the day
+                        {nowSlot != null && <span className="text-muted-foreground/60"> · dashed = now, shaded = projected</span>}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="h-[220px] w-full mt-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={bucketData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="gradGut" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.4} />
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradLiver" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#f97316" stopOpacity={0.5} />
+                                        <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradFat" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#10b981" stopOpacity={0.4} />
+                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradMuscle" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.35} />
+                                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                <XAxis
+                                    dataKey="slot"
+                                    type="number"
+                                    domain={[0, NUM_SLOTS - 1]}
+                                    ticks={X_TICKS}
+                                    tickFormatter={slotToTimeLabel}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fontSize: 9, fontWeight: 700 }}
+                                />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                                <Tooltip
+                                    labelFormatter={(slot) => slotToTimeLabel(slot as number)}
+                                    formatter={(value, name) => {
+                                        const labels: Record<string, string> = {
+                                            gutKcal: 'Gut', liverKcal: 'Liver Glycogen',
+                                            fatAllowanceKcal: 'Fat Allowance', muscleShieldPct: 'Muscle Shield',
+                                        };
+                                        const unit = name === 'muscleShieldPct' ? '%' : ' kcal';
+                                        return [`${value}${unit}`, labels[name as string] ?? name];
+                                    }}
+                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                />
+                                <Legend formatter={(value) => {
+                                    const labels: Record<string, string> = {
+                                        gutKcal: 'Gut / Exog.', liverKcal: 'Liver Glycogen',
+                                        fatAllowanceKcal: 'Fat Allowance', muscleShieldPct: 'Muscle Shield %',
+                                    };
+                                    return <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{labels[value] ?? value}</span>;
+                                }} />
+                                {nowSlot != null && (
+                                    <ReferenceArea x1={nowSlot} x2={NUM_SLOTS - 1} fill="#94a3b8" fillOpacity={0.07} stroke="none" />
+                                )}
+                                {nowSlot != null && (
+                                    <ReferenceLine x={nowSlot} stroke="#475569" strokeDasharray="4 3" strokeWidth={1.5}
+                                        label={{ value: 'NOW', position: 'insideTopRight', fontSize: 8, fontWeight: 800, fill: '#475569', offset: 4 }}
+                                    />
+                                )}
+                                <Area type="monotone" dataKey="gutKcal"          stroke="#3b82f6" strokeWidth={2} fill="url(#gradGut)"    dot={false} />
+                                <Area type="monotone" dataKey="liverKcal"        stroke="#ea580c" strokeWidth={2} fill="url(#gradLiver)"  dot={false} />
+                                <Area type="monotone" dataKey="fatAllowanceKcal" stroke="#10b981" strokeWidth={2.5} fill="url(#gradFat)"  dot={false} />
+                                <Area type="monotone" dataKey="muscleShieldPct"  stroke="#ef4444" strokeWidth={1.5} fill="url(#gradMuscle)" dot={false} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* ── Cumulative Ledger ──────────────────────────────────────────── */}
+            <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">
+                        Cumulative Ledger: Fat vs Muscle
+                    </CardTitle>
+                    <CardDescription className="text-xs font-medium">
+                        Fat burned (ledger points) vs lean tissue lost · Ideal = red line stays flat
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="h-[180px] w-full mt-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={bucketData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="gradFatCumul" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradMuscleCumul" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                <XAxis
+                                    dataKey="slot"
+                                    type="number"
+                                    domain={[0, NUM_SLOTS - 1]}
+                                    ticks={X_TICKS}
+                                    tickFormatter={slotToTimeLabel}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fontSize: 9, fontWeight: 700 }}
+                                />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                                <Tooltip
+                                    labelFormatter={(slot) => slotToTimeLabel(slot as number)}
+                                    formatter={(value, name) => [`${value} kcal`, name === 'cumulativeFatBurned' ? 'Fat Burned' : 'Muscle Lost']}
+                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                />
+                                <Legend formatter={(value) => (
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                        {value === 'cumulativeFatBurned' ? 'Cumulative Fat Burned (Ledger Points)' : 'Cumulative Muscle Lost'}
+                                    </span>
+                                )} />
+                                {nowSlot != null && (
+                                    <ReferenceArea x1={nowSlot} x2={NUM_SLOTS - 1} fill="#94a3b8" fillOpacity={0.07} stroke="none" />
+                                )}
+                                {nowSlot != null && (
+                                    <ReferenceLine x={nowSlot} stroke="#475569" strokeDasharray="4 3" strokeWidth={1.5} />
+                                )}
+                                <Area type="monotone" dataKey="cumulativeFatBurned"  stroke="#10b981" strokeWidth={2.5} fill="url(#gradFatCumul)"    dot={false} name="cumulativeFatBurned" />
+                                <Area type="monotone" dataKey="cumulativeMuscleLost" stroke="#ef4444" strokeWidth={2}   fill="url(#gradMuscleCumul)" dot={false} name="cumulativeMuscleLost" />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                    {/* End-of-day summary */}
+                    <div className="flex justify-between items-end mt-3">
+                        <div className="text-center">
+                            <p className="text-[9px] font-black uppercase text-emerald-600/70 tracking-widest">Fat Burned</p>
+                            <p className="text-base font-black text-emerald-600">{last.cumulativeFatBurned}</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-[9px] font-black uppercase text-red-500/70 tracking-widest">Muscle Lost</p>
+                            <p className="text-base font-black text-red-500">{last.cumulativeMuscleLost}</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-[9px] font-black uppercase text-muted-foreground/70 tracking-widest">Efficiency</p>
+                            <p className="text-base font-black text-foreground">
+                                {last.cumulativeFatBurned + last.cumulativeMuscleLost > 0
+                                    ? `${Math.round(last.cumulativeFatBurned / (last.cumulativeFatBurned + last.cumulativeMuscleLost) * 100)}%`
+                                    : '—'}
+                            </p>
+                            <p className="text-[9px] font-bold text-muted-foreground">fat-sourced</p>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
         </div>

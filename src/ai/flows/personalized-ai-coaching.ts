@@ -10,7 +10,7 @@ import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import type { HealthData, UserPreferences, FoodNickname, TemporaryContext } from '@/lib/health-service';
-import { calculateDailyVFScore } from '@/lib/vf-scoring';
+import { calculateDailyVFScore, computeAlpertNumber } from '@/lib/vf-scoring';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 
 const PersonalizedAICoachingInputSchema = z.object({
@@ -122,6 +122,23 @@ const getUserContextTool = ai.defineTool(
         if (!tc) return null;
         if (tc.expiresAt < today) return null; // expired
         return tc;
+      })(),
+      // Alpert hourly pace — lets the AI flag imminent ceiling breaches
+      alpertPace: (() => {
+        const caloriesIn = isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0);
+        const caloriesOut = health?.dailyCaloriesOut ?? 0;
+        const deficit = caloriesOut - caloriesIn;
+        if (caloriesIn <= 0 || caloriesOut <= 0 || deficit <= 0) return null;
+        const alpert = computeAlpertNumber(health?.weightKg, health?.bodyFatPct);
+        const now = new Date();
+        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+        if (hoursElapsed < 1) return null;
+        const budgetSoFar = alpert * (hoursElapsed / 24);
+        if (deficit <= budgetSoFar) return null;
+        const currentRate = Math.round(deficit / hoursElapsed);
+        const hourlyBudget = Math.round(alpert / 24);
+        const projectedDaily = Math.round(currentRate * 24);
+        return { alpertNumber: alpert, currentHourlyRate: currentRate, hourlyBudget, projectedDailyDeficit: projectedDaily, breaching: true };
       })(),
     };
   }
@@ -917,6 +934,17 @@ When logging food (log_food), ALWAYS assess and set:
 - hasSeedOils: true if the meal is deep-fried, heavily processed, or cooked in seed oils
 
 EXERCISE STILL MATTERS — it expands caloriesOut, which directly increases the deficit and the score. Log exercise via log_exercise. Reference the alpertNumber when coaching: "You burned ~600 cal today. Your Alpert ceiling is 1,162 — you're at 52 pts before food."
+
+HOURLY ALPERT PACE MONITORING:
+The Alpert number is a daily max, but fat oxidation has an hourly ceiling too: Alpert ÷ 24.
+When you notice the user's deficit is building faster than their hourly budget allows, proactively warn them:
+  hourly budget = Alpert / 24
+  budget so far = Alpert × (hours elapsed today / 24)
+  If current deficit > budget so far → the pace is unsustainable and excess energy will come from lean tissue (muscle catabolism).
+
+Example: Alpert = 1,162 kcal/day → ~48 kcal/hr ceiling. If by 10 AM (10h elapsed) the deficit is already 600 kcal but the budget is only 484 kcal, the pace exceeds the ceiling.
+When this happens, say something like: "You're burning at 60 kcal/hr vs your 48 kcal/hr Alpert ceiling — projected deficit of 1,440 kcal exceeds your max. Time to eat before you start losing lean assets."
+This should be rare (heavy exercise on an empty stomach early in the day) but important to catch. The dashboard shows a red "Pace Breach" warning as well — reinforce it in chat when you see the numbers.
 
 WEARABLE ACCURACY TIERS (apply every time you call log_exercise):
 Fitness wearables systematically overestimate calorie burn for certain activity types. The system corrects this automatically — but YOU must classify the exercise correctly. Pass your raw calorie estimate and the right tier; the discount is applied for you.

@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -58,6 +58,16 @@ export default function Home() {
   const hasSyncedFitbit = useRef(false);
   const hasBackfilledFitbit = useRef(false);
 
+  // Pull-to-refresh state (Today tab)
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const dailyScrollRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef(0);
+  const isPulling = useRef(false);
+  const pullDistanceRef = useRef(0);
+  const isPullRefreshingRef = useRef(false);
+  const PULL_THRESHOLD = 72;
+
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
 
@@ -103,6 +113,100 @@ export default function Home() {
     hasBackfilledFitbit.current = true;
     backfillFitbitHistory(user.uid).catch(e => console.error('[BackfillFitbit] Failed:', e));
   }, [user, healthData?.isDeviceVerified, healthData?.fitbitByDate]);
+
+  // Persist active tab across page reloads (prevents native PTR from resetting to 'chat').
+  useEffect(() => {
+    const saved = sessionStorage.getItem('cfo_activeTab');
+    if (saved && ['chat', 'daily', 'history', 'assets', 'about'].includes(saved)) {
+      setActiveTab(saved);
+    }
+  }, []);
+
+  const handleTabChange = useCallback((tab: string) => {
+    setActiveTab(tab);
+    sessionStorage.setItem('cfo_activeTab', tab);
+  }, []);
+
+  // Keep the ref in sync so PTR handlers always see the latest value.
+  useEffect(() => { isPullRefreshingRef.current = isPullRefreshing; }, [isPullRefreshing]);
+
+  // Fitbit sync used by pull-to-refresh — stable ref pattern so the touch
+  // handlers registered once still call the latest version.
+  const doFitbitSync = useCallback(async () => {
+    if (!user) return;
+    setIsPullRefreshing(true);
+    isPullRefreshingRef.current = true;
+    try {
+      const localDate = new Date().toLocaleDateString('en-CA');
+      const result = await syncFitbitData(user.uid, localDate);
+      if (result.success) {
+        toast({ title: 'Synced', description: 'Portfolio data updated.' });
+      } else if (result.reason === 'token_refresh_failed') {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired — reconnect your Fitbit.' });
+      } else if (result.reason === 'no_credentials') {
+        toast({ title: 'Refreshed', description: 'Data is live from Firestore.' });
+      } else {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not reach Fitbit API.' });
+      }
+    } finally {
+      setIsPullRefreshing(false);
+      isPullRefreshingRef.current = false;
+    }
+  }, [user, toast]);
+
+  const doFitbitSyncRef = useRef(doFitbitSync);
+  useEffect(() => { doFitbitSyncRef.current = doFitbitSync; }, [doFitbitSync]);
+
+  // Custom pull-to-refresh on the Today tab.
+  // Uses passive:true for touchstart, passive:false for touchmove (to call preventDefault).
+  // overscroll-y-contain on the container blocks the native browser PTR.
+  useEffect(() => {
+    const el = dailyScrollRef.current;
+    if (!el || activeTab !== 'daily') return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (el.scrollTop === 0 && !isPullRefreshingRef.current) {
+        touchStartY.current = e.touches[0].clientY;
+        isPulling.current = true;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isPulling.current || isPullRefreshingRef.current) return;
+      const delta = e.touches[0].clientY - touchStartY.current;
+      if (delta > 0 && el.scrollTop === 0) {
+        e.preventDefault();
+        const clamped = Math.min(delta, PULL_THRESHOLD * 1.5);
+        pullDistanceRef.current = clamped;
+        setPullDistance(clamped);
+      } else if (delta < 0) {
+        isPulling.current = false;
+        pullDistanceRef.current = 0;
+        setPullDistance(0);
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (!isPulling.current) return;
+      isPulling.current = false;
+      const dist = pullDistanceRef.current;
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+      if (dist >= PULL_THRESHOLD) {
+        doFitbitSyncRef.current();
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [activeTab]);
 
   // Show toast for Fitbit OAuth callback result.
   useEffect(() => {
@@ -309,7 +413,7 @@ export default function Home() {
       </header>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full overflow-hidden">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col h-full overflow-hidden">
           <div className="flex-1 relative overflow-hidden h-full">
             {activeTab === 'chat' && (
               <div className="h-full w-full absolute inset-0 flex flex-col">
@@ -317,7 +421,24 @@ export default function Home() {
               </div>
             )}
             {activeTab === 'daily' && (
-              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+              <div ref={dailyScrollRef} className="h-full w-full absolute inset-0 overflow-y-auto overscroll-y-contain">
+                {/* Pull-to-refresh indicator */}
+                <div
+                  className="flex items-center justify-center overflow-hidden transition-all duration-150"
+                  style={{ height: isPullRefreshing ? 52 : Math.round(pullDistance * 0.55) }}
+                >
+                  {isPullRefreshing ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  ) : pullDistance > 0 ? (
+                    <RefreshCw
+                      className="w-5 h-5 text-primary/60"
+                      style={{
+                        transform: `rotate(${Math.min((pullDistance / PULL_THRESHOLD) * 180, 180)}deg)`,
+                        opacity: Math.min(pullDistance / PULL_THRESHOLD, 1),
+                      }}
+                    />
+                  ) : null}
+                </div>
                 <DashboardCards data={healthData} isLoading={isHealthLoading} />
               </div>
             )}

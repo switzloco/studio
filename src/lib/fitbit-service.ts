@@ -5,7 +5,7 @@
  */
 
 import { Firestore } from 'firebase/firestore';
-import { healthService, FitbitCredentials } from '@/lib/health-service';
+import { healthService, FitbitCredentials, FitbitActivity } from '@/lib/health-service';
 
 export interface FitbitMetric {
   value: number;
@@ -18,6 +18,7 @@ export interface FitbitSyncResult {
   sleep: FitbitMetric;
   hrv: FitbitMetric;
   caloriesOut?: FitbitMetric;
+  activities?: FitbitActivity[];
   isVerified: boolean;
 }
 
@@ -61,6 +62,80 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
     throw new FitbitApiError(res.status, endpoint, `Fitbit API ${res.status} on ${endpoint}: ${body}`);
   }
   return res.json();
+}
+
+// Maps lowercase Fitbit activity names → accuracy tier for calorie discount.
+// Default (unrecognized): tier2_steady_state.
+const ACTIVITY_TIER_MAP: Record<string, FitbitActivity['activityTier']> = {
+  walk: 'tier1_walking', walking: 'tier1_walking', 'outdoor walk': 'tier1_walking',
+  hike: 'tier1_walking', hiking: 'tier1_walking',
+  yoga: 'tier1_walking', stretch: 'tier1_walking', pilates: 'tier1_walking',
+  run: 'tier2_steady_state', running: 'tier2_steady_state', 'outdoor run': 'tier2_steady_state',
+  jog: 'tier2_steady_state', jogging: 'tier2_steady_state',
+  bike: 'tier2_steady_state', biking: 'tier2_steady_state', cycling: 'tier2_steady_state', 'outdoor bike': 'tier2_steady_state',
+  swim: 'tier2_steady_state', swimming: 'tier2_steady_state',
+  elliptical: 'tier2_steady_state', rowing: 'tier2_steady_state', row: 'tier2_steady_state',
+  treadmill: 'tier2_steady_state', 'stair climber': 'tier2_steady_state',
+  weights: 'tier3_anaerobic', 'weight training': 'tier3_anaerobic', 'strength training': 'tier3_anaerobic',
+  kettlebell: 'tier3_anaerobic', crossfit: 'tier3_anaerobic',
+  hiit: 'tier3_anaerobic', 'interval training': 'tier3_anaerobic', 'circuit training': 'tier3_anaerobic',
+  sport: 'tier3_anaerobic', soccer: 'tier3_anaerobic', basketball: 'tier3_anaerobic',
+  tennis: 'tier3_anaerobic', volleyball: 'tier3_anaerobic', football: 'tier3_anaerobic',
+  'martial arts': 'tier3_anaerobic', boxing: 'tier3_anaerobic',
+};
+
+function classifyActivityTier(
+  name: string,
+  peakMinutes?: number,
+  cardioMinutes?: number,
+): FitbitActivity['activityTier'] {
+  // HR-zone override is more reliable than name matching when available.
+  if (peakMinutes != null && cardioMinutes != null) {
+    if (peakMinutes + cardioMinutes >= 10) return 'tier3_anaerobic';
+    if (peakMinutes + cardioMinutes >= 2) return 'tier2_steady_state';
+    return 'tier1_walking';
+  }
+  return ACTIVITY_TIER_MAP[name.toLowerCase()] ?? 'tier2_steady_state';
+}
+
+/**
+ * Fetches Fitbit auto-detected activities for a specific date.
+ * Silently returns [] on failure — non-critical for glycogen fallback.
+ */
+async function fetchActivitiesForDate(accessToken: string, date: string): Promise<FitbitActivity[]> {
+  if (accessToken === 'mock_token') return [];
+  try {
+    const data = await fitbitFetch(
+      `/1/user/-/activities/list.json?afterDate=${date}&sort=asc&limit=20&offset=0`,
+      accessToken,
+    );
+    const raw: any[] = (data as any)?.activities ?? [];
+    return raw
+      .filter((a: any) => {
+        if (!a.startTime) return false;
+        // Only include activities whose local start date matches the target date.
+        return new Date(a.startTime).toLocaleDateString('en-CA') === date;
+      })
+      .map((a: any) => {
+        const d = new Date(a.startTime);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const zones = (a.heartRateZones as any[]) ?? [];
+        const peak = zones.find((z: any) => z.name === 'Peak')?.minutes ?? 0;
+        const cardio = zones.find((z: any) => z.name === 'Cardio')?.minutes ?? 0;
+        return {
+          activityName: a.activityName || 'Unknown',
+          startTime: `${hh}:${mm}`,
+          durationMin: Math.round((a.duration || 0) / 60000),
+          calories: a.calories || 0,
+          averageHeartRate: a.averageHeartRate || undefined,
+          activityTier: classifyActivityTier(a.activityName || '', peak, cardio),
+        } satisfies FitbitActivity;
+      });
+  } catch (e) {
+    console.warn('[FitbitService] fetchActivitiesForDate failed (non-critical):', e);
+    return [];
+  }
 }
 
 export const fitbitService = {
@@ -177,13 +252,15 @@ export const fitbitService = {
       };
     }
 
-    // Fetch all three endpoints. Individual endpoints may return null (204 / no
-    // data today) — that's fine and we default to 0. But if a request *throws*
-    // (auth error, rate limit, etc.) we let it propagate so the caller knows.
-    const [activitiesData, sleepData, hrvData] = await Promise.all([
+    // Fetch all endpoints in parallel. Individual endpoints may return null (204 /
+    // no data today) — that's fine. If a request throws (auth error, rate limit)
+    // we let it propagate so the caller knows. Activities are non-critical:
+    // failure is caught inside fetchActivitiesForDate and returns [].
+    const [activitiesData, sleepData, hrvData, activities] = await Promise.all([
       fitbitFetch(`/1/user/-/activities/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1.2/user/-/sleep/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1/user/-/hrv/date/${targetDate}.json`, accessToken),
+      fetchActivitiesForDate(accessToken, targetDate),
     ]);
 
     const steps = (activitiesData as any)?.summary?.steps ?? 0;
@@ -197,6 +274,7 @@ export const fitbitService = {
       sleep: { value: totalMinutesAsleep / 60, source: 'device' },
       hrv: { value: Math.round(dailyRmssd), source: 'device' },
       caloriesOut: { value: caloriesOut, source: 'device' },
+      activities: activities.length > 0 ? activities : undefined,
       isVerified: true,
     };
   },

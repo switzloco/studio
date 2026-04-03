@@ -90,6 +90,9 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   if (healthUpdate.dailyCaloriesOut) {
     dailySnapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
   }
+  if (result.activities && result.activities.length > 0) {
+    dailySnapshot.activities = result.activities;
+  }
 
   try {
     await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
@@ -158,6 +161,9 @@ export async function syncFitbitSnapshot(userId: string, date: string): Promise<
   }
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     snapshot.caloriesOut = Math.round(result.caloriesOut.value * 0.90);
+  }
+  if (result.activities && result.activities.length > 0) {
+    snapshot.activities = result.activities;
   }
 
   try {
