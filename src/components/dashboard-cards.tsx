@@ -207,6 +207,66 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [isOuraSyncing, setIsOuraSyncing] = React.useState(false);
 
+  // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
+  const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
+
+  // Use computed totals from food_log (accurate) or fall back to user doc counter
+  const dailyProteinG = computedTotals?.proteinG ?? (data?.dailyProteinG || 0);
+  const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data?.dailyCaloriesIn || 0);
+  const dailyCarbsG = computedTotals?.carbsG ?? (data?.dailyCarbsG || 0);
+  // For past dates, prefer the history breakdown, then the Fitbit/Oura snapshot, then current doc value.
+  const dailyCaloriesOut = isViewingToday
+    ? (data?.dailyCaloriesOut || 2000)
+    : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data?.dailyCaloriesOut || 2000);
+
+  // Fitbit auto-detected activities — used as glycogen fallback when no manual exercise is logged.
+  // For today, use the live snapshot that was written on the last Fitbit sync.
+  const fitbitActivities = isViewingToday
+    ? data?.fitbitByDate?.[new Date().toLocaleDateString('en-CA')]?.activities
+    : fitbitForDate?.activities;
+
+  const visceralFatPoints = data?.visceralFatPoints || 0;
+  const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
+  const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
+
+  // Alpert daily score
+  const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
+  const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
+
+  // For past days use stored score; for today run the metabolic engine (uncapped)
+  const dailyAlpertScore = React.useMemo(() => {
+    if (!data) return null;
+    if (!isViewingToday && historyEntry) return historyEntry.gain;
+    if (dailyCaloriesOut <= 0) return null;
+    const result = runMetabolicSimulation({
+      caloriesOut: dailyCaloriesOut,
+      alpertNumber,
+      foodLogs: todayFoodLogs ?? undefined,
+      exerciseLogs: todayExerciseLogs ?? undefined,
+      fitbitActivities,
+      caloriesIn: dailyCaloriesIn,
+    });
+    return computeMetabolicScore(result.totalFatBurned, result.totalFatStored, result.totalMuscleLost);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, alpertNumber,
+      todayFoodLogs, todayExerciseLogs, fitbitActivities]);
+
+  // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
+  // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
+  // If deficit so far > (alpertNumber × hoursElapsed / 24), the pace is unsustainable.
+  const alpertPace = React.useMemo(() => {
+    if (!data || !isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
+    const now = new Date();
+    const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+    if (hoursElapsed < 1) return null; // too early to project
+    const hourlyBudget = alpertNumber / 24;
+    const budgetSoFar = alpertNumber * (hoursElapsed / 24);
+    if (alpertDeficit <= budgetSoFar) return null; // on pace, no warning
+    const currentHourlyRate = alpertDeficit / hoursElapsed;
+    const projectedDaily = Math.round(currentHourlyRate * 24);
+    return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
+  }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-full space-y-6 p-6 md:p-12 lg:p-16 bg-background">
@@ -250,68 +310,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     );
   }
 
-  // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
-  const fitbitForDate = !isViewingToday ? (data.fitbitByDate?.[selectedDateStr] ?? null) : null;
-
-  // Use computed totals from food_log (accurate) or fall back to user doc counter
-  const dailyProteinG = computedTotals?.proteinG ?? (data.dailyProteinG || 0);
-  const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data.dailyCaloriesIn || 0);
-  const dailyCarbsG = computedTotals?.carbsG ?? (data.dailyCarbsG || 0);
-  // For past dates, prefer the history breakdown, then the Fitbit/Oura snapshot, then current doc value.
-  const dailyCaloriesOut = isViewingToday
-    ? (data.dailyCaloriesOut || 2000)
-    : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data.dailyCaloriesOut || 2000);
-
-  // Fitbit auto-detected activities — used as glycogen fallback when no manual exercise is logged.
-  // For today, use the live snapshot that was written on the last Fitbit sync.
-  const fitbitActivities = isViewingToday
-    ? data.fitbitByDate?.[new Date().toLocaleDateString('en-CA')]?.activities
-    : fitbitForDate?.activities;
-
-  const visceralFatPoints = data.visceralFatPoints || 0;
-  const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
-  const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
 
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
   const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
 
-  // Alpert daily score
-  const alpertNumber = computeAlpertNumber(data.weightKg, data.bodyFatPct);
-  const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
-  // For past days use stored score; for today run the metabolic engine (uncapped)
-  const dailyAlpertScore = React.useMemo(() => {
-    if (!isViewingToday && historyEntry) return historyEntry.gain;
-    if (dailyCaloriesOut <= 0) return null;
-    const result = runMetabolicSimulation({
-      caloriesOut: dailyCaloriesOut,
-      alpertNumber,
-      foodLogs: todayFoodLogs ?? undefined,
-      exerciseLogs: todayExerciseLogs ?? undefined,
-      fitbitActivities,
-      caloriesIn: dailyCaloriesIn,
-    });
-    return computeMetabolicScore(result.totalFatBurned, result.totalFatStored, result.totalMuscleLost);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, alpertNumber,
-      todayFoodLogs, todayExerciseLogs, fitbitActivities]);
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
-  const scoreHasDevicePending = isViewingToday && !data.isDeviceVerified;
-
-  // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
-  // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
-  // If deficit so far > (alpertNumber × hoursElapsed / 24), the pace is unsustainable.
-  const alpertPace = React.useMemo(() => {
-    if (!isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
-    const now = new Date();
-    const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-    if (hoursElapsed < 1) return null; // too early to project
-    const hourlyBudget = alpertNumber / 24;
-    const budgetSoFar = alpertNumber * (hoursElapsed / 24);
-    if (alpertDeficit <= budgetSoFar) return null; // on pace, no warning
-    const currentHourlyRate = alpertDeficit / hoursElapsed;
-    const projectedDaily = Math.round(currentHourlyRate * 24);
-    return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
-  }, [isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
+  const scoreHasDevicePending = isViewingToday && (data && !data.isDeviceVerified);
 
   const handleConnectFitbit = async () => {
     if (!user) return;
