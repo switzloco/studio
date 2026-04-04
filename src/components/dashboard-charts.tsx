@@ -8,6 +8,7 @@ import { Flame, BatteryCharging, Info } from 'lucide-react';
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 import type { FitbitActivity } from '@/lib/health-service';
+import { runMetabolicSimulation } from '@/lib/metabolic-engine';
 
 interface DashboardChartsProps {
     caloriesIn: number;
@@ -532,7 +533,6 @@ export function DashboardCharts({
                 caloriesIn={caloriesIn}
                 caloriesOut={caloriesOut}
                 alpertNumber={alpertNumber}
-                glycogenData={glycogenData}
                 foodLogs={foodLogs}
                 exerciseLogs={exerciseLogs}
                 fitbitActivities={fitbitActivities}
@@ -549,7 +549,7 @@ interface BucketSlot {
     slot: number;
     /** Food calories still in the gut (unabsorbed). */
     gutKcal: number;
-    /** Liver glycogen kcal — taken directly from the glycogen model. */
+    /** Liver glycogen kcal — taken from the metabolic engine simulation. */
     liverKcal: number;
     /** Alpert fat-oxidation budget remaining today (starts at alpertNumber). */
     fatAllowanceKcal: number;
@@ -557,132 +557,47 @@ interface BucketSlot {
     muscleShieldPct: number;
     /** Running total of kcal burned sustainably from fat. */
     cumulativeFatBurned: number;
-    /** Running total of kcal lost from lean tissue (Alpert breach overage). */
+    /** Running total of kcal deposited as fat (surplus slots). */
+    cumulativeFatStored: number;
+    /** Running total of kcal lost from lean tissue (all fuel sources exhausted). */
     cumulativeMuscleLost: number;
 }
 
 /**
- * Derives per-slot gut / fat-allowance / muscle-shield curves from the same
- * 15-min grid used by buildGlycogenCurves. Liver data comes directly from the
- * already-computed glycogen curve to avoid redundant simulation.
+ * Delegates to the shared MetabolicEngine for correct 4-bucket sequential drain:
+ *   Gut → Fat Faucet (rate-limited, paused while gut non-empty) → Liver → Muscle
  */
 function buildBucketCurves(
     caloriesOut: number,
     caloriesIn: number,
     alpertNumber: number,
-    glycogenData: { slot: number; liver: number; muscle: number }[],
     foodLogs: FoodLogEntry[] | undefined,
     exerciseLogs: ExerciseLogEntry[] | undefined,
     fitbitActivities: FitbitActivity[] | undefined,
 ): BucketSlot[] {
-    // ── Per-slot calorie absorption ──────────────────────────────────────────
-    const absorptionPerSlot = new Array(NUM_SLOTS).fill(0);
-    const activeFoods = foodLogs?.filter(f => !f.ignored) ?? [];
-
-    if (activeFoods.length > 0) {
-        for (const food of activeFoods) {
-            const eatMin  = food.consumedAt ? parseHHMM(food.consumedAt) : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
-            const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(eatMin)));
-            const perSlot = food.calories / ABSORPTION_SLOTS;
-            for (let s = startSlot; s < Math.min(startSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
-                absorptionPerSlot[s] += perSlot;
-            }
-        }
-    } else if (caloriesIn > 0) {
-        // Fallback shape: 25% breakfast / 35% lunch / 40% dinner
-        const meals = [
-            { slot: timeToSlot(7 * 60),        kcal: caloriesIn * 0.25 },
-            { slot: timeToSlot(12 * 60 + 30),  kcal: caloriesIn * 0.35 },
-            { slot: timeToSlot(18 * 60 + 30),  kcal: caloriesIn * 0.40 },
-        ];
-        for (const m of meals) {
-            const start = Math.max(0, Math.min(NUM_SLOTS - 1, m.slot));
-            const perSlot = m.kcal / ABSORPTION_SLOTS;
-            for (let s = start; s < Math.min(start + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
-                absorptionPerSlot[s] += perSlot;
-            }
-        }
-    }
-
-    // ── Per-slot exercise burn ────────────────────────────────────────────────
-    const exerciseBurnPerSlot = new Array(NUM_SLOTS).fill(0);
-    const activeLogs = exerciseLogs?.filter(e => !e.ignored) ?? [];
-    let totalExerciseCal = 0;
-
-    const logsToUse = activeLogs.length > 0 ? activeLogs.map(ex => ({
-        cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
-        durationMin: ex.durationMin || 30,
-        startMin: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
-    })) : (fitbitActivities ?? []).map(act => {
-        const TIER_DISCOUNT: Record<string, number> = { tier1_walking: 1.0, tier2_steady_state: 0.80, tier3_anaerobic: 0.65 };
-        return {
-            cal: Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80)),
-            durationMin: act.durationMin,
-            startMin: parseHHMM(act.startTime),
-        };
+    const { slots, totalMuscleLost } = runMetabolicSimulation({
+        caloriesOut,
+        alpertNumber,
+        foodLogs,
+        exerciseLogs,
+        fitbitActivities,
+        caloriesIn,
     });
 
-    for (const ex of logsToUse) {
-        if (ex.cal <= 0) continue;
-        const dur = Math.max(15, ex.durationMin);
-        const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(ex.startMin)));
-        const numSlots  = Math.max(1, Math.round(dur / INTERVAL_MIN));
-        const perSlot   = ex.cal / numSlots;
-        for (let s = startSlot; s < Math.min(startSlot + numSlots, NUM_SLOTS); s++) {
-            exerciseBurnPerSlot[s] += perSlot;
-        }
-        totalExerciseCal += ex.cal;
-    }
-
-    // BMR component spread evenly across waking hours
-    const bmrTotal   = Math.max(0, caloriesOut - totalExerciseCal);
-    const bmrPerSlot = bmrTotal / NUM_SLOTS;
-
-    // ── Gut (unabsorbed food) per slot ────────────────────────────────────────
-    const gutBySlot = new Array(NUM_SLOTS).fill(0);
-    for (const food of activeFoods) {
-        const eatMin  = food.consumedAt ? parseHHMM(food.consumedAt) : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
-        const eatSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(eatMin)));
-        for (let s = eatSlot; s < Math.min(eatSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
-            const remaining = food.calories * (1 - (s - eatSlot) / ABSORPTION_SLOTS);
-            gutBySlot[s] += remaining;
-        }
-    }
-
-    // ── Slot-by-slot bucket accumulation ─────────────────────────────────────
-    const result: BucketSlot[] = [];
-    let fatAllowanceRemaining = alpertNumber;
-    let cumulativeFatBurned   = 0;
-    let cumulativeMuscleLost  = 0;
-
-    for (let s = 0; s < NUM_SLOTS; s++) {
-        const burnThisSlot = bmrPerSlot + exerciseBurnPerSlot[s];
-        const inThisSlot   = absorptionPerSlot[s];
-        const netDeficit   = burnThisSlot - inThisSlot;
-
-        if (netDeficit > 0) {
-            const fatBurn    = Math.min(netDeficit, fatAllowanceRemaining);
-            const muscleBurn = Math.max(0, netDeficit - fatAllowanceRemaining);
-            fatAllowanceRemaining  = Math.max(0, fatAllowanceRemaining - fatBurn);
-            cumulativeFatBurned   += fatBurn;
-            cumulativeMuscleLost  += muscleBurn;
-        }
-
-        // Shield: 100% until muscle lost = 10% of alpertNumber → 0%
-        const muscleShieldPct = Math.max(0, 100 - (cumulativeMuscleLost / (alpertNumber * 0.1)) * 100);
-
-        result.push({
-            slot: s,
-            gutKcal:            Math.round(gutBySlot[s]),
-            liverKcal:          Math.round((glycogenData[s]?.liver ?? 0) / 100 * LIVER_MAX_KCAL),
-            fatAllowanceKcal:   Math.round(fatAllowanceRemaining),
-            muscleShieldPct:    Math.round(muscleShieldPct),
-            cumulativeFatBurned:  Math.round(cumulativeFatBurned),
-            cumulativeMuscleLost: Math.round(cumulativeMuscleLost),
-        });
-    }
-
-    return result;
+    return slots.map(s => {
+        // Muscle shield: 100% → 0% as muscle lost grows toward 10% of alpertNumber
+        const muscleShieldPct = Math.max(0, 100 - (totalMuscleLost / (alpertNumber * 0.1)) * 100);
+        return {
+            slot:                  s.slot,
+            gutKcal:               s.gutKcal,
+            liverKcal:             s.liverKcal,
+            fatAllowanceKcal:      s.fatAllowanceRemaining,
+            muscleShieldPct:       Math.round(muscleShieldPct),
+            cumulativeFatBurned:   s.cumulativeFatBurned,
+            cumulativeFatStored:   s.cumulativeFatStored,
+            cumulativeMuscleLost:  s.cumulativeMuscleLost,
+        };
+    });
 }
 
 // ─── Metabolic Buckets View ──────────────────────────────────────────────────
@@ -691,7 +606,6 @@ interface MetabolicBucketsViewProps {
     caloriesIn: number;
     caloriesOut: number;
     alpertNumber: number;
-    glycogenData: { slot: number; liver: number; muscle: number }[];
     foodLogs?: FoodLogEntry[];
     exerciseLogs?: ExerciseLogEntry[];
     fitbitActivities?: FitbitActivity[];
@@ -731,12 +645,12 @@ function BucketGauge({
 }
 
 export function MetabolicBucketsView({
-    caloriesIn, caloriesOut, alpertNumber, glycogenData,
+    caloriesIn, caloriesOut, alpertNumber,
     foodLogs, exerciseLogs, fitbitActivities, nowSlot,
 }: MetabolicBucketsViewProps) {
     const bucketData = React.useMemo(
-        () => buildBucketCurves(caloriesOut, caloriesIn, alpertNumber, glycogenData, foodLogs, exerciseLogs, fitbitActivities),
-        [caloriesOut, caloriesIn, alpertNumber, glycogenData, foodLogs, exerciseLogs, fitbitActivities],
+        () => buildBucketCurves(caloriesOut, caloriesIn, alpertNumber, foodLogs, exerciseLogs, fitbitActivities),
+        [caloriesOut, caloriesIn, alpertNumber, foodLogs, exerciseLogs, fitbitActivities],
     );
 
     const current = nowSlot != null ? bucketData[nowSlot] : bucketData[bucketData.length - 1];
@@ -900,6 +814,10 @@ export function MetabolicBucketsView({
                                         <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
                                         <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                                     </linearGradient>
+                                    <linearGradient id="gradFatStored" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                                    </linearGradient>
                                     <linearGradient id="gradMuscleCumul" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.3} />
                                         <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
@@ -919,12 +837,12 @@ export function MetabolicBucketsView({
                                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                                 <Tooltip
                                     labelFormatter={(slot) => slotToTimeLabel(slot as number)}
-                                    formatter={(value, name) => [`${value} kcal`, name === 'cumulativeFatBurned' ? 'Fat Burned' : 'Muscle Lost']}
+                                    formatter={(value, name) => [`${value} kcal`, name === 'cumulativeFatBurned' ? 'Fat Burned' : name === 'cumulativeFatStored' ? 'Fat Stored' : 'Muscle Lost']}
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                                 <Legend formatter={(value) => (
                                     <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                                        {value === 'cumulativeFatBurned' ? 'Cumulative Fat Burned (Ledger Points)' : 'Cumulative Muscle Lost'}
+                                        {value === 'cumulativeFatBurned' ? 'Fat Burned (Ledger Points)' : value === 'cumulativeFatStored' ? 'Fat Stored (Surplus)' : 'Muscle Lost'}
                                     </span>
                                 )} />
                                 {nowSlot != null && (
@@ -934,6 +852,7 @@ export function MetabolicBucketsView({
                                     <ReferenceLine x={nowSlot} stroke="#475569" strokeDasharray="4 3" strokeWidth={1.5} />
                                 )}
                                 <Area type="monotone" dataKey="cumulativeFatBurned"  stroke="#10b981" strokeWidth={2.5} fill="url(#gradFatCumul)"    dot={false} name="cumulativeFatBurned" />
+                                <Area type="monotone" dataKey="cumulativeFatStored"  stroke="#f59e0b" strokeWidth={2}   fill="url(#gradFatStored)"   dot={false} name="cumulativeFatStored" />
                                 <Area type="monotone" dataKey="cumulativeMuscleLost" stroke="#ef4444" strokeWidth={2}   fill="url(#gradMuscleCumul)" dot={false} name="cumulativeMuscleLost" />
                             </AreaChart>
                         </ResponsiveContainer>
@@ -943,6 +862,11 @@ export function MetabolicBucketsView({
                         <div className="text-center">
                             <p className="text-[9px] font-black uppercase text-emerald-600/70 tracking-widest">Fat Burned</p>
                             <p className="text-base font-black text-emerald-600">{last.cumulativeFatBurned}</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-[9px] font-black uppercase text-amber-500/70 tracking-widest">Fat Stored</p>
+                            <p className="text-base font-black text-amber-500">{last.cumulativeFatStored}</p>
                             <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
                         </div>
                         <div className="text-center">
