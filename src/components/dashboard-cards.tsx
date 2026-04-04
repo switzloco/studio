@@ -14,6 +14,7 @@ import { syncOuraData, OuraSyncResult } from '@/app/actions/oura';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber } from '@/lib/vf-scoring';
+import { runMetabolicSimulation, computeMetabolicScore } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -277,12 +278,22 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   // Alpert daily score
   const alpertNumber = computeAlpertNumber(data.weightKg, data.bodyFatPct);
   const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
-  // For past days use stored score if available, otherwise compute
-  const dailyAlpertScore = !isViewingToday && historyEntry
-    ? historyEntry.gain
-    : (dailyCaloriesOut > 0 && dailyCaloriesIn > 0)
-      ? Math.min(100, Math.round((alpertDeficit / alpertNumber) * 100))
-      : null;
+  // For past days use stored score; for today run the metabolic engine (uncapped)
+  const dailyAlpertScore = React.useMemo(() => {
+    if (!isViewingToday && historyEntry) return historyEntry.gain;
+    if (dailyCaloriesOut <= 0) return null;
+    const result = runMetabolicSimulation({
+      caloriesOut: dailyCaloriesOut,
+      alpertNumber,
+      foodLogs: todayFoodLogs ?? undefined,
+      exerciseLogs: todayExerciseLogs ?? undefined,
+      fitbitActivities,
+      caloriesIn: dailyCaloriesIn,
+    });
+    return computeMetabolicScore(result.totalFatBurned, result.totalFatStored, result.totalMuscleLost);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, alpertNumber,
+      todayFoodLogs, todayExerciseLogs, fitbitActivities]);
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && !data.isDeviceVerified;
 
@@ -635,7 +646,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                     <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending) && <span className="text-2xl opacity-60">*</span>}</>
                   ) : '—'}
                 </div>
-                <div className="text-sm font-bold opacity-60 mb-2">/ 100</div>
+                <div className="text-sm font-bold opacity-60 mb-2">pts</div>
               </div>
               <div className="h-1.5 bg-white/20 rounded-full mb-4">
                 {dailyAlpertScore !== null && dailyAlpertScore > 0 && (

@@ -503,7 +503,7 @@ const getRecentLogsTool = ai.defineTool(
 const scoreDailyVFTool = ai.defineTool(
   {
     name: 'score_daily_vf',
-    description: `Calculates today's Visceral Fat score using the Alpert-number method. Call this at end-of-day or when the user asks for their daily score. The score = (caloric deficit / Alpert max burn) × 100, capped at 100. Alpert max burn = max sustainable fat oxidation based on fat mass (Alpert 2005). Returns the score, a plain-english breakdown, and coaching context on the 5 rules (protein, fasting, alcohol, sleep, seed oils) as talking points — they do not affect the score directly.`,
+    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine. Call this at end-of-day or when the user asks for their daily score. Score = (fatBurned/1200)×100 − (fatStored/1200)×100 − (muscleLost/10)×2. Score is UNCAPPED — a perfect PSMF day = ~100 pts; extended fasts can exceed 100; surplus days go negative. Fat oxidation is rate-limited per hour (Alpert 2005) and paused while the gut has food (insulin suppression of lipolysis). Returns the score, a breakdown of fat burned/stored/muscle lost, and coaching context on the 5 rules.`,
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('YYYY-MM-DD'),
@@ -521,20 +521,20 @@ const scoreDailyVFTool = ai.defineTool(
   async (input) => {
     const firestore = getAdminFirestore();
 
-    // Gather day's food logs to compute totals
-    const foodLogs = await healthService.queryFoodLog(firestore, input.userId, input.localDate, 50);
+    // Gather day's food and exercise logs for the metabolic simulation
+    const [foodLogs, exerciseLogs, health, prefs] = await Promise.all([
+      healthService.queryFoodLog(firestore, input.userId, input.localDate, 50),
+      healthService.queryExerciseLog(firestore, input.userId, input.localDate, 50),
+      healthService.getHealthSummary(firestore, input.userId),
+      healthService.getUserPreferences(firestore, input.userId),
+    ]);
     const totalCaloriesIn = foodLogs.reduce((s, e) => s + (e.calories || 0), 0);
     const totalProteinG = foodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
     const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
     const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
 
-    // Get current health data for caloriesOut, body comp, and existing equity
-    const health = await healthService.getHealthSummary(firestore, input.userId);
     const caloriesOut = health?.dailyCaloriesOut || 2000;
     const currentEquity = health?.visceralFatPoints || 0;
-
-    // Get protein goal from preferences
-    const prefs = await healthService.getUserPreferences(firestore, input.userId);
     const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
 
     const result = calculateDailyVFScore({
@@ -548,6 +548,8 @@ const scoreDailyVFTool = ai.defineTool(
       seedOilMeals,
       weightKg: health?.weightKg,
       bodyFatPct: health?.bodyFatPct,
+      foodLogs,
+      exerciseLogs,
     });
 
     // Apply score to equity
@@ -900,21 +902,26 @@ EXERCISE HISTORY & PHYSICAL ABILITIES:
 - Track and celebrate progress: "You pressed 32kg kettlebells last month — up from 24kg in January. That's a 33% equity gain on overhead press."
 - Never say you don't track this data or can't answer. The data is there — just query it.
 
-VF DAILY SCORING SYSTEM (Alpert Method):
-Score = (caloric deficit ÷ Alpert number) × 100, capped at 100.
+VF DAILY SCORING SYSTEM (Hourly Metabolic Partitioning Engine):
+Score = (fatBurned / 1200) × 100 − (fatStored / 1200) × 100 − (muscleLost / 10) × 2
 
-The Alpert number is the maximum sustainable fat oxidation rate for this client's body composition:
-  Alpert (kcal/day) = fat mass (lbs) × 31
-  → Default at 25% BF / 150 lbs: ~1,162 kcal/day = 100 pts
-  → At heavier/higher BF: higher Alpert number (bigger furnace)
+1200 kcal = PSMF perfect-day baseline. Score is UNCAPPED:
+  • Perfect PSMF day (1,200 kcal fat burned, 0 stored, 0 muscle) → +100
+  • Extended 36h fast (~1,440 kcal fat burned) → ~+120
+  • Maintenance → ≈ 0
+  • Caloric surplus (400 kcal stored) → ~ −33
 
-Examples:
-  800 kcal deficit, Alpert = 1,162 → score = +69
-  1,162 kcal deficit              → score = +100 (maxed out)
-  0 kcal (maintenance)            → score = 0
-  +400 kcal surplus               → score = -34
+The engine models 4-bucket sequential drain across 15-minute slots (6 AM–10 PM):
+  1. Gut/Exogenous first — absorbed calories cover burn before anything else
+  2. Fat faucet — rate-limited at Alpert ÷ 24 kcal/hr; PAUSED while gut has food (insulin blocks lipolysis)
+  3. Liver glycogen — fills remaining requirement
+  4. Muscle catabolism — last resort, incurs the −2 pts per 10 kcal penalty
 
-Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool computes everything automatically from logged data, but you need to supply fastingHours and sleepHours from the conversation. The tool returns alpertNumber and deficit so you can explain the math.
+The Alpert number is the max sustainable fat oxidation rate:
+  Alpert (kcal/day) = fat mass (lbs) × 31  [Alpert 2005]
+  → At 25% BF / 150 lbs: ~1,162 kcal/day → ~48 kcal/hr fat faucet ceiling
+
+Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool fetches all food and exercise logs automatically and runs the full simulation. You only need to supply fastingHours and sleepHours from the conversation.
 
 THE 5 RULES — COACHING TALKING POINTS (they do NOT directly change the score):
 These are context levers you surface when relevant. They matter because they affect the underlying deficit, hormone environment, or fat oxidation capacity:
