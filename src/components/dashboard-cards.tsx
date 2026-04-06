@@ -13,8 +13,8 @@ import { syncFitbitData, syncFitbitSnapshot, SyncResult } from '@/app/actions/fi
 import { syncOuraData, OuraSyncResult } from '@/app/actions/oura';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
-import { computeAlpertNumber } from '@/lib/vf-scoring';
-import { runMetabolicSimulation, computeMetabolicScore } from '@/lib/metabolic-engine';
+import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
+import { runMetabolicSimulation } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -233,23 +233,34 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
   const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
 
-  // For past days use stored score; for today run the metabolic engine (uncapped)
+  // For past days use stored score; for today run the 5-rule scoring engine.
+  // Returns null when no food has been logged yet (avoid misleading estimates).
   const dailyAlpertScore = React.useMemo(() => {
     if (!data) return null;
     if (!isViewingToday && historyEntry) return historyEntry.gain;
     if (dailyCaloriesOut <= 0) return null;
-    const result = runMetabolicSimulation({
+    // Don't show a score before the user has logged any food — caloriesIn=0 with
+    // no explicit fasting hours would produce a wildly optimistic estimate.
+    if (isViewingToday && dailyCaloriesIn <= 0) return null;
+    const result = calculateDailyVFScore({
+      caloriesIn: dailyCaloriesIn,
       caloriesOut: dailyCaloriesOut,
-      alpertNumber,
+      proteinG: dailyProteinG,
+      proteinGoal,
+      fastingHours: 0,   // not auto-tracked; user tells CFO coach
+      alcoholDrinks: 0,  // not auto-tracked; user tells CFO coach
+      sleepHours: data.sleepHours ?? 7,
+      seedOilMeals: 0,   // not auto-tracked; user tells CFO coach
+      weightKg: data.weightKg,
+      bodyFatPct: data.bodyFatPct,
       foodLogs: todayFoodLogs ?? undefined,
       exerciseLogs: todayExerciseLogs ?? undefined,
       fitbitActivities,
-      caloriesIn: dailyCaloriesIn,
     });
-    return computeMetabolicScore(result.totalFatBurned, result.totalFatStored, result.totalMuscleLost);
+    return result.score;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, alpertNumber,
-      todayFoodLogs, todayExerciseLogs, fitbitActivities]);
+  }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
+      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities]);
 
   // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
   // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
