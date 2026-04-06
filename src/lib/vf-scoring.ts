@@ -122,15 +122,20 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const alcoholFlag   = alcoholDrinks > 2;
   const poorSleep     = sleepHours < 6;
 
-  // Rule 2: Fasting Override — 24h+ fast always awards +100 base score
-  const fastingOverride = fastingHours >= 24;
+  // Rule 2: Fasting Override — 24h+ fast OR calorie intake <15% of TDEE.
+  // Near-fasting days (e.g. 235 kcal in / 2700 kcal out) are treated the same
+  // as an explicit fast: score caps at +100, protein mandate is waived.
+  const nearFasting = caloriesIn >= 0 && caloriesIn < caloriesOut * 0.15;
+  const fastingOverride = fastingHours >= 24 || nearFasting;
 
   // Rule 1: Base score from caloric deficit (linear: 1000 kcal deficit = 100 pts)
+  // Fasting override caps at +100 to prevent runaway scores on extreme deficits.
   const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
   let score = baseScore;
 
-  // Rule 1: Protein mandate — cap positive score at +50 if protein goal not met
-  if (!proteinMet && score > 50) {
+  // Rule 1: Protein mandate — cap positive score at +50 if protein goal not met.
+  // Waived when fasting/near-fasting: you can't eat protein you're not eating.
+  if (!proteinMet && !fastingOverride && score > 50) {
     score = 50;
   }
 
