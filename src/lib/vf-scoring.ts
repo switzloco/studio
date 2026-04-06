@@ -1,24 +1,20 @@
 /**
  * @fileOverview Visceral Fat daily scoring engine.
  *
- * SCORING: Hourly Metabolic Partitioning (4-bucket sequential drain).
- *   Score = (totalFatBurned / 1200) × 100
- *         − (totalFatStored  / 1200) × 100
- *         − (totalMuscleLost / 10)   × 2
+ * SCORING: Linear caloric-deficit base + biology-grounded modifiers.
+ *   Base  = deficit / 10   (1000 kcal deficit = 100 pts)
+ *   Range = [-200 … uncapped positive]
  *
- *   1200 kcal = PSMF perfect-day baseline (physiologically optimal fat-loss day).
- *   Score is UNCAPPED — extended fasts score > 100. Caloric surplus scores < 0.
+ *   Metabolic engine (4-bucket drain) still runs for informational breakdown
+ *   but does NOT drive the score — it was producing extreme negatives on
+ *   fasting days due to Alpert rate-limiting forcing deficit into muscle.
  *
- *   Fat faucet is PAUSED while gut has food (insulin suppression of lipolysis).
- *   Fat oxidation is rate-limited to alpertNumber/24 kcal/hr.
- *   Alpert number = fat mass (lbs) × 31 kcal/lb/day  [Alpert 2005]
- *
- * 5-RULE ASSESSMENTS (coaching context, not scoring):
- *   Rule 1 — Caloric Engine    (base deficit context)
- *   Rule 2 — Fasting Multiplier
- *   Rule 3 — Alcohol Freeze
- *   Rule 4 — Cortisol Tax
- *   Rule 5 — Seed Oil Penalty
+ * 5 BIOLOGY-BASED MODIFIERS:
+ *   1 — Caloric Engine    (base = deficit / 10; cap +50 if protein missed)
+ *   2 — Fasting Override  (24h+ fast → +100 base — ketosis is protective)
+ *   3 — Alcohol Drag      (−5 pts/drink — ~1h suppressed fat oxidation each)
+ *   4 — Cortisol Tax      (sleep <6h → 0.8× positive scores — ~20% impairment)
+ *   5 — Seed Oil Nudge    (−5 pts/meal — mild inflammation signal, not acute)
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -138,30 +134,22 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     score = 50;
   }
 
-  // Rule 3: Alcohol Freeze
-  let alcoholCap     = false;
-  let alcoholPenalty = 0;
-  if (alcoholDrinks > 2) {
-    if (score > 0) {
-      // Deficit day: freeze score at 0
-      alcoholCap     = true;
-      alcoholPenalty = -score;
-      score          = 0;
-    } else {
-      // Surplus day: apply heavy additional penalty
-      alcoholPenalty = -100;
-      score         += alcoholPenalty;
-    }
-  }
+  // Rule 3: Alcohol Drag — each drink suppresses fat oxidation ~1h (Siler 1999)
+  // At typical Alpert rates, ~5 pts of lost fat-burning per drink.
+  const alcoholPenalty = alcoholDrinks > 0 ? alcoholDrinks * -5 : 0;
+  const alcoholCap    = false; // no cliff — proportional to biology
+  score += alcoholPenalty;
 
-  // Rule 4: Cortisol Tax — halve positive scores only (poor sleep doesn't help negative scores)
-  const cortisolMultiplier = poorSleep ? 0.5 : 1;
+  // Rule 4: Cortisol Tax — poor sleep elevates cortisol ~20%, impairing fat oxidation
+  // Only penalizes positive scores (bad sleep doesn't "help" a surplus day)
+  const cortisolMultiplier = poorSleep ? 0.8 : 1;
   if (poorSleep && score > 0) {
     score = Math.round(score * cortisolMultiplier);
   }
 
-  // Rule 5: Seed Oil Penalty — -25 per seed-oil meal
-  const seedOilPenalty = seedOilMeals * -25;
+  // Rule 5: Seed Oil Nudge — mild inflammatory signal (omega-6 load)
+  // Acute daily impact on fat oxidation is negligible; this is a coaching nudge.
+  const seedOilPenalty = seedOilMeals * -5;
   score += seedOilPenalty;
 
   // Clamp worst case at -200

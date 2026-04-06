@@ -152,47 +152,48 @@ describe('VF Rule 2 — Fasting Multiplier', () => {
   });
 });
 
-// ─── Rule 3: Alcohol Freeze ─────────────────────────────────────────────────
-describe('VF Rule 3 — Alcohol Freeze', () => {
-  it('caps score at 0 when >2 drinks consumed (deficit day)', () => {
-    const result = calculateDailyVFScore(cleanDay({ alcoholDrinks: 4 }));
-    expect(result.score).toBeLessThanOrEqual(0);
-    expect(result.breakdown.alcoholCap).toBe(true);
+// ─── Rule 3: Alcohol Drag ───────────────────────────────────────────────────
+describe('VF Rule 3 — Alcohol Drag (biology: ~1h suppressed fat oxidation per drink)', () => {
+  it('deducts -5 per drink (proportional, no cliff)', () => {
+    const clean = calculateDailyVFScore(cleanDay());
+    const four = calculateDailyVFScore(cleanDay({ alcoholDrinks: 4 }));
+    expect(four.score).toBe(clean.score - 20);
+    expect(four.breakdown.alcoholPenalty).toBe(-20);
   });
 
-  it('allows positive score with exactly 2 drinks', () => {
+  it('still allows a positive score with moderate drinking on a deficit day', () => {
     const result = calculateDailyVFScore(cleanDay({ alcoholDrinks: 2 }));
     expect(result.score).toBeGreaterThan(0);
-    expect(result.breakdown.alcoholCap).toBe(false);
+    expect(result.breakdown.alcoholPenalty).toBe(-10);
   });
 
-  it('applies heavy penalty (-100 to -200) for alcohol + surplus', () => {
+  it('stacks with surplus for a worse score', () => {
     const result = calculateDailyVFScore(cleanDay({
       alcoholDrinks: 5,
       caloriesIn: 3000,
       caloriesOut: 2000,
     }));
+    // base = -100, alcohol = -25 → -125
     expect(result.score).toBeLessThanOrEqual(-100);
-    expect(result.breakdown.alcoholPenalty).toBeLessThan(0);
+    expect(result.breakdown.alcoholPenalty).toBe(-25);
   });
 });
 
 // ─── Rule 4: Cortisol Tax ───────────────────────────────────────────────────
-describe('VF Rule 4 — Cortisol Tax', () => {
-  it('halves a positive score when sleep < 6h', () => {
+describe('VF Rule 4 — Cortisol Tax (biology: ~20% impaired fat oxidation)', () => {
+  it('reduces a positive score by 20% when sleep < 6h', () => {
     const good = calculateDailyVFScore(cleanDay({ sleepHours: 8 }));
     const bad = calculateDailyVFScore(cleanDay({ sleepHours: 5 }));
-    expect(bad.score).toBe(Math.round(good.score * 0.5));
-    expect(bad.breakdown.cortisolMultiplier).toBe(0.5);
+    expect(bad.score).toBe(Math.round(good.score * 0.8));
+    expect(bad.breakdown.cortisolMultiplier).toBe(0.8);
   });
 
-  it('does NOT halve a negative score', () => {
+  it('does NOT reduce a negative score (bad sleep should not help surplus)', () => {
     const result = calculateDailyVFScore(cleanDay({
       caloriesIn: 3000,
       caloriesOut: 2000,
       sleepHours: 4,
     }));
-    // Negative scores should not be made "better" by the cortisol tax
     const withGoodSleep = calculateDailyVFScore(cleanDay({
       caloriesIn: 3000,
       caloriesOut: 2000,
@@ -207,18 +208,18 @@ describe('VF Rule 4 — Cortisol Tax', () => {
   });
 });
 
-// ─── Rule 5: Seed Oil Penalty ───────────────────────────────────────────────
-describe('VF Rule 5 — Seed Oil Penalty', () => {
-  it('deducts -25 per seed-oil meal', () => {
+// ─── Rule 5: Seed Oil Nudge ─────────────────────────────────────────────────
+describe('VF Rule 5 — Seed Oil Nudge (mild inflammation signal, not acute)', () => {
+  it('deducts -5 per seed-oil meal', () => {
     const clean = calculateDailyVFScore(cleanDay());
     const oily = calculateDailyVFScore(cleanDay({ seedOilMeals: 2 }));
-    expect(oily.score).toBe(clean.score - 50);
+    expect(oily.score).toBe(clean.score - 10);
   });
 
-  it('deducts -25 for a single seed-oil meal', () => {
+  it('deducts -5 for a single seed-oil meal', () => {
     const clean = calculateDailyVFScore(cleanDay());
     const one = calculateDailyVFScore(cleanDay({ seedOilMeals: 1 }));
-    expect(one.score).toBe(clean.score - 25);
+    expect(one.score).toBe(clean.score - 5);
   });
 });
 
@@ -240,13 +241,13 @@ describe('VF Scoring — Combined Scenarios', () => {
     expect(result.score).toBe(-200);
   });
 
-  it('fasting day with bad sleep: +100 base halved to +50', () => {
+  it('fasting day with bad sleep: +100 base × 0.8 = +80', () => {
     const result = calculateDailyVFScore(cleanDay({
       fastingHours: 24,
       caloriesIn: 0,
       sleepHours: 5,
     }));
-    expect(result.score).toBe(50);
+    expect(result.score).toBe(80);
   });
 
   it('returns a summary string describing the breakdown', () => {
