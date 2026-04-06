@@ -61,6 +61,11 @@ env:
     availability:
       - RUNTIME
 
+  - variable: OURA_CLIENT_SECRET
+    secret: OURA_CLIENT_SECRET
+    availability:
+      - RUNTIME
+
 runConfig:
   # --- SCALING CONFIGURATION ---
   # minInstances: Minimum number of instances kept warm at all times.
