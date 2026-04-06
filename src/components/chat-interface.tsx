@@ -7,7 +7,8 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square } from "lucide-react";
+import { useTranscription } from "@/hooks/use-transcription";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
@@ -95,6 +96,13 @@ export function ChatInterface() {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
+    useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
+  );
+
+  useEffect(() => {
+    if (micError) toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+  }, [micError, toast]);
 
   const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 
@@ -481,6 +489,18 @@ export function ChatInterface() {
           onPaste={handlePaste}
           className="flex-1 rounded-full border-muted bg-white/50"
         />
+        <Button
+          variant={micStatus === 'recording' ? 'destructive' : 'secondary'}
+          size="icon"
+          className={`rounded-full shrink-0 w-12 h-12 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
+          onClick={toggleMic}
+          disabled={isLoading || micStatus === 'transcribing'}
+          title={micStatus === 'recording' ? 'Stop recording' : micStatus === 'transcribing' ? 'Transcribing...' : 'Voice input'}
+        >
+          {micStatus === 'recording' ? <Square className="w-4 h-4" /> :
+           micStatus === 'transcribing' ? <Loader2 className="w-4 h-4 animate-spin" /> :
+           <Mic className="w-5 h-5 text-muted-foreground" />}
+        </Button>
         <Button
           size="icon" className="rounded-full w-12 h-12"
           onClick={handleSend}

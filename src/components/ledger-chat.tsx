@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Loader2, ChevronDown, ChevronUp, BarChart3 } from 'lucide-react';
+import { Send, Loader2, ChevronDown, ChevronUp, BarChart3, Mic, Square } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { sendLedgerMessage } from '@/app/actions/ledger-chat';
 import { useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { useTranscription } from '@/hooks/use-transcription';
 
 interface Message {
   role: 'user' | 'model';
@@ -31,6 +32,13 @@ export function LedgerChat() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
+    useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
+  );
+
+  useEffect(() => {
+    if (micError) toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+  }, [micError, toast]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -237,6 +245,18 @@ export function LedgerChat() {
               placeholder="Ask about your history..."
               className="flex-1 rounded-full text-sm border-muted bg-white/50 h-9"
             />
+            <Button
+              variant={micStatus === 'recording' ? 'destructive' : 'secondary'}
+              size="icon"
+              className={`rounded-full w-9 h-9 shrink-0 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
+              onClick={toggleMic}
+              disabled={isLoading || micStatus === 'transcribing'}
+              title={micStatus === 'recording' ? 'Stop recording' : micStatus === 'transcribing' ? 'Transcribing...' : 'Voice input'}
+            >
+              {micStatus === 'recording' ? <Square className="w-3.5 h-3.5" /> :
+               micStatus === 'transcribing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> :
+               <Mic className="w-3.5 h-3.5 text-muted-foreground" />}
+            </Button>
             <Button
               size="icon"
               className="rounded-full w-9 h-9 bg-emerald-600 hover:bg-emerald-700 shrink-0"
