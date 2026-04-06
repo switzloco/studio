@@ -53,7 +53,7 @@ export interface DailyVFInput {
 export interface DailyVFResult {
   score: number;
   breakdown: {
-    // Metabolic engine outputs
+    // Metabolic engine outputs (informational)
     alpertNumber: number;
     deficit: number;
     totalFatBurned: number;
@@ -65,13 +65,13 @@ export interface DailyVFResult {
     alcoholFlag: boolean;
     poorSleep: boolean;
     seedOilMeals: number;
-    // Legacy fields kept for backward compatibility with old history entries
-    baseScore?: number;
-    fastingOverride?: boolean;
-    alcoholCap?: boolean;
-    alcoholPenalty?: number;
-    cortisolMultiplier?: number;
-    seedOilPenalty?: number;
+    // Rule modifier fields
+    baseScore: number;
+    fastingOverride: boolean;
+    alcoholCap: boolean;
+    alcoholPenalty: number;
+    cortisolMultiplier: number;
+    seedOilPenalty: number;
   };
   summary: string;
 }
@@ -96,11 +96,10 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
   const deficit = caloriesOut - caloriesIn;
 
-  // Run the metabolic simulation when logs available, else approximate from daily totals
+  // Run metabolic simulation for breakdown detail (informational display only)
   let totalFatBurned: number;
   let totalFatStored: number;
   let muscleKcal: number;
-  let score: number;
 
   if (foodLogs && foodLogs.length > 0) {
     const result = runMetabolicSimulation({
@@ -114,25 +113,64 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     totalFatBurned = result.totalFatBurned;
     totalFatStored = result.totalFatStored;
     muscleKcal     = result.totalMuscleLost;
-    score          = result.score;
   } else {
     // Daily-total approximation: treat all deficit as fat burned (no timing data)
     totalFatBurned = Math.max(0, deficit);
     totalFatStored = Math.max(0, -deficit);
     muscleKcal     = 0;
-    score          = computeMetabolicScore(totalFatBurned, totalFatStored, muscleKcal);
   }
 
-  // --- Coaching context assessments (informational only) ---
-  const proteinMet   = proteinG >= proteinGoal;
+  // ── Rule assessments ──────────────────────────────────────────────────────
+  const proteinMet    = proteinG >= proteinGoal;
   const fastingActive = fastingHours >= 16;
-  const alcoholFlag  = alcoholDrinks > 2;
-  const poorSleep    = sleepHours < 6;
+  const alcoholFlag   = alcoholDrinks > 2;
+  const poorSleep     = sleepHours < 6;
 
-  // Build summary
+  // Rule 2: Fasting Override — 24h+ fast always awards +100 base score
+  const fastingOverride = fastingHours >= 24;
+
+  // Rule 1: Base score from caloric deficit (linear: 1000 kcal deficit = 100 pts)
+  const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
+  let score = baseScore;
+
+  // Rule 1: Protein mandate — cap positive score at +50 if protein goal not met
+  if (!proteinMet && score > 50) {
+    score = 50;
+  }
+
+  // Rule 3: Alcohol Freeze
+  let alcoholCap     = false;
+  let alcoholPenalty = 0;
+  if (alcoholDrinks > 2) {
+    if (score > 0) {
+      // Deficit day: freeze score at 0
+      alcoholCap     = true;
+      alcoholPenalty = -score;
+      score          = 0;
+    } else {
+      // Surplus day: apply heavy additional penalty
+      alcoholPenalty = -100;
+      score         += alcoholPenalty;
+    }
+  }
+
+  // Rule 4: Cortisol Tax — halve positive scores only (poor sleep doesn't help negative scores)
+  const cortisolMultiplier = poorSleep ? 0.5 : 1;
+  if (poorSleep && score > 0) {
+    score = Math.round(score * cortisolMultiplier);
+  }
+
+  // Rule 5: Seed Oil Penalty — -25 per seed-oil meal
+  const seedOilPenalty = seedOilMeals * -25;
+  score += seedOilPenalty;
+
+  // Clamp worst case at -200
+  score = Math.max(-200, score);
+
+  // ── Summary ───────────────────────────────────────────────────────────────
   const directionLabel = deficit >= 0 ? 'deficit' : 'surplus';
   const parts: string[] = [
-    `${Math.abs(deficit)} kcal ${directionLabel}; fat burned ${totalFatBurned} kcal, stored ${totalFatStored} kcal, muscle ${muscleKcal} kcal → ${score} pts`,
+    `${Math.abs(deficit)} kcal ${directionLabel}; fat burned ${totalFatBurned} kcal, stored ${totalFatStored} kcal → ${score} pts`,
   ];
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
@@ -153,6 +191,12 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       alcoholFlag,
       poorSleep,
       seedOilMeals,
+      baseScore,
+      fastingOverride,
+      alcoholCap,
+      alcoholPenalty,
+      cortisolMultiplier,
+      seedOilPenalty,
     },
     summary: `Daily VF score: ${score}. ${parts.join('; ')}.`,
   };
