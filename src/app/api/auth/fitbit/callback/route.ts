@@ -76,74 +76,95 @@ export async function GET(request: NextRequest) {
       lastSyncedAt: Date.now(),
     });
 
-    // Initial sync: pull last 7 days of data + profile so the dashboard
-    // has real numbers even if the device hasn't synced today yet.
-    const syncResult = await fitbitService.syncInitialData(creds.accessToken);
-
-    // Build the health data update — include weight/height from profile if available.
-    const healthUpdate: Record<string, unknown> = {
+    // Mark device as verified immediately after token exchange succeeds.
+    // This ensures the connection is established even if the initial data sync fails.
+    await adminHealthService.updateHealthData(firestore, userId, {
       isDeviceVerified: true,
       connectedDevice: 'fitbit',
       onboardingDay: 1,
-      steps: syncResult.steps.value,
-      sleepHours: syncResult.sleep.value,
-      hrv: syncResult.hrv.value,
-    };
-    if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
-    if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
-    if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-      // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
-      healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * 0.90);
+    });
+
+    // Initial sync: pull last 7 days of data + profile so the dashboard
+    // has real numbers even if the device hasn't synced today yet.
+    // Non-fatal: if the sync fails, the connection is still established and
+    // the client-side auto-sync will retry on next page load.
+    let syncResult: import('@/lib/fitbit-service').FitbitInitialSyncResult | null = null;
+    try {
+      syncResult = await fitbitService.syncInitialData(creds.accessToken);
+    } catch (syncError) {
+      console.error('[FitbitCallback] Initial data sync failed (non-fatal — device still linked):', syncError);
     }
 
-    // Derive recovery status from HRV.
-    if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
-    else if (syncResult.hrv.value >= 30) healthUpdate.recoveryStatus = 'medium';
-    else if (syncResult.hrv.value > 0) healthUpdate.recoveryStatus = 'low';
-
-    await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
-
-    // Write per-day snapshots for all 7 days — this backfills the history so
-    // previous-day views show correct steps, HRV, sleep, and calories.
-    if (syncResult.dailySnapshots) {
-      await Promise.all(
-        Object.entries(syncResult.dailySnapshots).map(([date, snap]) =>
-          adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snap)
-        )
-      );
-    } else {
-      // Fallback: write at least the most-recent-data-day snapshot.
-      const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
-      const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
+    if (syncResult) {
+      // Build the health data update — include weight/height from profile if available.
+      const healthUpdate: Record<string, unknown> = {
         steps: syncResult.steps.value,
         sleepHours: syncResult.sleep.value,
+        hrv: syncResult.hrv.value,
       };
-      if (syncResult.hrv.value > 0) {
-        snapshot.hrv = syncResult.hrv.value;
-        snapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
+      if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
+      if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
+      if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
+        // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
+        healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * 0.90);
       }
-      if (healthUpdate.dailyCaloriesOut) {
-        snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
-      }
-      await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
-    }
 
-    const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
-    await adminHealthService.logActivity(firestore, userId, {
-      category: 'health_sync',
-      content: `Hardware Audit Successful: Fitbit linked${datePart}. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.${syncResult.weightKg ? ` Weight: ${syncResult.weightKg}kg.` : ''}`,
-      metrics: [
-        'status:verified',
-        'source:fitbit',
-        `fitbit_user:${creds.fitbitUserId}`,
-        `steps:${syncResult.steps.value}`,
-        `sleep_h:${syncResult.sleep.value.toFixed(1)}`,
-        `hrv:${syncResult.hrv.value}`,
-        ...(syncResult.weightKg ? [`weight_kg:${syncResult.weightKg}`] : []),
-        ...(syncResult.heightCm ? [`height_cm:${syncResult.heightCm}`] : []),
-      ],
-      verified: true,
-    });
+      // Derive recovery status from HRV.
+      if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
+      else if (syncResult.hrv.value >= 30) healthUpdate.recoveryStatus = 'medium';
+      else if (syncResult.hrv.value > 0) healthUpdate.recoveryStatus = 'low';
+
+      await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+
+      // Write per-day snapshots for all 7 days — this backfills the history so
+      // previous-day views show correct steps, HRV, sleep, and calories.
+      if (syncResult.dailySnapshots) {
+        await Promise.all(
+          Object.entries(syncResult.dailySnapshots).map(([date, snap]) =>
+            adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snap)
+          )
+        );
+      } else {
+        // Fallback: write at least the most-recent-data-day snapshot.
+        const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
+        const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
+          steps: syncResult.steps.value,
+          sleepHours: syncResult.sleep.value,
+        };
+        if (syncResult.hrv.value > 0) {
+          snapshot.hrv = syncResult.hrv.value;
+          snapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
+        }
+        if (healthUpdate.dailyCaloriesOut) {
+          snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
+        }
+        await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
+      }
+
+      const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: `Hardware Audit Successful: Fitbit linked${datePart}. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.${syncResult.weightKg ? ` Weight: ${syncResult.weightKg}kg.` : ''}`,
+        metrics: [
+          'status:verified',
+          'source:fitbit',
+          `fitbit_user:${creds.fitbitUserId}`,
+          `steps:${syncResult.steps.value}`,
+          `sleep_h:${syncResult.sleep.value.toFixed(1)}`,
+          `hrv:${syncResult.hrv.value}`,
+          ...(syncResult.weightKg ? [`weight_kg:${syncResult.weightKg}`] : []),
+          ...(syncResult.heightCm ? [`height_cm:${syncResult.heightCm}`] : []),
+        ],
+        verified: true,
+      });
+    } else {
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: 'Hardware Audit Successful: Fitbit linked. Initial data sync deferred — will retry on next page load.',
+        metrics: ['status:verified', 'source:fitbit', `fitbit_user:${creds.fitbitUserId}`, 'initial_sync:deferred'],
+        verified: true,
+      });
+    }
 
     return NextResponse.redirect(new URL('?fitbit_sync=success', appRoot));
   } catch (error) {
