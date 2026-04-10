@@ -1,13 +1,14 @@
 /**
  * @fileOverview Hourly Metabolic Partitioning Engine
  *
- * Simulates 4-bucket sequential energy drain across 15-minute slots from 6 AM to 10 PM.
+ * Simulates 5-bucket sequential energy drain across 15-minute slots from 6 AM to 10 PM.
  *
  * Drain priority per slot:
- *   1. Gut / Exogenous  — food being absorbed (insulin suppresses lipolysis)
- *   2. Fat Faucet       — rate-limited at alpertNumber/24/4 per slot; PAUSED while gut non-empty
- *   3. Liver Glycogen   — 400 kcal cap; replenishes from absorbed carbs
- *   4. Muscle Protein   — last resort; contributes to score penalty
+ *   1. Gut / Exogenous    — food being absorbed (insulin suppresses lipolysis)
+ *   2. Fat Faucet         — rate-limited at alpertNumber/24/4 per slot; PAUSED while gut non-empty
+ *   3. Liver Glycogen     — 400 kcal cap; replenishes from absorbed carbs
+ *   4. Muscle Glycogen    — 1500 kcal cap; primary exercise buffer; replenishes from dietary carbs
+ *   5. Muscle Protein     — true last resort; contributes to score penalty
  *
  * Surplus slots (absorption > burn) → fat storage, tracked separately.
  *
@@ -30,6 +31,7 @@ export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; //
 
 const ABSORPTION_SLOTS             = 6;     // 90-min food absorption window
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
+const MUSCLE_GLYCOGEN_MAX_KCAL     = 1500;  // typical intramuscular glycogen capacity
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
 const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
 
@@ -66,6 +68,8 @@ export interface MetabolicEngineParams {
   fitbitActivities?: FitbitActivity[];
   /** Starting liver glycogen. Default: 280 kcal (70% of 400 kcal max). */
   liverGlycogenStartKcal?: number;
+  /** Starting muscle glycogen. Default: 1200 kcal (~80% of typical 1500 kcal max). */
+  muscleGlycogenStartKcal?: number;
   /** Fallback daily caloric intake when no foodLogs are provided. */
   caloriesIn?: number;
 }
@@ -119,6 +123,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     exerciseLogs,
     fitbitActivities,
     liverGlycogenStartKcal = 280,
+    muscleGlycogenStartKcal = 1200,
     caloriesIn = 0,
   } = params;
 
@@ -196,6 +201,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   // ── Slot-by-slot bucket drain simulation ──────────────────────────────────
   const slots: MetabolicSlotData[] = [];
   let liverKcal            = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
+  let muscleGlycogenKcal   = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL, muscleGlycogenStartKcal);
   let cumulativeFatBurned  = 0;
   let cumulativeFatStored  = 0;
   let cumulativeMuscleLost = 0;
@@ -223,7 +229,15 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     liverKcal = Math.min(LIVER_MAX_KCAL, liverKcal + absorptionThisSlot * 0.06);
     remaining -= liverContribution;
 
-    // Step 4: muscle protein catabolism (last resort)
+    // Step 4: muscle glycogen — intramuscular stores, primary exercise buffer
+    // Prevents muscle protein catabolism during exercise when liver is depleted.
+    const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
+    muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
+    // Replenish from dietary carbs (~15% of absorbed calories refill muscle stores)
+    muscleGlycogenKcal = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL, muscleGlycogenKcal + absorptionThisSlot * 0.15);
+    remaining -= muscleGlycoContribution;
+
+    // Step 5: muscle protein catabolism (true last resort — all glycogen exhausted)
     const muscleContribution = Math.max(0, remaining);
 
     // Surplus: excess absorption above burn → deposited as fat
