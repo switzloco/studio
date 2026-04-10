@@ -874,15 +874,6 @@ export function MetabolicBucketsView({
                             <p className="text-base font-black text-red-500">{last.cumulativeMuscleLost}</p>
                             <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
                         </div>
-                        <div className="text-center">
-                            <p className="text-[9px] font-black uppercase text-muted-foreground/70 tracking-widest">Efficiency</p>
-                            <p className="text-base font-black text-foreground">
-                                {last.cumulativeFatBurned + last.cumulativeMuscleLost > 0
-                                    ? `${Math.round(last.cumulativeFatBurned / (last.cumulativeFatBurned + last.cumulativeMuscleLost) * 100)}%`
-                                    : '—'}
-                            </p>
-                            <p className="text-[9px] font-bold text-muted-foreground">fat-sourced</p>
-                        </div>
                     </div>
                 </CardContent>
             </Card>
