@@ -585,8 +585,8 @@ function buildBucketCurves(
     });
 
     return slots.map(s => {
-        // Muscle shield: 100% → 0% as muscle lost grows toward 10% of alpertNumber
-        const muscleShieldPct = Math.max(0, 100 - (totalMuscleLost / (alpertNumber * 0.1)) * 100);
+        // Muscle shield: starts 100% at 6 AM, depletes as cumulative muscle loss grows through the day
+        const muscleShieldPct = Math.max(0, 100 - (s.cumulativeMuscleLost / (alpertNumber * 0.1)) * 100);
         return {
             slot:                  s.slot,
             gutKcal:               s.gutKcal,
