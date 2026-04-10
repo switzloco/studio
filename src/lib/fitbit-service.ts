@@ -161,11 +161,11 @@ export const fitbitService = {
     code: string,
     redirectUri: string
   ): Promise<FitbitCredentials | null> {
-    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
-    const clientSecret = process.env.FITBIT_CLIENT_SECRET;
+    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID?.trim();
+    const clientSecret = process.env.FITBIT_CLIENT_SECRET?.trim();
 
     if (!clientId || !clientSecret) {
-      console.warn('[FitbitService] Missing credentials — running in mock mode.');
+      console.warn('[FitbitService] Missing credentials (clientId or clientSecret is null/empty) — running in mock mode.');
       return {
         accessToken: 'mock_token',
         refreshToken: 'mock_refresh',
@@ -185,7 +185,8 @@ export const fitbitService = {
     });
 
     if (!res.ok) {
-      console.error('[FitbitService] Token exchange failed:', res.status, await res.text());
+      const errorBody = await res.text().catch(() => 'No body');
+      console.error(`[FitbitService] Token exchange failed: Status ${res.status}, Body: ${errorBody}. Code: ${code.substring(0, 5)}..., Redirect: ${redirectUri}`);
       return null;
     }
 

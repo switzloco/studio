@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
 
   const origin = getPublicOrigin(request);
-  const appRoot = `${origin}/`;
+  let appRoot = `${origin}/`;
 
   if (!code) {
     return NextResponse.redirect(new URL('?error=fitbit_auth_failed', appRoot));
@@ -55,6 +55,14 @@ export async function GET(request: NextRequest) {
 
   const { userId, redirectUri } = parseState(state, origin);
 
+  // Derive the absolute app root from the trusted redirectUri in state.
+  // This bypasses unreliable header-based origin detection in Cloud Run/App Hosting.
+  try {
+    appRoot = new URL('/', redirectUri).toString();
+  } catch (e) {
+    console.warn('[FitbitCallback] Malformed redirectUri in state, falling back to header-based origin:', redirectUri);
+  }
+
   try {
     const firestore = getAdminFirestore();
 
@@ -63,7 +71,7 @@ export async function GET(request: NextRequest) {
     if (!creds) {
       await adminHealthService.logActivity(firestore, userId, {
         category: 'health_sync',
-        content: 'Hardware Audit Failed: Fitbit token exchange rejected. Device verification NOT granted.',
+        content: `Hardware Audit Failed: Fitbit token exchange rejected (Target: ${redirectUri}). Device verification NOT granted. Check your Fitbit Client ID and Secret in settings.`,
         metrics: ['status:rejected', 'source:fitbit'],
         verified: false,
       });

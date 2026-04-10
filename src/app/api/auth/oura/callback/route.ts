@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
 
   const origin = getPublicOrigin(request);
-  const appRoot = `${origin}/`;
+  let appRoot = `${origin}/`;
 
   if (!code) {
     return NextResponse.redirect(new URL('?error=oura_auth_failed', appRoot));
@@ -47,6 +47,14 @@ export async function GET(request: NextRequest) {
   }
 
   const { userId, redirectUri } = parseState(state, origin);
+
+  // Derive the absolute app root from the trusted redirectUri in state.
+  // This bypasses unreliable header-based origin detection in Cloud Run/App Hosting.
+  try {
+    appRoot = new URL('/', redirectUri).toString();
+  } catch (e) {
+    console.warn('[OuraCallback] Malformed redirectUri in state, falling back to header-based origin:', redirectUri);
+  }
 
   try {
     const firestore = getAdminFirestore();
