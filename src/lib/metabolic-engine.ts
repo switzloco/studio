@@ -225,23 +225,28 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     // Step 3: liver glycogen fills remaining requirement
     const liverContribution = Math.min(remaining, liverKcal);
     liverKcal = Math.max(0, liverKcal - liverContribution);
-    // Replenish liver from carb fraction of absorbed calories (~6% of absorbed = 40% carbs × 15% to liver)
-    liverKcal = Math.min(LIVER_MAX_KCAL, liverKcal + absorptionThisSlot * 0.06);
+    // Replenish liver from carb fraction of absorbed calories — track actual refill (limited by headroom)
+    const liverRefillAmt = Math.min(LIVER_MAX_KCAL - liverKcal, absorptionThisSlot * 0.06);
+    liverKcal += liverRefillAmt;
     remaining -= liverContribution;
 
     // Step 4: muscle glycogen — intramuscular stores, primary exercise buffer
     // Prevents muscle protein catabolism during exercise when liver is depleted.
     const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
     muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
-    // Replenish from dietary carbs (~15% of absorbed calories refill muscle stores)
-    muscleGlycogenKcal = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL, muscleGlycogenKcal + absorptionThisSlot * 0.15);
+    // Replenish from dietary carbs — track actual refill (limited by headroom)
+    const muscleRefillAmt = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL - muscleGlycogenKcal, absorptionThisSlot * 0.15);
+    muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
     // Step 5: muscle protein catabolism (true last resort — all glycogen exhausted)
     const muscleContribution = Math.max(0, remaining);
 
-    // Surplus: excess absorption above burn → deposited as fat
-    const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot);
+    // Surplus: excess absorption above burn, minus what was routed to glycogen replenishment.
+    // Glycogen refill calories were already counted above — excluding them prevents double-counting
+    // them as fat storage. Post-exercise meals with depleted glycogen tanks will now correctly show
+    // most of the surplus going to glycogen, not fat.
+    const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
 
     cumulativeFatBurned  += fatContribution;
     cumulativeFatStored  += fatStoredThisSlot;
