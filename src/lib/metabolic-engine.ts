@@ -7,10 +7,11 @@
  *   1. Gut / Exogenous    — food being absorbed (insulin suppresses lipolysis)
  *   2. Fat Faucet         — rate-limited at alpertNumber/24/4 per slot; PAUSED while gut non-empty
  *   3. Liver Glycogen     — 400 kcal cap; replenishes from absorbed carbs
- *   4. Muscle Glycogen    — 1500 kcal cap; primary exercise buffer; replenishes from dietary carbs
+ *   4. Muscle Glycogen    — lean-mass-scaled cap; primary exercise buffer; replenishes from dietary carbs
  *   5. Muscle Protein     — true last resort; contributes to score penalty
  *
  * Surplus slots (absorption > burn) → fat storage, tracked separately.
+ * Glycogen refill calories are deducted from fat storage to prevent double-counting.
  *
  * Score = (totalFatBurned / 1200) × 100
  *       − (totalFatStored  / 1200) × 100
@@ -31,7 +32,6 @@ export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; //
 
 const ABSORPTION_SLOTS             = 6;     // 90-min food absorption window
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
-const MUSCLE_GLYCOGEN_MAX_KCAL     = 1500;  // typical intramuscular glycogen capacity
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
 const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
 
@@ -58,6 +58,19 @@ function timeToSlot(minutesSinceMidnight: number): number {
   return Math.round((minutesSinceMidnight - START_MIN) / INTERVAL_MIN);
 }
 
+/**
+ * Compute the user's personal muscle glycogen capacity from lean mass.
+ * Based on ~15g glycogen per kg lean mass (well-trained ≈ 20g/kg, sedentary ≈ 10g/kg).
+ * Clamped to a physiologically plausible range [800, 2400] kcal.
+ */
+export function computeMuscleGlycogenMaxKcal(weightKg?: number, bodyFatPct?: number): number {
+  const kg = weightKg ?? 70;
+  const bfFraction = (bodyFatPct ?? 20) / 100;
+  const leanKg = kg * (1 - bfFraction);
+  // 15 g/kg lean mass × 4 kcal/g
+  return Math.round(Math.max(800, Math.min(2400, leanKg * 60)));
+}
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 export interface MetabolicEngineParams {
@@ -68,8 +81,10 @@ export interface MetabolicEngineParams {
   fitbitActivities?: FitbitActivity[];
   /** Starting liver glycogen. Default: 280 kcal (70% of 400 kcal max). */
   liverGlycogenStartKcal?: number;
-  /** Starting muscle glycogen. Default: 1200 kcal (~80% of typical 1500 kcal max). */
+  /** Starting muscle glycogen. Default: 80% of muscleGlycogenMaxKcal. */
   muscleGlycogenStartKcal?: number;
+  /** Personalized muscle glycogen capacity from lean mass. Default: computeMuscleGlycogenMaxKcal(). */
+  muscleGlycogenMaxKcal?: number;
   /** Fallback daily caloric intake when no foodLogs are provided. */
   caloriesIn?: number;
 }
@@ -86,9 +101,10 @@ export interface MetabolicSlotData {
   cumulativeFatBurned: number;
   cumulativeFatStored: number;
   cumulativeMuscleLost: number;
-  // Bucket levels at end of slot (for gauge visualization)
+  // Bucket levels at end of slot (for gauge visualization and coaching)
   gutKcal: number;
   liverKcal: number;
+  muscleGlycogenKcal: number;
   fatAllowanceRemaining: number;
 }
 
@@ -97,6 +113,7 @@ export interface MetabolicResult {
   totalFatBurned: number;
   totalFatStored: number;
   totalMuscleLost: number;
+  muscleGlycogenMaxKcal: number;
   score: number;
 }
 
@@ -123,9 +140,12 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     exerciseLogs,
     fitbitActivities,
     liverGlycogenStartKcal = 280,
-    muscleGlycogenStartKcal = 1200,
     caloriesIn = 0,
   } = params;
+
+  // Personalized muscle glycogen capacity from lean mass (or caller-supplied value)
+  const muscleMax = params.muscleGlycogenMaxKcal ?? computeMuscleGlycogenMaxKcal();
+  const muscleGlycogenStartKcal = params.muscleGlycogenStartKcal ?? Math.round(muscleMax * 0.80);
 
   // Max fat that can be oxidized in one 15-min slot (Alpert rate limit)
   const fatFaucetPerSlot = alpertNumber / 24 / 4;
@@ -201,7 +221,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   // ── Slot-by-slot bucket drain simulation ──────────────────────────────────
   const slots: MetabolicSlotData[] = [];
   let liverKcal            = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
-  let muscleGlycogenKcal   = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL, muscleGlycogenStartKcal);
+  let muscleGlycogenKcal   = Math.min(muscleMax, muscleGlycogenStartKcal);
   let cumulativeFatBurned  = 0;
   let cumulativeFatStored  = 0;
   let cumulativeMuscleLost = 0;
@@ -235,7 +255,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
     muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
     // Replenish from dietary carbs — track actual refill (limited by headroom)
-    const muscleRefillAmt = Math.min(MUSCLE_GLYCOGEN_MAX_KCAL - muscleGlycogenKcal, absorptionThisSlot * 0.15);
+    const muscleRefillAmt = Math.min(muscleMax - muscleGlycogenKcal, absorptionThisSlot * 0.15);
     muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
@@ -264,6 +284,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       cumulativeMuscleLost:  Math.round(cumulativeMuscleLost),
       gutKcal:               Math.round(gutRemaining),
       liverKcal:             Math.round(liverKcal),
+      muscleGlycogenKcal:    Math.round(muscleGlycogenKcal),
       fatAllowanceRemaining: Math.round(alpertNumber - cumulativeFatBurned),
     });
   }
@@ -277,6 +298,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     totalFatBurned,
     totalFatStored,
     totalMuscleLost,
+    muscleGlycogenMaxKcal: muscleMax,
     score: computeMetabolicScore(totalFatBurned, totalFatStored, totalMuscleLost),
   };
 }

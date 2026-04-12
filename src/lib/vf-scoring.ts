@@ -19,7 +19,7 @@
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 import type { FitbitActivity } from './health-service';
-import { runMetabolicSimulation, computeMetabolicScore } from './metabolic-engine';
+import { runMetabolicSimulation, computeMetabolicScore, computeMuscleGlycogenMaxKcal } from './metabolic-engine';
 
 /** Compute maximum sustainable fat oxidation in kcal/day (Alpert 2005). */
 export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): number {
@@ -105,6 +105,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       exerciseLogs,
       fitbitActivities,
       caloriesIn,
+      muscleGlycogenMaxKcal: computeMuscleGlycogenMaxKcal(weightKg, bodyFatPct),
     });
     totalFatBurned = result.totalFatBurned;
     totalFatStored = result.totalFatStored;
