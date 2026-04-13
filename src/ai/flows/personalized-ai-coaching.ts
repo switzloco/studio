@@ -11,6 +11,7 @@ import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import type { HealthData, UserPreferences, FoodNickname, TemporaryContext } from '@/lib/health-service';
 import { calculateDailyVFScore, computeAlpertNumber } from '@/lib/vf-scoring';
+import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, NUM_SLOTS } from '@/lib/metabolic-engine';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 
 const PersonalizedAICoachingInputSchema = z.object({
@@ -139,6 +140,65 @@ const getUserContextTool = ai.defineTool(
         const hourlyBudget = Math.round(alpert / 24);
         const projectedDaily = Math.round(currentRate * 24);
         return { alpertNumber: alpert, currentHourlyRate: currentRate, hourlyBudget, projectedDailyDeficit: projectedDaily, breaching: true };
+      })(),
+      // Muscle glycogen state — drives refueling coaching
+      glycogenState: (() => {
+        const caloriesOut = health?.dailyCaloriesOut ?? 0;
+        if (caloriesOut <= 0) return null;
+        const wKg = health?.weightKg;
+        const bfPct = health?.bodyFatPct;
+        const muscleMax = computeMuscleGlycogenMaxKcal(wKg, bfPct);
+        const alpert    = computeAlpertNumber(wKg, bfPct);
+        const sim = runMetabolicSimulation({
+          caloriesOut,
+          alpertNumber: alpert,
+          foodLogs:      isNewDay ? [] : (recentFood ?? []),
+          exerciseLogs:  isNewDay ? [] : (recentExercise ?? []),
+          caloriesIn:    isNewDay ? 0  : (health?.dailyCaloriesIn ?? 0),
+          muscleGlycogenMaxKcal: muscleMax,
+        });
+        // Current slot (clamp to last slot when outside 6 AM–10 PM window)
+        const now = new Date();
+        const nowMin  = now.getHours() * 60 + now.getMinutes();
+        const nowSlot = Math.max(0, Math.min(NUM_SLOTS - 1,
+          Math.round((nowMin - 6 * 60) / 15)));
+        const snap = sim.slots[nowSlot];
+        const musclePct = Math.round((snap.muscleGlycogenKcal / muscleMax) * 100);
+        const liverPct  = Math.round((snap.liverKcal / 400) * 100);
+
+        // Hours since last exercise ended (for refueling window)
+        const activeEx = (recentExercise ?? []).filter(e => !e.ignored);
+        let hoursPostExercise: number | null = null;
+        if (activeEx.length > 0) {
+          const last = activeEx[activeEx.length - 1];
+          if (last.performedAt) {
+            const [eh, em] = last.performedAt.split(':').map(Number);
+            const endMin = eh * 60 + (em || 0) + (last.durationMin || 30);
+            hoursPostExercise = Math.round(((nowMin - endMin) / 60) * 10) / 10;
+          }
+        }
+
+        const depleted = musclePct < 50;
+        // Prime refueling window: within 2 hours post-exercise (highest glycogen synthase activity)
+        const inRefuelWindow = hoursPostExercise !== null && hoursPostExercise >= 0 && hoursPostExercise <= 2;
+        // Target carbs to refuel: 1.2 g/kg body weight for the first post-exercise hour
+        const refuelCarbsG = wKg ? Math.round(wKg * 1.2) : null;
+        // Glycogen deficit in grams (to give coach a concrete refueling target)
+        const muscleDeficitKcal = muscleMax - snap.muscleGlycogenKcal;
+        const muscleDeficitG    = Math.round(muscleDeficitKcal / 4); // 4 kcal/g glycogen
+
+        return {
+          muscleKcal:        snap.muscleGlycogenKcal,
+          muscleMax,
+          musclePct,
+          liverKcal:         snap.liverKcal,
+          liverPct,
+          depleted,
+          inRefuelWindow,
+          hoursPostExercise,
+          refuelCarbsG,
+          muscleDeficitG,
+        };
       })(),
     };
   }
@@ -911,11 +971,22 @@ Score = (fatBurned / 1200) × 100 − (fatStored / 1200) × 100 − (muscleLost 
   • Maintenance → ≈ 0
   • Caloric surplus (400 kcal stored) → ~ −33
 
-The engine models 4-bucket sequential drain across 15-minute slots (6 AM–10 PM):
+The engine models 5-bucket sequential drain across 15-minute slots (6 AM–10 PM):
   1. Gut/Exogenous first — absorbed calories cover burn before anything else
   2. Fat faucet — rate-limited at Alpert ÷ 24 kcal/hr; PAUSED while gut has food (insulin blocks lipolysis)
-  3. Liver glycogen — fills remaining requirement
-  4. Muscle catabolism — last resort, incurs the −2 pts per 10 kcal penalty
+  3. Liver glycogen (400 kcal cap) — fills remaining requirement
+  4. Muscle glycogen (lean-mass scaled, ~800–2400 kcal) — primary exercise buffer; replenishes from dietary carbs
+  5. Muscle protein catabolism — true last resort, incurs the −2 pts per 10 kcal penalty
+
+MUSCLE GLYCOGEN COACHING (use glycogenState from get_user_context):
+- glycogenState.musclePct tells you how full the muscle glycogen tanks are right now (0–100%).
+- glycogenState.depleted = true when musclePct < 50% — this is a real refueling signal, not cosmetic.
+- glycogenState.inRefuelWindow = true when within 2 hours post-exercise — glycogen synthase activity is highest here; this is the prime anabolic window.
+- glycogenState.refuelCarbsG is the target: ~1.2g carbs per kg bodyweight for the post-workout hour.
+- glycogenState.muscleDeficitG is the total glycogen gap in grams — useful for multi-meal planning.
+When inRefuelWindow is true AND depleted is true, PROACTIVELY lead with a refueling directive — don't wait to be asked. Example: "Your tanks are at 45% after basketball. You've got 90 minutes left in the prime refueling window — hit [refuelCarbsG]g of fast carbs (rice, potato, fruit) NOW. Pair with 40g protein to activate glycogen synthase."
+When depleted but NOT in the window, flag it as a next-meal priority: "Muscle glycogen is at [musclePct]% — make your next meal carb-forward to restock before tomorrow's session."
+When musclePct ≥ 80%, tanks are topped off — you can deprioritize carbs and let the Alpert fat faucet run.
 
 The Alpert number is the max sustainable fat oxidation rate:
   Alpert (kcal/day) = fat mass (lbs) × 31  [Alpert 2005]

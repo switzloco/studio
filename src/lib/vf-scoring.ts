@@ -19,7 +19,7 @@
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 import type { FitbitActivity } from './health-service';
-import { runMetabolicSimulation, computeMetabolicScore } from './metabolic-engine';
+import { runMetabolicSimulation, computeMetabolicScore, computeMuscleGlycogenMaxKcal } from './metabolic-engine';
 
 /** Compute maximum sustainable fat oxidation in kcal/day (Alpert 2005). */
 export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): number {
@@ -105,6 +105,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       exerciseLogs,
       fitbitActivities,
       caloriesIn,
+      muscleGlycogenMaxKcal: computeMuscleGlycogenMaxKcal(weightKg, bodyFatPct),
     });
     totalFatBurned = result.totalFatBurned;
     totalFatStored = result.totalFatStored;
@@ -133,10 +134,12 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
   let score = baseScore;
 
-  // Rule 1: Protein mandate — cap positive score at +50 if protein goal not met.
+  // Rule 1: Protein mandate — scale down positive scores proportionally to protein shortfall.
+  // A hard cap at 50 was producing too many identical scores regardless of deficit size.
   // Waived when fasting/near-fasting: you can't eat protein you're not eating.
-  if (!proteinMet && !fastingOverride && score > 50) {
-    score = 50;
+  if (!proteinMet && !fastingOverride && score > 0) {
+    const proteinRatio = Math.min(1, proteinG / proteinGoal); // 0.0 – 1.0
+    score = Math.round(score * proteinRatio);
   }
 
   // Rule 3: Alcohol Drag — each drink suppresses fat oxidation ~1h (Siler 1999)
