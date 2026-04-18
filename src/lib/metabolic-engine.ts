@@ -27,8 +27,8 @@ import type { FitbitActivity } from './health-service';
 // ── Simulation constants ──────────────────────────────────────────────────────
 const INTERVAL_MIN = 15;
 const START_MIN    = 6 * 60;   // 6:00 AM
-const END_MIN      = 22 * 60;  // 10:00 PM
-export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; // 65
+const END_MIN      = 24 * 60;  // midnight — captures late-night exercise (e.g. 9 PM basketball)
+export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; // 73
 
 const ABSORPTION_SLOTS             = 6;     // 90-min food absorption window
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
@@ -95,12 +95,14 @@ export interface MetabolicSlotData {
   gutContribution: number;
   fatContribution: number;
   liverContribution: number;
+  muscleGlycogenContribution: number;
   muscleContribution: number;
   fatStoredThisSlot: number;
   // Running cumulative totals
   cumulativeFatBurned: number;
   cumulativeFatStored: number;
   cumulativeMuscleLost: number;
+  cumulativeGlycogenDrawn: number;
   // Bucket levels at end of slot (for gauge visualization and coaching)
   gutKcal: number;
   liverKcal: number;
@@ -113,6 +115,7 @@ export interface MetabolicResult {
   totalFatBurned: number;
   totalFatStored: number;
   totalMuscleLost: number;
+  totalGlycogenDrawn: number;
   muscleGlycogenMaxKcal: number;
   score: number;
 }
@@ -220,11 +223,12 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
 
   // ── Slot-by-slot bucket drain simulation ──────────────────────────────────
   const slots: MetabolicSlotData[] = [];
-  let liverKcal            = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
-  let muscleGlycogenKcal   = Math.min(muscleMax, muscleGlycogenStartKcal);
-  let cumulativeFatBurned  = 0;
-  let cumulativeFatStored  = 0;
-  let cumulativeMuscleLost = 0;
+  let liverKcal              = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
+  let muscleGlycogenKcal     = Math.min(muscleMax, muscleGlycogenStartKcal);
+  let cumulativeFatBurned    = 0;
+  let cumulativeFatStored    = 0;
+  let cumulativeMuscleLost   = 0;
+  let cumulativeGlycogenDrawn = 0;
 
   for (let s = 0; s < NUM_SLOTS; s++) {
     const burnThisSlot       = bmrPerSlot + exerciseBurnPerSlot[s];
@@ -268,36 +272,41 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     // most of the surplus going to glycogen, not fat.
     const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
 
-    cumulativeFatBurned  += fatContribution;
-    cumulativeFatStored  += fatStoredThisSlot;
-    cumulativeMuscleLost += muscleContribution;
+    cumulativeFatBurned     += fatContribution;
+    cumulativeFatStored     += fatStoredThisSlot;
+    cumulativeMuscleLost    += muscleContribution;
+    cumulativeGlycogenDrawn += liverContribution + muscleGlycoContribution;
 
     slots.push({
       slot: s,
-      gutContribution:       Math.round(gutContribution),
-      fatContribution:       Math.round(fatContribution),
-      liverContribution:     Math.round(liverContribution),
-      muscleContribution:    Math.round(muscleContribution),
-      fatStoredThisSlot:     Math.round(fatStoredThisSlot),
-      cumulativeFatBurned:   Math.round(cumulativeFatBurned),
-      cumulativeFatStored:   Math.round(cumulativeFatStored),
-      cumulativeMuscleLost:  Math.round(cumulativeMuscleLost),
-      gutKcal:               Math.round(gutRemaining),
-      liverKcal:             Math.round(liverKcal),
-      muscleGlycogenKcal:    Math.round(muscleGlycogenKcal),
-      fatAllowanceRemaining: Math.round(alpertNumber - cumulativeFatBurned),
+      gutContribution:            Math.round(gutContribution),
+      fatContribution:            Math.round(fatContribution),
+      liverContribution:          Math.round(liverContribution),
+      muscleGlycogenContribution: Math.round(muscleGlycoContribution),
+      muscleContribution:         Math.round(muscleContribution),
+      fatStoredThisSlot:          Math.round(fatStoredThisSlot),
+      cumulativeFatBurned:        Math.round(cumulativeFatBurned),
+      cumulativeFatStored:        Math.round(cumulativeFatStored),
+      cumulativeMuscleLost:       Math.round(cumulativeMuscleLost),
+      cumulativeGlycogenDrawn:    Math.round(cumulativeGlycogenDrawn),
+      gutKcal:                    Math.round(gutRemaining),
+      liverKcal:                  Math.round(liverKcal),
+      muscleGlycogenKcal:         Math.round(muscleGlycogenKcal),
+      fatAllowanceRemaining:      Math.round(alpertNumber - cumulativeFatBurned),
     });
   }
 
-  const totalFatBurned  = Math.round(cumulativeFatBurned);
-  const totalFatStored  = Math.round(cumulativeFatStored);
-  const totalMuscleLost = Math.round(cumulativeMuscleLost);
+  const totalFatBurned     = Math.round(cumulativeFatBurned);
+  const totalFatStored     = Math.round(cumulativeFatStored);
+  const totalMuscleLost    = Math.round(cumulativeMuscleLost);
+  const totalGlycogenDrawn = Math.round(cumulativeGlycogenDrawn);
 
   return {
     slots,
     totalFatBurned,
     totalFatStored,
     totalMuscleLost,
+    totalGlycogenDrawn,
     muscleGlycogenMaxKcal: muscleMax,
     score: computeMetabolicScore(totalFatBurned, totalFatStored, totalMuscleLost),
   };

@@ -48,14 +48,14 @@ export function computeMaxGlycogenKcal(weightKg?: number, bodyFatPct?: number): 
     return glycogenG * 4;
 }
 
-// 15-minute intraday glycogen simulation — 6 AM (slot 0) → 10 PM (slot 64) = 65 slots
+// 15-minute intraday glycogen simulation — 6 AM (slot 0) → midnight (slot 72) = 73 slots
 const INTERVAL_MIN = 15;
 const START_MIN = 6 * 60;   // 360
-const END_MIN   = 22 * 60;  // 1320
-const NUM_SLOTS = (END_MIN - START_MIN) / INTERVAL_MIN + 1; // 65
+const END_MIN   = 24 * 60;  // 1440 — captures late-night exercise (e.g. 9 PM basketball)
+const NUM_SLOTS = (END_MIN - START_MIN) / INTERVAL_MIN + 1; // 73
 
-// X-axis ticks: 6 AM, 9 AM, 12 PM, 3 PM, 6 PM, 10 PM (shared across all charts)
-const X_TICKS = [0, 12, 24, 36, 48, 64];
+// X-axis ticks: 6 AM, 9 AM, 12 PM, 3 PM, 6 PM, 9 PM, midnight (shared across all charts)
+const X_TICKS = [0, 12, 24, 36, 48, 60, 72];
 
 // Carb/food absorption window: ~90 min = 6 × 15-min slots
 const ABSORPTION_SLOTS = 6;
@@ -89,10 +89,10 @@ const timeToSlot = (minFromMid: number): number =>
 
 const slotToTimeLabel = (slot: number): string => {
     const m = START_MIN + slot * INTERVAL_MIN;
-    const h = Math.floor(m / 60);
+    const h24 = Math.floor(m / 60) % 24; // normalize midnight (24→0)
     const min = m % 60;
-    const h12 = h % 12 || 12;
-    const ampm = h < 12 ? 'AM' : 'PM';
+    const h12 = h24 % 12 || 12;
+    const ampm = h24 < 12 ? 'AM' : 'PM';
     return min === 0 ? `${h12} ${ampm}` : `${h12}:${String(min).padStart(2, '0')} ${ampm}`;
 };
 
@@ -561,6 +561,8 @@ interface BucketSlot {
     cumulativeFatStored: number;
     /** Running total of kcal lost from lean tissue (all fuel sources exhausted). */
     cumulativeMuscleLost: number;
+    /** Running total of kcal drawn from liver + muscle glycogen (bridges deficit when fat faucet paused). */
+    cumulativeGlycogenDrawn: number;
 }
 
 /**
@@ -588,14 +590,15 @@ function buildBucketCurves(
         // Muscle shield: starts 100% at 6 AM, depletes as cumulative muscle loss grows through the day
         const muscleShieldPct = Math.max(0, 100 - (s.cumulativeMuscleLost / (alpertNumber * 0.1)) * 100);
         return {
-            slot:                  s.slot,
-            gutKcal:               s.gutKcal,
-            liverKcal:             s.liverKcal,
-            fatAllowanceKcal:      s.fatAllowanceRemaining,
-            muscleShieldPct:       Math.round(muscleShieldPct),
-            cumulativeFatBurned:   s.cumulativeFatBurned,
-            cumulativeFatStored:   s.cumulativeFatStored,
-            cumulativeMuscleLost:  s.cumulativeMuscleLost,
+            slot:                    s.slot,
+            gutKcal:                 s.gutKcal,
+            liverKcal:               s.liverKcal,
+            fatAllowanceKcal:        s.fatAllowanceRemaining,
+            muscleShieldPct:         Math.round(muscleShieldPct),
+            cumulativeFatBurned:     s.cumulativeFatBurned,
+            cumulativeFatStored:     s.cumulativeFatStored,
+            cumulativeMuscleLost:    s.cumulativeMuscleLost,
+            cumulativeGlycogenDrawn: s.cumulativeGlycogenDrawn,
         };
     });
 }
@@ -822,6 +825,10 @@ export function MetabolicBucketsView({
                                         <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.3} />
                                         <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                                     </linearGradient>
+                                    <linearGradient id="gradGlycoCumul" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#8b5cf6" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                    </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                                 <XAxis
@@ -837,32 +844,50 @@ export function MetabolicBucketsView({
                                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                                 <Tooltip
                                     labelFormatter={(slot) => slotToTimeLabel(slot as number)}
-                                    formatter={(value, name) => [`${value} kcal`, name === 'cumulativeFatBurned' ? 'Fat Burned' : name === 'cumulativeFatStored' ? 'Fat Stored' : 'Muscle Lost']}
+                                    formatter={(value, name) => {
+                                        const labels: Record<string, string> = {
+                                            cumulativeFatBurned: 'Fat Burned',
+                                            cumulativeFatStored: 'Fat Stored',
+                                            cumulativeMuscleLost: 'Muscle Lost',
+                                            cumulativeGlycogenDrawn: 'Glycogen Drawn',
+                                        };
+                                        return [`${value} kcal`, labels[name as string] ?? name];
+                                    }}
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
-                                <Legend formatter={(value) => (
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                                        {value === 'cumulativeFatBurned' ? 'Fat Burned (Ledger Points)' : value === 'cumulativeFatStored' ? 'Fat Stored (Surplus)' : 'Muscle Lost'}
-                                    </span>
-                                )} />
+                                <Legend formatter={(value) => {
+                                    const labels: Record<string, string> = {
+                                        cumulativeFatBurned: 'Fat Burned',
+                                        cumulativeFatStored: 'Fat Stored',
+                                        cumulativeMuscleLost: 'Muscle Lost',
+                                        cumulativeGlycogenDrawn: 'Glycogen Drawn',
+                                    };
+                                    return <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{labels[value] ?? value}</span>;
+                                }} />
                                 {nowSlot != null && (
                                     <ReferenceArea x1={nowSlot} x2={NUM_SLOTS - 1} fill="#94a3b8" fillOpacity={0.07} stroke="none" />
                                 )}
                                 {nowSlot != null && (
                                     <ReferenceLine x={nowSlot} stroke="#475569" strokeDasharray="4 3" strokeWidth={1.5} />
                                 )}
-                                <Area type="monotone" dataKey="cumulativeFatBurned"  stroke="#10b981" strokeWidth={2.5} fill="url(#gradFatCumul)"    dot={false} name="cumulativeFatBurned" />
-                                <Area type="monotone" dataKey="cumulativeFatStored"  stroke="#f59e0b" strokeWidth={2}   fill="url(#gradFatStored)"   dot={false} name="cumulativeFatStored" />
-                                <Area type="monotone" dataKey="cumulativeMuscleLost" stroke="#ef4444" strokeWidth={2}   fill="url(#gradMuscleCumul)" dot={false} name="cumulativeMuscleLost" />
+                                <Area type="monotone" dataKey="cumulativeFatBurned"     stroke="#10b981" strokeWidth={2.5} fill="url(#gradFatCumul)"    dot={false} name="cumulativeFatBurned" />
+                                <Area type="monotone" dataKey="cumulativeGlycogenDrawn" stroke="#8b5cf6" strokeWidth={2}   fill="url(#gradGlycoCumul)"  dot={false} name="cumulativeGlycogenDrawn" />
+                                <Area type="monotone" dataKey="cumulativeFatStored"     stroke="#f59e0b" strokeWidth={2}   fill="url(#gradFatStored)"   dot={false} name="cumulativeFatStored" />
+                                <Area type="monotone" dataKey="cumulativeMuscleLost"    stroke="#ef4444" strokeWidth={2}   fill="url(#gradMuscleCumul)" dot={false} name="cumulativeMuscleLost" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                     {/* End-of-day summary */}
-                    <div className="flex justify-between items-end mt-3">
+                    <div className="grid grid-cols-4 gap-2 mt-3">
                         <div className="text-center">
                             <p className="text-[9px] font-black uppercase text-emerald-600/70 tracking-widest">Fat Burned</p>
                             <p className="text-base font-black text-emerald-600">{last.cumulativeFatBurned}</p>
                             <p className="text-[9px] font-bold text-muted-foreground">kcal</p>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-[9px] font-black uppercase text-violet-500/70 tracking-widest">Glycogen</p>
+                            <p className="text-base font-black text-violet-500">{last.cumulativeGlycogenDrawn}</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">kcal drawn</p>
                         </div>
                         <div className="text-center">
                             <p className="text-[9px] font-black uppercase text-amber-500/70 tracking-widest">Fat Stored</p>
