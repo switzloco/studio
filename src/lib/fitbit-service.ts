@@ -150,7 +150,10 @@ export const fitbitService = {
     // Encode both userId and the exact redirectUri in state so the callback
     // uses the identical redirect_uri for the token exchange (prevents mismatch).
     const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri }));
-    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`;
+    // expires_in=2592000 requests a 30-day access token (Fitbit max).
+    // Without this parameter Fitbit defaults to 8 hours, forcing daily reconnects
+    // when the background cron isn't running or FITBIT_CLIENT_SECRET is missing.
+    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=2592000&state=${state}`;
   },
 
   /**
@@ -170,7 +173,7 @@ export const fitbitService = {
         accessToken: 'mock_token',
         refreshToken: 'mock_refresh',
         fitbitUserId: 'mock_fitbit_user',
-        expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
       };
     }
 
