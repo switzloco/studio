@@ -406,7 +406,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const handleDisconnectFitbit = async () => {
     if (!user) return;
     try {
-      await healthService.deleteFitbitCredentials(db, user.uid);
+      // Token deletion is best-effort: if it's already gone that's fine.
+      try {
+        await healthService.deleteFitbitCredentials(db, user.uid);
+      } catch (tokenErr) {
+        console.warn('[Fitbit Disconnect] Token doc deletion failed (may already be removed):', tokenErr);
+      }
       await healthService.updateHealthData(db, user.uid, {
         isDeviceVerified: false,
         connectedDevice: null,
@@ -414,10 +419,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
     } catch (e: any) {
       console.error('[Fitbit Disconnect] Failed:', e);
-      toast({ 
-        variant: 'destructive', 
-        title: 'Disconnect Failed', 
-        description: e?.message || 'Could not remove Fitbit connection properly.' 
+      toast({
+        variant: 'destructive',
+        title: 'Disconnect Failed',
+        description: e?.message || 'Could not remove Fitbit connection properly.'
       });
     }
   };
@@ -490,7 +495,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const handleDisconnectOura = async () => {
     if (!user) return;
     try {
-      await healthService.deleteOuraCredentials(db, user.uid);
+      try {
+        await healthService.deleteOuraCredentials(db, user.uid);
+      } catch (tokenErr) {
+        console.warn('[Oura Disconnect] Token doc deletion failed (may already be removed):', tokenErr);
+      }
       await healthService.updateHealthData(db, user.uid, {
         isDeviceVerified: false,
         connectedDevice: null,
@@ -498,10 +507,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       toast({ title: 'Oura Ring Disconnected', description: 'Your device connection has been removed.' });
     } catch (e: any) {
       console.error('[Oura Disconnect] Failed:', e);
-      toast({ 
-        variant: 'destructive', 
-        title: 'Disconnect Failed', 
-        description: e?.message || 'Could not remove Oura connection properly.' 
+      toast({
+        variant: 'destructive',
+        title: 'Disconnect Failed',
+        description: e?.message || 'Could not remove Oura connection properly.'
       });
     }
   };
