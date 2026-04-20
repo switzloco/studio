@@ -130,10 +130,12 @@ function buildGlycogenCurves(
 
     // ── Exercise burns ──────────────────────────────────────────────────────────
     const activeLogs = exerciseLogs?.filter(e => !e.ignored) ?? [];
-    if (activeLogs.length > 0) {
-        for (const ex of activeLogs) {
+    // Only block the Fitbit fallback if at least one manual log actually has calorie data.
+    // A log with 0 calories should fall through to Fitbit activities, not silently zero out.
+    const activeLogsWithCalories = activeLogs.filter(e => (e.estimatedCaloriesBurned || 0) > 0);
+    if (activeLogsWithCalories.length > 0) {
+        for (const ex of activeLogsWithCalories) {
             const glycoCal = (ex.estimatedCaloriesBurned || 0) * 0.70; // ~70% of exercise from glycogen
-            if (glycoCal <= 0) continue;
             const dur       = Math.max(15, ex.durationMin || 30);
             const startMin  = ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60;
             const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(startMin)));
@@ -146,12 +148,14 @@ function buildGlycogenCurves(
             }
         }
     } else if (fitbitActivities && fitbitActivities.length > 0) {
-        // Fallback 1: Fitbit auto-detected activities — same slot logic as manual logs.
-        // Tier discount mirrors the wearable accuracy tiers used for manual logging.
+        // Glycolytic fractions by intensity tier (what % of calories comes from glycogen vs fat).
+        // Walking is primarily fat-fuelled at normal pace (~10-15% glycolytic);
+        // the old 0.40 value was far too high and caused spurious evening muscle drain
+        // from Fitbit-detected walking after an intense workout.
         const TIER_GLYCO_FRACTION: Record<string, number> = {
-            tier1_walking: 0.40,
-            tier2_steady_state: 0.65,
-            tier3_anaerobic: 0.85,
+            tier1_walking: 0.12,       // ~90% fat — casual walking barely touches glycogen
+            tier2_steady_state: 0.55,  // mixed — aerobic threshold range
+            tier3_anaerobic: 0.85,     // basketball/HIIT/lifting — heavily glycogen-dependent
         };
         const TIER_DISCOUNT: Record<string, number> = {
             tier1_walking: 1.0,

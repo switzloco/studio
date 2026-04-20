@@ -9,8 +9,8 @@ import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightnin
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { ouraService } from '@/lib/oura-service';
-import { syncFitbitData, syncFitbitSnapshot, SyncResult } from '@/app/actions/fitbit';
-import { syncOuraData, OuraSyncResult } from '@/app/actions/oura';
+import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
+import { syncOuraData, disconnectOura, OuraSyncResult } from '@/app/actions/oura';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
@@ -405,24 +405,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const handleDisconnectFitbit = async () => {
     if (!user) return;
-    try {
-      // Token deletion is best-effort: if it's already gone that's fine.
-      try {
-        await healthService.deleteFitbitCredentials(db, user.uid);
-      } catch (tokenErr) {
-        console.warn('[Fitbit Disconnect] Token doc deletion failed (may already be removed):', tokenErr);
-      }
-      await healthService.updateHealthData(db, user.uid, {
-        isDeviceVerified: false,
-        connectedDevice: null,
-      });
+    const result = await disconnectFitbit(user.uid);
+    if (result.ok) {
       toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
-    } catch (e: any) {
-      console.error('[Fitbit Disconnect] Failed:', e);
+    } else {
+      console.error('[Fitbit Disconnect] Server action failed:', result.error);
       toast({
         variant: 'destructive',
         title: 'Disconnect Failed',
-        description: e?.message || 'Could not remove Fitbit connection properly.'
+        description: result.error || 'Could not remove Fitbit connection.',
       });
     }
   };
@@ -494,23 +485,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const handleDisconnectOura = async () => {
     if (!user) return;
-    try {
-      try {
-        await healthService.deleteOuraCredentials(db, user.uid);
-      } catch (tokenErr) {
-        console.warn('[Oura Disconnect] Token doc deletion failed (may already be removed):', tokenErr);
-      }
-      await healthService.updateHealthData(db, user.uid, {
-        isDeviceVerified: false,
-        connectedDevice: null,
-      });
+    const result = await disconnectOura(user.uid);
+    if (result.ok) {
       toast({ title: 'Oura Ring Disconnected', description: 'Your device connection has been removed.' });
-    } catch (e: any) {
-      console.error('[Oura Disconnect] Failed:', e);
+    } else {
+      console.error('[Oura Disconnect] Server action failed:', result.error);
       toast({
         variant: 'destructive',
         title: 'Disconnect Failed',
-        description: e?.message || 'Could not remove Oura connection properly.'
+        description: result.error || 'Could not remove Oura connection.',
       });
     }
   };

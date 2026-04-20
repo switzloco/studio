@@ -21,3 +21,22 @@ export async function getOuraLastSyncedAt(userId: string): Promise<number | null
   const creds = await adminHealthService.getOuraCredentials(firestore, userId);
   return creds?.lastSyncedAt ?? null;
 }
+
+/**
+ * Removes Oura credentials and marks the device as disconnected.
+ * Uses Admin SDK so it works regardless of client-side Firestore rules.
+ */
+export async function disconnectOura(userId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const firestore = getAdminFirestore();
+    await adminHealthService.deleteOuraCredentials(firestore, userId);
+    await adminHealthService.updateHealthData(firestore, userId, {
+      isDeviceVerified: false,
+      connectedDevice: null,
+    });
+    return { ok: true };
+  } catch (err: any) {
+    console.error('[disconnectOura] Failed:', err);
+    return { ok: false, error: err?.message ?? 'Unknown error' };
+  }
+}

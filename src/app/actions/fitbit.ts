@@ -34,6 +34,25 @@ export async function getFitbitLastSyncedAt(userId: string): Promise<number | nu
  * for each day that has any data — fixes the "shows today's calories for
  * past dates" issue for days before the snapshot system was deployed.
  */
+/**
+ * Removes Fitbit credentials and marks the device as disconnected.
+ * Uses Admin SDK so it works regardless of client-side Firestore rules.
+ */
+export async function disconnectFitbit(userId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const firestore = getAdminFirestore();
+    await adminHealthService.deleteFitbitCredentials(firestore, userId);
+    await adminHealthService.updateHealthData(firestore, userId, {
+      isDeviceVerified: false,
+      connectedDevice: null,
+    });
+    return { ok: true };
+  } catch (err: any) {
+    console.error('[disconnectFitbit] Failed:', err);
+    return { ok: false, error: err?.message ?? 'Unknown error' };
+  }
+}
+
 export async function backfillFitbitHistory(userId: string): Promise<{ ok: boolean; days: number }> {
   const firestore = getAdminFirestore();
   let creds = await adminHealthService.getFitbitCredentials(firestore, userId);

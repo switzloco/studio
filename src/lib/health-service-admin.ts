@@ -96,6 +96,11 @@ export const adminHealthService = {
     return snap.exists ? (snap.data() as FitbitCredentials) : null;
   },
 
+  async deleteFitbitCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = db.doc(`users/${userId}/preferences/fitbit_tokens`);
+    await docRef.delete();
+  },
+
   async saveOuraCredentials(db: Firestore, userId: string, creds: OuraCredentials): Promise<void> {
     const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
     await docRef.set(creds);
@@ -105,6 +110,11 @@ export const adminHealthService = {
     const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
     const snap = await docRef.get();
     return snap.exists ? (snap.data() as OuraCredentials) : null;
+  },
+
+  async deleteOuraCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
+    await docRef.delete();
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>): Promise<void> {
