@@ -181,7 +181,9 @@ export const healthService = {
 
   async updateHealthData(db: Firestore, userId: string, updates: Partial<HealthData>): Promise<void> {
     const docRef = doc(db, 'users', userId);
-    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() });
+    // setDoc with merge works whether or not the document already exists;
+    // updateDoc throws "No document to update" if the doc is missing.
+    await setDoc(docRef, { ...updates, updatedAt: serverTimestamp() }, { merge: true });
   },
 
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
