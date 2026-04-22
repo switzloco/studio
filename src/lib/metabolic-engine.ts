@@ -35,6 +35,12 @@ const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
 const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
 
+// Glycogen synthesis rate caps (physiology, Ivy 1998 / Jentjens 2003).
+// Liver synthesis ≈ 10–15 g/hr; muscle synthesis ≈ 40–50 g/hr in depleted muscle with adequate carbs.
+// Per 15-min slot: liver up to ~15 kcal (3.75g), muscle up to ~50 kcal (12.5g).
+const LIVER_REFILL_MAX_PER_SLOT  = 15;
+const MUSCLE_REFILL_MAX_PER_SLOT = 50;
+
 const MEAL_DEFAULT_MIN: Record<string, number> = {
   breakfast: 7 * 60,
   lunch:     12 * 60 + 30,
@@ -249,28 +255,45 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     // Step 3: liver glycogen fills remaining requirement
     const liverContribution = Math.min(remaining, liverKcal);
     liverKcal = Math.max(0, liverKcal - liverContribution);
-    // Replenish liver from carb fraction of absorbed calories — track actual refill (limited by headroom)
-    const liverRefillAmt = Math.min(LIVER_MAX_KCAL - liverKcal, absorptionThisSlot * 0.06);
-    liverKcal += liverRefillAmt;
     remaining -= liverContribution;
 
     // Step 4: muscle glycogen — intramuscular stores, primary exercise buffer
     // Prevents muscle protein catabolism during exercise when liver is depleted.
     const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
     muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
-    // Replenish from dietary carbs — track actual refill (limited by headroom)
-    const muscleRefillAmt = Math.min(muscleMax - muscleGlycogenKcal, absorptionThisSlot * 0.15);
-    muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
     // Step 5: muscle protein catabolism (true last resort — all glycogen exhausted)
     const muscleContribution = Math.max(0, remaining);
 
-    // Surplus: excess absorption above burn, minus what was routed to glycogen replenishment.
-    // Glycogen refill calories were already counted above — excluding them prevents double-counting
-    // them as fat storage. Post-exercise meals with depleted glycogen tanks will now correctly show
-    // most of the surplus going to glycogen, not fat.
-    const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
+    // ── Glycogen replenishment from the slot's absorption surplus ──────────────
+    // Refill is demand-driven: absorbed calories that exceed immediate burn preferentially
+    // refill depleted glycogen tanks (liver first, then muscle) up to physiological synthesis
+    // rate caps. Only the leftover after glycogen is satisfied is deposited as fat.
+    //
+    // This replaces the old fixed-percentage (6%/15%) refill, which under-refilled glycogen
+    // and caused the "fat stored" total to balloon on deficit/balanced days — the fat faucet
+    // is rate-limited, so BMR between meals drains ~1200 kcal/day from glycogen, far more
+    // than 21% of absorption could replace.
+    let absorptionSurplus = Math.max(0, absorptionThisSlot - burnThisSlot);
+
+    const liverRefillAmt = Math.min(
+      LIVER_MAX_KCAL - liverKcal,
+      LIVER_REFILL_MAX_PER_SLOT,
+      absorptionSurplus,
+    );
+    liverKcal += liverRefillAmt;
+    absorptionSurplus -= liverRefillAmt;
+
+    const muscleRefillAmt = Math.min(
+      muscleMax - muscleGlycogenKcal,
+      MUSCLE_REFILL_MAX_PER_SLOT,
+      absorptionSurplus,
+    );
+    muscleGlycogenKcal += muscleRefillAmt;
+    absorptionSurplus -= muscleRefillAmt;
+
+    const fatStoredThisSlot = absorptionSurplus;
 
     cumulativeFatBurned     += fatContribution;
     cumulativeFatStored     += fatStoredThisSlot;
