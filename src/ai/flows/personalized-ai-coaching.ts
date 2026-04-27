@@ -109,6 +109,7 @@ const getUserContextTool = ai.defineTool(
       fitbitSync: fitbitStatus,
       todaysFoodLog: recentFood,
       todaysExerciseLog: recentExercise,
+      todaysFitbitActivities: health?.fitbitByDate?.[today]?.activities ?? [],
       yesterdaysFoodLog: yesterdayFood,
       yesterdaysFoodCount: yesterdayFood.length,
       yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
@@ -149,12 +150,15 @@ const getUserContextTool = ai.defineTool(
         const bfPct = health?.bodyFatPct;
         const muscleMax = computeMuscleGlycogenMaxKcal(wKg, bfPct);
         const alpert    = computeAlpertNumber(wKg, bfPct);
+        // Include Fitbit-tracked workouts so the sim matches the dashboard chart
+        const todayFitbitActivities = health?.fitbitByDate?.[today]?.activities;
         const sim = runMetabolicSimulation({
           caloriesOut,
           alpertNumber: alpert,
-          foodLogs:      isNewDay ? [] : (recentFood ?? []),
-          exerciseLogs:  isNewDay ? [] : (recentExercise ?? []),
-          caloriesIn:    isNewDay ? 0  : (health?.dailyCaloriesIn ?? 0),
+          foodLogs:         isNewDay ? [] : (recentFood ?? []),
+          exerciseLogs:     isNewDay ? [] : (recentExercise ?? []),
+          fitbitActivities: isNewDay ? [] : (todayFitbitActivities ?? []),
+          caloriesIn:       isNewDay ? 0  : (health?.dailyCaloriesIn ?? 0),
           muscleGlycogenMaxKcal: muscleMax,
         });
         // Current slot (clamp to last slot when outside 6 AM–10 PM window)
@@ -166,7 +170,8 @@ const getUserContextTool = ai.defineTool(
         const musclePct = Math.round((snap.muscleGlycogenKcal / muscleMax) * 100);
         const liverPct  = Math.round((snap.liverKcal / 400) * 100);
 
-        // Hours since last exercise ended (for refueling window)
+        // Hours since last exercise ended — check manual logs AND Fitbit activities,
+        // use whichever workout ended most recently.
         const activeEx = (recentExercise ?? []).filter(e => !e.ignored);
         let hoursPostExercise: number | null = null;
         if (activeEx.length > 0) {
@@ -175,6 +180,16 @@ const getUserContextTool = ai.defineTool(
             const [eh, em] = last.performedAt.split(':').map(Number);
             const endMin = eh * 60 + (em || 0) + (last.durationMin || 30);
             hoursPostExercise = Math.round(((nowMin - endMin) / 60) * 10) / 10;
+          }
+        }
+        if (todayFitbitActivities && todayFitbitActivities.length > 0) {
+          const lastFit = todayFitbitActivities[todayFitbitActivities.length - 1];
+          const [sh, sm] = lastFit.startTime.split(':').map(Number);
+          const fitEndMin = sh * 60 + (sm || 0) + lastFit.durationMin;
+          const fitHoursPost = Math.round(((nowMin - fitEndMin) / 60) * 10) / 10;
+          // Prefer Fitbit timing when it's more recent (smaller positive value)
+          if (hoursPostExercise === null || (fitHoursPost >= 0 && fitHoursPost < hoursPostExercise)) {
+            hoursPostExercise = fitHoursPost;
           }
         }
 
@@ -979,13 +994,14 @@ The engine models 5-bucket sequential drain across 15-minute slots (6 AM–10 PM
   5. Muscle protein catabolism — true last resort, incurs the −2 pts per 10 kcal penalty
 
 MUSCLE GLYCOGEN COACHING (use glycogenState from get_user_context):
-- glycogenState.musclePct tells you how full the muscle glycogen tanks are right now (0–100%).
+- glycogenState.musclePct tells you how full the muscle glycogen tanks are right now (0–100%). The simulation includes both manually-logged workouts (todaysExerciseLog) AND Fitbit-detected workouts (todaysFitbitActivities), so this number should match what the dashboard chart shows.
 - glycogenState.depleted = true when musclePct < 50% — this is a real refueling signal, not cosmetic.
 - glycogenState.inRefuelWindow = true when within 2 hours post-exercise — glycogen synthase activity is highest here; this is the prime anabolic window.
 - glycogenState.refuelCarbsG is the target: ~1.2g carbs per kg bodyweight for the post-workout hour.
 - glycogenState.muscleDeficitG is the total glycogen gap in grams — useful for multi-meal planning.
-When inRefuelWindow is true AND depleted is true, PROACTIVELY lead with a refueling directive — don't wait to be asked. Example: "Your tanks are at 45% after basketball. You've got 90 minutes left in the prime refueling window — hit [refuelCarbsG]g of fast carbs (rice, potato, fruit) NOW. Pair with 40g protein to activate glycogen synthase."
-When depleted but NOT in the window, flag it as a next-meal priority: "Muscle glycogen is at [musclePct]% — make your next meal carb-forward to restock before tomorrow's session."
+- todaysFitbitActivities contains auto-detected workouts with activityName, durationMin, calories, averageHeartRate, and activityTier (tier1_walking / tier2_steady_state / tier3_anaerobic). Use these to name the specific workout that caused depletion rather than speaking generically.
+When inRefuelWindow is true AND depleted is true, PROACTIVELY lead with a refueling directive — don't wait to be asked. Name the specific workout. Example: "Your [activityName] drained tanks to [musclePct]%. You've got 90 minutes left in the prime refueling window — hit [refuelCarbsG]g of fast carbs (rice, potato, fruit) NOW. Pair with 40g protein to activate glycogen synthase."
+When depleted but NOT in the window, flag it as a next-meal priority: "Muscle glycogen is at [musclePct]% after [activityName] — make your next meal carb-forward to restock before tomorrow's session."
 When musclePct ≥ 80%, tanks are topped off — you can deprioritize carbs and let the Alpert fat faucet run.
 
 The Alpert number is the max sustainable fat oxidation rate:
