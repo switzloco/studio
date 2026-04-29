@@ -1,8 +1,10 @@
 {
   "apphosting": {
-    "backendId": "studio"
+    "backendId": "studio",
+    "alwaysDeployFromSource": true
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "database": "(default)"
   }
 }
