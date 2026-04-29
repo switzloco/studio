@@ -192,7 +192,7 @@ export const fitbitService = {
         Authorization: `Basic ${credentials}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({ code, grant_type: 'authorization_code', redirect_uri: redirectUri }).toString(),
+      body: new URLSearchParams({ code, grant_type: 'authorization_code', redirect_uri: redirectUri, expires_in: '31536000' }).toString(),
     });
 
     if (!res.ok) {
@@ -229,7 +229,7 @@ export const fitbitService = {
         Authorization: `Basic ${credentials}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }).toString(),
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, expires_in: '31536000' }).toString(),
     });
 
     if (!res.ok) {
