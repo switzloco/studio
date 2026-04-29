@@ -88,11 +88,19 @@ function classifyActivityTier(
   name: string,
   peakMinutes?: number,
   cardioMinutes?: number,
+  avgHr?: number,
 ): FitbitActivity['activityTier'] {
-  // HR-zone override is more reliable than name matching when available.
+  // HR-zone override when zones confirm elevated intensity.
   if (peakMinutes != null && cardioMinutes != null) {
     if (peakMinutes + cardioMinutes >= 10) return 'tier3_anaerobic';
     if (peakMinutes + cardioMinutes >= 2) return 'tier2_steady_state';
+    // Don't return tier1 here — zero cardio/peak could mean the activities
+    // list API didn't return heartRateZones, not that intensity was truly low.
+  }
+  // Average HR as secondary signal when zone data is absent or ambiguous.
+  if (avgHr != null) {
+    if (avgHr >= 150) return 'tier3_anaerobic';
+    if (avgHr >= 120) return 'tier2_steady_state';
     return 'tier1_walking';
   }
   return ACTIVITY_TIER_MAP[name.toLowerCase()] ?? 'tier2_steady_state';
@@ -129,7 +137,7 @@ async function fetchActivitiesForDate(accessToken: string, date: string): Promis
           durationMin: Math.round((a.duration || 0) / 60000),
           calories: a.calories || 0,
           averageHeartRate: a.averageHeartRate || undefined,
-          activityTier: classifyActivityTier(a.activityName || '', peak, cardio),
+          activityTier: classifyActivityTier(a.activityName || '', peak, cardio, a.averageHeartRate || undefined),
         } satisfies FitbitActivity;
       });
   } catch (e) {
