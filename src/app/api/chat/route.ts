@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
+import { verifyAuthHeader } from '@/firebase/admin';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { message, chatHistory, currentHealth, userId, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates } = body;
+    const uid = await verifyAuthHeader(req);
+    if (!uid) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!userId) {
-      return NextResponse.json({ error: "Anonymous UID required for audit." }, { status: 400 });
-    }
+    const body = await req.json();
+    const { message, chatHistory, currentHealth, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates } = body;
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
     const [yr, mo, dy] = resolvedDate.split('-').map(Number);
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       : currentHealth;
 
     const input: PersonalizedAICoachingInput = {
-      userId,
+      userId: uid,
       userName,
       message,
       currentDay,

@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server';
 import { ledgerAnalystPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
+import { verifyAuthHeader } from '@/firebase/admin';
 
 export async function POST(req: Request) {
   try {
+    const uid = await verifyAuthHeader(req);
+    if (!uid) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const body = await req.json();
-    const { message, chatHistory, userId, userName, localDate } = body;
+    const { message, chatHistory, userName, localDate } = body;
 
     const resolvedDate = localDate ?? new Date().toISOString().split('T')[0];
     const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
 
     const input: PersonalizedAICoachingInput = {
-      userId,
+      userId: uid,
       userName,
       message,
       currentDay,

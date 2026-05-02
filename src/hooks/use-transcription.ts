@@ -4,7 +4,10 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type TranscriptionStatus = 'idle' | 'recording' | 'transcribing';
 
-export function useTranscription(onTranscript: (text: string) => void) {
+export function useTranscription(
+  onTranscript: (text: string) => void,
+  getToken?: () => Promise<string>,
+) {
   const [status, setStatus] = useState<TranscriptionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -35,9 +38,15 @@ export function useTranscription(onTranscript: (text: string) => void) {
       const mimeType = blob.type || 'audio/webm';
       const dataUri = `data:${mimeType};base64,${base64}`;
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (getToken) {
+        const token = await getToken();
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/transcribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ audioDataUri: dataUri }),
       });
 
@@ -53,7 +62,7 @@ export function useTranscription(onTranscript: (text: string) => void) {
     } finally {
       setStatus('idle');
     }
-  }, [onTranscript]);
+  }, [onTranscript, getToken]);
 
   const startRecording = useCallback(async () => {
     setError(null);
