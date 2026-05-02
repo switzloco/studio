@@ -160,13 +160,13 @@ export const healthService = {
       dailyCarbsG: 0,
       dailyCaloriesIn: 0,
       dailyCaloriesOut: 2000, // Default estimate
-      visceralFatPoints: 1250, // Starting equity
+      visceralFatPoints: 0,
       history: [{
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         gain: 0,
         status: 'Stable',
-        detail: 'Portfolio Initialized',
-        equity: 1250
+        detail: 'Account Created',
+        equity: 0,
       }],
       isAnonymous: true,
       onboardingDay: 1,

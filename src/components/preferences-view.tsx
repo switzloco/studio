@@ -25,7 +25,7 @@ const RANKS = [
   { label: 'Partner',           min: 10000, max: Infinity,  color: 'text-emerald-600', bg: 'bg-emerald-100' },
 ] as const;
 
-const STARTING_EQUITY = 1250;
+const STARTING_EQUITY = 0;
 
 function getRank(points: number) {
   return RANKS.find(r => points >= r.min && points <= r.max) ?? RANKS[0];
