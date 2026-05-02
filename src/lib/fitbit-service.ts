@@ -161,7 +161,7 @@ export const fitbitService = {
     // expires_in=2592000 requests a 30-day access token (Fitbit max).
     // Without this parameter Fitbit defaults to 8 hours, forcing daily reconnects
     // when the background cron isn't running or FITBIT_CLIENT_SECRET is missing.
-    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=2592000&state=${state}`;
+    return `https://api.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=2592000&state=${state}`;
   },
 
   /**

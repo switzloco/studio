@@ -373,7 +373,7 @@ export function ChatInterface() {
     }
   };
 
-  const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints && healthData.visceralFatPoints > 1250);
+  const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints != null && healthData.visceralFatPoints > 0);
   const placeholder = hasTargets
     ? "Log a meal, workout, or ask The CFO..."
     : "Tell me about your goals, equipment, routine...";
