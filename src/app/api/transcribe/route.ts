@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ai, SAFETY_SETTINGS } from '@/ai/genkit';
 import { verifyAuthHeader } from '@/firebase/admin';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 // ~5 MB of raw audio encodes to ~6.7 MB base64; cap the data URI at 7 MB.
 const MAX_AUDIO_DATA_URI_BYTES = 7 * 1024 * 1024;
@@ -9,6 +10,14 @@ export async function POST(req: Request) {
   try {
     const uid = await verifyAuthHeader(req);
     if (!uid) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const limit = await checkRateLimit(uid, 'transcribe');
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: `Rate limit hit (${limit.scope}). Try again in ${limit.retryAfter}s.` },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
+      );
+    }
 
     const { audioDataUri } = await req.json();
 
