@@ -319,10 +319,11 @@ export function DashboardCharts({
     }, [isViewingToday]);
 
     const last            = glycogenData[glycogenData.length - 1];
-    const endLiverPct     = last.liver;
-    const endMusclePct    = last.muscle;
-    const endLiverKcal    = Math.round((endLiverPct  / 100) * LIVER_MAX_KCAL);
-    const endMuscleKcal   = Math.round((endMusclePct / 100) * muscleMaxKcal);
+    const currentGlycogen = nowSlot != null ? glycogenData[nowSlot] : last;
+    const displayLiverPct     = currentGlycogen.liver;
+    const displayMusclePct    = currentGlycogen.muscle;
+    const displayLiverKcal    = Math.round((displayLiverPct  / 100) * LIVER_MAX_KCAL);
+    const displayMuscleKcal   = Math.round((displayMusclePct / 100) * muscleMaxKcal);
 
     return (
         <>
@@ -502,22 +503,17 @@ export function DashboardCharts({
                         </ResponsiveContainer>
                     </div>
 
-                    {/* End-of-day stats */}
-                    <div className="flex justify-between items-end mt-3">
+                    {/* Current stats */}
+                    <div className="flex justify-around items-end mt-3">
                         <div className="text-center">
                             <p className="text-[9px] font-black uppercase text-orange-500/70 tracking-widest">Liver</p>
-                            <p className="text-base font-black text-orange-500">{endLiverPct}%</p>
-                            <p className="text-[9px] font-bold text-muted-foreground">{endLiverKcal} kcal</p>
+                            <p className="text-base font-black text-orange-500">{displayLiverPct}%</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">{displayLiverKcal} kcal</p>
                         </div>
                         <div className="text-center">
                             <p className="text-[9px] font-black uppercase text-blue-500/70 tracking-widest">Muscle</p>
-                            <p className="text-base font-black text-blue-600">{endMusclePct}%</p>
-                            <p className="text-[9px] font-bold text-muted-foreground">{endMuscleKcal} kcal</p>
-                        </div>
-                        <div className="text-center">
-                            <p className="text-[9px] font-black uppercase text-muted-foreground/70 tracking-widest">Combined</p>
-                            <p className="text-base font-black text-foreground">{endLiverKcal + endMuscleKcal}</p>
-                            <p className="text-[9px] font-bold text-muted-foreground">kcal left</p>
+                            <p className="text-base font-black text-blue-600">{displayMusclePct}%</p>
+                            <p className="text-[9px] font-bold text-muted-foreground">{displayMuscleKcal} kcal</p>
                         </div>
                     </div>
 
@@ -638,7 +634,7 @@ function BucketGauge({
             <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight">{subtitle}</p>
             <div className="relative w-full h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40">
                 <div
-                    className={`absolute bottom-0 left-0 right-0 rounded-xl transition-all duration-700 ${fillColor}`}
+                    className={`absolute bottom-0 left-0 right-0 transition-all duration-700 ${fillColor}`}
                     style={{ height: `${pct}%` }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center">
