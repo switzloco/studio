@@ -630,8 +630,8 @@ function BucketGauge({
     const pct = Math.max(0, Math.min(100, (value / max) * 100));
     return (
         <div className="flex flex-col items-center gap-1 w-full">
-            <p className={`text-[9px] font-black uppercase tracking-widest ${textColor} text-center min-h-[14px] flex items-center`}>{title}</p>
-            <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight min-h-[20px] flex items-center justify-center">{subtitle}</p>
+            <p className={`text-[9px] font-black uppercase tracking-widest ${textColor} text-center min-h-[14px] flex items-center justify-center w-full`}>{title}</p>
+            <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight min-h-[20px] flex items-center justify-center w-full">{subtitle}</p>
             <div 
                 className="relative w-full h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40"
                 style={{ isolation: 'isolate' }}

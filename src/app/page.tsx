@@ -304,7 +304,7 @@ export default function Home() {
             >
               {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                 <>
-                  Secure Portfolio Entry
+                  Log In / Create Account
                   <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
