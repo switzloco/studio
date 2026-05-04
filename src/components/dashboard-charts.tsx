@@ -629,13 +629,16 @@ function BucketGauge({
 }) {
     const pct = Math.max(0, Math.min(100, (value / max) * 100));
     return (
-        <div className="flex flex-col items-center gap-1">
-            <p className={`text-[9px] font-black uppercase tracking-widest ${textColor}`}>{title}</p>
-            <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight">{subtitle}</p>
-            <div className="relative w-full h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40">
+        <div className="flex flex-col items-center gap-1 w-full">
+            <p className={`text-[9px] font-black uppercase tracking-widest ${textColor} text-center min-h-[14px] flex items-center`}>{title}</p>
+            <p className="text-[8px] font-bold text-muted-foreground/60 text-center leading-tight min-h-[20px] flex items-center justify-center">{subtitle}</p>
+            <div 
+                className="relative w-full h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40"
+                style={{ isolation: 'isolate' }}
+            >
                 <div
                     className={`absolute bottom-0 left-0 right-0 transition-all duration-700 ${fillColor}`}
-                    style={{ height: `${pct}%` }}
+                    style={{ height: `${pct}%`, transform: 'translateZ(0)' }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-[10px] font-black text-foreground/80 drop-shadow-sm">
@@ -678,12 +681,12 @@ export function MetabolicBucketsView({
                     <div className="grid grid-cols-4 gap-3">
                         <BucketGauge
                             title="Gut / Exog."
-                            subtitle="In transit"
+                            subtitle="In Transit"
                             value={current.gutKcal}
                             max={maxGut}
-                            fillColor="bg-gradient-to-t from-blue-400 to-blue-300"
+                            fillColor="bg-gradient-to-t from-blue-500 to-blue-400"
                             textColor="text-blue-500"
-                            formatValue={v => `${v} kcal`}
+                            formatValue={v => `${Math.round(v)} kcal`}
                         />
                         <BucketGauge
                             title="Liver Glycogen"
@@ -705,12 +708,12 @@ export function MetabolicBucketsView({
                         />
                         <BucketGauge
                             title="Muscle Shield"
-                            subtitle="Lean tissue"
+                            subtitle="Lean Tissue"
                             value={current.muscleShieldPct}
                             max={100}
                             fillColor="bg-gradient-to-t from-red-500 to-red-400"
                             textColor="text-red-500"
-                            formatValue={v => `${v}% intact`}
+                            formatValue={v => `${Math.round(v)}% intact`}
                         />
                     </div>
                 </CardContent>
