@@ -98,6 +98,7 @@ export function ChatInterface() {
   const { toast } = useToast();
   const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
     useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
+    useCallback(() => user!.getIdToken(), [user]),
   );
 
   useEffect(() => {
@@ -127,11 +128,11 @@ export function ChatInterface() {
         const now = new Date();
         const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
         
+        const idToken = await user.getIdToken();
         const payload = {
           message: '__init__',
           chatHistory: [],
           currentHealth: sanitizedHealth,
-          userId: user.uid,
           userName: user.displayName || undefined,
           localDate: now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
           localTime: now.toLocaleTimeString('en-US'),
@@ -139,7 +140,7 @@ export function ChatInterface() {
 
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
           body: JSON.stringify(payload),
         });
 
@@ -321,11 +322,11 @@ export function ChatInterface() {
     const fullMessage = exifContext + userMessage;
 
     try {
+      const idToken = await user.getIdToken();
       const payload = {
         message: fullMessage,
         chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
         currentHealth: sanitizedHealth,
-        userId: user.uid,
         userName: user.displayName || undefined,
         localDate,
         localTime: now.toLocaleTimeString('en-US'),
@@ -336,7 +337,7 @@ export function ChatInterface() {
 
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify(payload),
       });
 

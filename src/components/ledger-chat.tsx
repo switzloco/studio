@@ -34,6 +34,7 @@ export function LedgerChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
     useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
+    useCallback(() => user!.getIdToken(), [user]),
   );
 
   useEffect(() => {
@@ -56,17 +57,17 @@ export function LedgerChat() {
       setIsLoading(true);
       try {
         const localDate = new Date().toLocaleDateString('en-CA');
+        const idToken = await user.getIdToken();
         const payload = {
           message: '__init__',
           chatHistory: [],
-          userId: user.uid,
           userName: user.displayName || undefined,
           localDate,
         };
 
         const res = await fetch('/api/ledger-chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
           body: JSON.stringify(payload),
         });
 
@@ -112,17 +113,17 @@ export function LedgerChat() {
 
     try {
       const localDate = new Date().toLocaleDateString('en-CA');
+      const idToken = await user.getIdToken();
       const payload = {
         message: messageText,
         chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
-        userId: user.uid,
         userName: user.displayName || undefined,
         localDate,
       };
 
       const res = await fetch('/api/ledger-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify(payload),
       });
 

@@ -1,16 +1,29 @@
 import { NextResponse } from 'next/server';
 import { ledgerAnalystPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
+import { verifyAuthHeader } from '@/firebase/admin';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function POST(req: Request) {
   try {
+    const uid = await verifyAuthHeader(req);
+    if (!uid) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const limit = await checkRateLimit(uid, 'chat');
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: `Rate limit hit (${limit.scope}). Try again in ${limit.retryAfter}s.` },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
+      );
+    }
+
     const body = await req.json();
-    const { message, chatHistory, userId, userName, localDate } = body;
+    const { message, chatHistory, userName, localDate } = body;
 
     const resolvedDate = localDate ?? new Date().toISOString().split('T')[0];
     const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
 
     const input: PersonalizedAICoachingInput = {
-      userId,
+      userId: uid,
       userName,
       message,
       currentDay,
