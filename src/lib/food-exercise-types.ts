@@ -14,6 +14,10 @@ export interface FoodLogEntry {
   carbsG: number;
   fatG: number;
   fiberG: number;
+  glycemicIndex?: number;      // 0-100; affects absorption speed and insulin spike
+  omega3Mg?: number;           // Omega-3 content (EPA/DHA); anti-inflammatory & sensitivity
+  caffeineMg?: number;         // caffeine content; boosts fat oxidation rate
+  hasElectrolytes?: boolean;   // true if electrolytes were supplemented
   source: 'usda' | 'web_search' | 'user_estimate';
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   alcoholDrinks?: number;      // number of alcoholic drinks in this entry
@@ -63,6 +67,7 @@ export interface UserProfile {
   goals?: string[];
   injuries?: string[];
   dietaryRestrictions?: string[];
+  hasCreatine?: boolean;    // true if supplementing daily (increases glycogen cap)
   lastConversationSummary?: string;
   motivationalWhy?: string; // The user's personal "why" — their deeper reason for pursuing their goals
 }

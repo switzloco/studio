@@ -40,6 +40,8 @@ export interface DailyVFInput {
   seedOilMeals: number;      // count of meals with heavy seed oil / deep-fried
   weightKg?: number;         // used for Alpert number calculation
   bodyFatPct?: number;       // 0-100; used for Alpert number calculation
+  hrv?: number;              // 0-150; used for recovery multiplier
+  hasCreatine?: boolean;     // user supplement status
   // Optional: per-entry logs for precise slot simulation
   foodLogs?: FoodLogEntry[];
   exerciseLogs?: ExerciseLogEntry[];
@@ -59,14 +61,15 @@ export interface DailyVFResult {
     proteinMet: boolean;
     fastingActive: boolean;
     alcoholFlag: boolean;
-    poorSleep: boolean;
     seedOilMeals: number;
     // Rule modifier fields
     baseScore: number;
     fastingOverride: boolean;
     alcoholCap: boolean;
     alcoholPenalty: number;
-    cortisolMultiplier: number;
+    hrvMultiplier: number;
+    hrvStatus: 'tax' | 'neutral' | 'bonus';
+    omega3Bonus: number;
     seedOilPenalty: number;
   };
   summary: string;
@@ -121,42 +124,56 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const proteinMet    = proteinG >= proteinGoal;
   const fastingActive = fastingHours >= 16;
   const alcoholFlag   = alcoholDrinks > 2;
-  const poorSleep     = sleepHours < 6;
 
   // Rule 2: Fasting Override — 24h+ fast OR calorie intake <15% of TDEE.
-  // Near-fasting days (e.g. 235 kcal in / 2700 kcal out) are treated the same
-  // as an explicit fast: score caps at +100, protein mandate is waived.
   const nearFasting = caloriesIn >= 0 && caloriesIn < caloriesOut * 0.15;
   const fastingOverride = fastingHours >= 24 || nearFasting;
 
-  // Rule 1: Base score from caloric deficit (linear: 1000 kcal deficit = 100 pts)
-  // Fasting override caps at +100 to prevent runaway scores on extreme deficits.
+  // Rule 1: Base score from caloric deficit
   const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
   let score = baseScore;
 
-  // Rule 1: Protein mandate — scale down positive scores proportionally to protein shortfall.
-  // A hard cap at 50 was producing too many identical scores regardless of deficit size.
-  // Waived when fasting/near-fasting: you can't eat protein you're not eating.
   if (!proteinMet && !fastingOverride && score > 0) {
-    const proteinRatio = Math.min(1, proteinG / proteinGoal); // 0.0 – 1.0
+    const proteinRatio = Math.min(1, proteinG / proteinGoal);
     score = Math.round(score * proteinRatio);
   }
 
-  // Rule 3: Alcohol Drag — each drink suppresses fat oxidation ~1h (Siler 1999)
-  // At typical Alpert rates, ~5 pts of lost fat-burning per drink.
-  const alcoholPenalty = alcoholDrinks > 0 ? alcoholDrinks * -5 : 0;
-  const alcoholCap    = false; // no cliff — proportional to biology
+  // Rule 3: Alcohol Drag
+  // Up to 3 drinks: -5 pts/drink (oxidation suppression).
+  // 4+ drinks: -10 pts/drink (toxic load & severe liver overhead).
+  const alcoholPenalty = alcoholDrinks > 3 
+    ? (3 * -5) + ((alcoholDrinks - 3) * -10)
+    : alcoholDrinks * -5;
   score += alcoholPenalty;
 
-  // Rule 4: Cortisol Tax — poor sleep elevates cortisol ~20%, impairing fat oxidation
-  // Only penalizes positive scores (bad sleep doesn't "help" a surplus day)
-  const cortisolMultiplier = poorSleep ? 0.8 : 1;
-  if (poorSleep && score > 0) {
-    score = Math.round(score * cortisolMultiplier);
+  // Rule 4: HRV Multiplier (Replacing Sleep/Cortisol tax)
+  let hrvMultiplier = 1.0;
+  let hrvStatus: 'tax' | 'neutral' | 'bonus' = 'neutral';
+  if (input.hrv) {
+    if (input.hrv < 30) {
+      hrvMultiplier = 0.85;
+      hrvStatus = 'tax';
+    } else if (input.hrv > 80) {
+      hrvMultiplier = 1.10;
+      hrvStatus = 'bonus';
+    }
+  }
+  
+  if (score > 0) {
+    score = Math.round(score * hrvMultiplier);
   }
 
-  // Rule 5: Seed Oil Nudge — mild inflammatory signal (omega-6 load)
-  // Acute daily impact on fat oxidation is negligible; this is a coaching nudge.
+  // Rule 5: Omega-3 Sensitivity Bonus
+  // High O3 intake (1000mg+) offsets systemic inflammation and improves sensitivity.
+  let omega3Bonus = 0;
+  if (input.foodLogs) {
+    const totalO3 = input.foodLogs.reduce((sum, f) => sum + (f.omega3Mg || 0), 0);
+    if (totalO3 >= 2000) omega3Bonus = 10;
+    else if (totalO3 >= 1000) omega3Bonus = 5;
+  }
+  score += omega3Bonus;
+
+  // Rule 6: Seed Oil Nudge
   const seedOilPenalty = seedOilMeals * -5;
   score += seedOilPenalty;
 
@@ -171,7 +188,9 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
   if (alcoholFlag) parts.push(`${alcoholDrinks} drinks — liver overhead`);
-  if (poorSleep) parts.push(`<6h sleep — cortisol elevated`);
+  if (hrvStatus === 'tax') parts.push(`low HRV recovery tax`);
+  if (hrvStatus === 'bonus') parts.push(`high HRV recovery bonus`);
+  if (omega3Bonus > 0) parts.push(`omega-3 sensitivity bonus (+${omega3Bonus})`);
   if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s) — inflammation load`);
 
   return {
@@ -185,13 +204,14 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       proteinMet,
       fastingActive,
       alcoholFlag,
-      poorSleep,
       seedOilMeals,
       baseScore,
       fastingOverride,
-      alcoholCap,
+      alcoholCap: false,
       alcoholPenalty,
-      cortisolMultiplier,
+      hrvMultiplier,
+      hrvStatus,
+      omega3Bonus,
       seedOilPenalty,
     },
     summary: `Daily VF score: ${score}. ${parts.join('; ')}.`,

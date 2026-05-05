@@ -1,7 +1,7 @@
 /**
  * @fileOverview Hourly Metabolic Partitioning Engine
  *
- * Simulates 5-bucket sequential energy drain across 15-minute slots from 6 AM to 10 PM.
+ * Simulates 5-bucket sequential energy drain across 15-minute slots from 6 AM to midnight.
  *
  * Drain priority per slot:
  *   1. Gut / Exogenous    — food being absorbed (insulin suppresses lipolysis)
@@ -9,16 +9,6 @@
  *   3. Liver Glycogen     — 400 kcal cap; replenishes from absorbed carbs
  *   4. Muscle Glycogen    — lean-mass-scaled cap; primary exercise buffer; replenishes from dietary carbs
  *   5. Muscle Protein     — true last resort; contributes to score penalty
- *
- * Surplus slots (absorption > burn) → fat storage, tracked separately.
- * Glycogen refill calories are deducted from fat storage to prevent double-counting.
- *
- * Score = (totalFatBurned / 1200) × 100
- *       − (totalFatStored  / 1200) × 100
- *       − (totalMuscleLost / 10)   × 2
- *
- * 1200 kcal = PSMF day baseline (physiologically perfect fat-loss day).
- * Score is uncapped — extended fasts produce scores > 100.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -27,13 +17,13 @@ import type { FitbitActivity } from './health-service';
 // ── Simulation constants ──────────────────────────────────────────────────────
 const INTERVAL_MIN = 15;
 const START_MIN    = 6 * 60;   // 6:00 AM
-const END_MIN      = 24 * 60;  // midnight — captures late-night exercise (e.g. 9 PM basketball)
+const END_MIN      = 24 * 60;  // midnight
 export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; // 73
 
-const ABSORPTION_SLOTS             = 6;     // 90-min food absorption window
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
 const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
+const INSULIN_DECAY_RATE           = 0.125; // clears a max spike (1.0) in ~2 hours (8 slots)
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
   breakfast: 7 * 60,
@@ -58,17 +48,13 @@ function timeToSlot(minutesSinceMidnight: number): number {
   return Math.round((minutesSinceMidnight - START_MIN) / INTERVAL_MIN);
 }
 
-/**
- * Compute the user's personal muscle glycogen capacity from lean mass.
- * Based on ~15g glycogen per kg lean mass (well-trained ≈ 20g/kg, sedentary ≈ 10g/kg).
- * Clamped to a physiologically plausible range [800, 2400] kcal.
- */
-export function computeMuscleGlycogenMaxKcal(weightKg?: number, bodyFatPct?: number): number {
+export function computeMuscleGlycogenMaxKcal(weightKg?: number, bodyFatPct?: number, hasCreatine?: boolean): number {
   const kg = weightKg ?? 70;
   const bfFraction = (bodyFatPct ?? 20) / 100;
   const leanKg = kg * (1 - bfFraction);
-  // 15 g/kg lean mass × 4 kcal/g
-  return Math.round(Math.max(800, Math.min(2400, leanKg * 60)));
+  let baseMax = leanKg * 60;
+  if (hasCreatine) baseMax *= 1.15;
+  return Math.round(Math.max(800, Math.min(2400, baseMax)));
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -79,30 +65,33 @@ export interface MetabolicEngineParams {
   foodLogs?: FoodLogEntry[];
   exerciseLogs?: ExerciseLogEntry[];
   fitbitActivities?: FitbitActivity[];
-  /** Starting liver glycogen. Default: 280 kcal (70% of 400 kcal max). */
   liverGlycogenStartKcal?: number;
-  /** Starting muscle glycogen. Default: 80% of muscleGlycogenMaxKcal. */
-  muscleGlycogenStartKcal?: number;
-  /** Personalized muscle glycogen capacity from lean mass. Default: computeMuscleGlycogenMaxKcal(). */
-  muscleGlycogenMaxKcal?: number;
-  /** Fallback daily caloric intake when no foodLogs are provided. */
+  morningGlycogenPct?: number;
   caloriesIn?: number;
+  hrv?: number;
+  hasCreatine?: boolean;
+  weightKg?: number;
+  bodyFatPct?: number;
 }
 
 export interface MetabolicSlotData {
   slot: number;
-  // Per-slot fuel source contributions (kcal)
   gutContribution: number;
   fatContribution: number;
   liverContribution: number;
   muscleGlycogenContribution: number;
   muscleContribution: number;
   fatStoredThisSlot: number;
-  // Running cumulative totals
+  // Advanced modeling (informational)
+  insulinLevel: number;        // 0.0 - 1.0 (1.0 = max suppression)
+  fatOxEfficiency: number;     // 0.0 - 1.0 (impact of insulin/caffeine/HRV)
+  anabolicSignal: number;      // 0.0 - 1.0 (MPS signal intensity)
+  caffeineLevel: number;       // mg currently active in system
   cumulativeFatBurned: number;
   cumulativeFatStored: number;
   cumulativeMuscleLost: number;
   cumulativeGlycogenDrawn: number;
+  cumulativeAnabolicPotential: number; // Running total of MPS "units"
   // Bucket levels at end of slot (for gauge visualization and coaching)
   gutKcal: number;
   liverKcal: number;
@@ -116,11 +105,11 @@ export interface MetabolicResult {
   totalFatStored: number;
   totalMuscleLost: number;
   totalGlycogenDrawn: number;
+  totalOmega3Mg: number;
+  totalAnabolicPotential: number;
   muscleGlycogenMaxKcal: number;
   score: number;
 }
-
-// ── Score formula ─────────────────────────────────────────────────────────────
 
 export function computeMetabolicScore(
   fatBurned: number,
@@ -133,8 +122,6 @@ export function computeMetabolicScore(
   return Math.round(fatBurnPts - fatStorePts - musclePenalty);
 }
 
-// ── Core simulation ───────────────────────────────────────────────────────────
-
 export function runMetabolicSimulation(params: MetabolicEngineParams): MetabolicResult {
   const {
     caloriesOut,
@@ -142,38 +129,69 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     foodLogs,
     exerciseLogs,
     fitbitActivities,
-    liverGlycogenStartKcal = 280,
     caloriesIn = 0,
+    hrv = 50,
+    hasCreatine = false,
   } = params;
 
-  // Personalized muscle glycogen capacity from lean mass (or caller-supplied value)
-  const muscleMax = params.muscleGlycogenMaxKcal ?? computeMuscleGlycogenMaxKcal();
-  const muscleGlycogenStartKcal = params.muscleGlycogenStartKcal ?? Math.round(muscleMax * 0.80);
+  const muscleMax = params.muscleGlycogenMaxKcal ?? computeMuscleGlycogenMaxKcal(params.weightKg, params.bodyFatPct, hasCreatine);
+  const liverGlycogenStartKcal = params.liverGlycogenStartKcal ?? 280;
+  const morningPct = params.morningGlycogenPct ?? 80;
+  const muscleGlycogenStartKcal = Math.round(muscleMax * (morningPct / 100));
 
-  // Max fat that can be oxidized in one 15-min slot (Alpert rate limit)
-  const fatFaucetPerSlot = alpertNumber / 24 / 4;
+  let hrvMultiplier = 1.0;
+  if (hrv < 30) hrvMultiplier = 0.85;
+  else if (hrv > 80) hrvMultiplier = 1.10;
 
-  // ── Build per-slot absorption and gut-remaining arrays ────────────────────
+  let totalOmega3Mg = 0;
+  foodLogs?.forEach(f => { if (!f.ignored) totalOmega3Mg += f.omega3Mg || 0; });
+  const sensitivityMultiplier = totalOmega3Mg >= 2000 ? 1.1 : 1.0;
+
   const absorptionPerSlot = new Array<number>(NUM_SLOTS).fill(0);
   const gutBySlot         = new Array<number>(NUM_SLOTS).fill(0);
+  const insulinSpikes     = new Array<number>(NUM_SLOTS).fill(0);
+  const proteinSpikes     = new Array<number>(NUM_SLOTS).fill(0);
+  const caffeineIntake    = new Array<number>(NUM_SLOTS).fill(0);
+  const liverAlcoholDrain  = new Array<number>(NUM_SLOTS).fill(0);
+  const exerciseBurnPerSlot = new Array<number>(NUM_SLOTS).fill(0);
+  const strengthSlots         = new Array<boolean>(NUM_SLOTS).fill(false);
 
   const activeFoods = foodLogs?.filter(f => !f.ignored) ?? [];
 
   if (activeFoods.length > 0) {
     for (const food of activeFoods) {
-      const eatMin  = food.consumedAt
-        ? parseHHMM(food.consumedAt)
-        : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
+      const eatMin  = food.consumedAt ? parseHHMM(food.consumedAt) : (MEAL_DEFAULT_MIN[food.meal] ?? 12 * 60);
       const eatSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(eatMin)));
-      const perSlot = food.calories / ABSORPTION_SLOTS;
-      for (let s = eatSlot; s < Math.min(eatSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
+      
+      const fiberDelaySlots = Math.round((food.fiberG || 0) * 0.5);
+      const fatDelaySlots   = Math.round((food.fatG || 0) * 0.2);
+      const absorptionDuration = Math.min(24, 6 + fiberDelaySlots + fatDelaySlots);
+      
+      const perSlot = food.calories / absorptionDuration;
+      for (let s = eatSlot; s < Math.min(eatSlot + absorptionDuration, NUM_SLOTS); s++) {
         absorptionPerSlot[s] += perSlot;
-        // Gut = food not yet absorbed at start of slot s
-        gutBySlot[s] += food.calories * (1 - (s - eatSlot) / ABSORPTION_SLOTS);
+        gutBySlot[s] += food.calories * (1 - (s - eatSlot) / absorptionDuration);
+      }
+
+      const carbKcal = (food.carbsG || 0) * 4;
+      const giFactor = (food.glycemicIndex || 50) / 100;
+      const spike = Math.min(1.0, (carbKcal / 400) * giFactor);
+      if (spike > 0) insulinSpikes[eatSlot] += spike;
+
+      // Protein spikes for MPS (20g+ amino acid availability)
+      if (food.proteinG >= 20) proteinSpikes[eatSlot] += Math.min(1.0, food.proteinG / 40);
+
+      if (food.caffeineMg) caffeineIntake[eatSlot] += food.caffeineMg;
+
+      const drinks = food.alcoholDrinks || 0;
+      if (drinks > 0) {
+        const totalDrain = drinks * 30;
+        for (let s = eatSlot; s < Math.min(eatSlot + 4, NUM_SLOTS); s++) {
+          liverAlcoholDrain[s] += totalDrain / 4;
+        }
       }
     }
   } else if (caloriesIn > 0) {
-    // Fallback: 3-meal shape when no individual logs available
     const meals = [
       { slot: timeToSlot(7 * 60),       kcal: caloriesIn * 0.25 },
       { slot: timeToSlot(12 * 60 + 30), kcal: caloriesIn * 0.35 },
@@ -181,101 +199,137 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     ];
     for (const m of meals) {
       const eatSlot = Math.max(0, Math.min(NUM_SLOTS - 1, m.slot));
-      const perSlot = m.kcal / ABSORPTION_SLOTS;
-      for (let s = eatSlot; s < Math.min(eatSlot + ABSORPTION_SLOTS, NUM_SLOTS); s++) {
+      const perSlot = m.kcal / 6;
+      for (let s = eatSlot; s < Math.min(eatSlot + 6, NUM_SLOTS); s++) {
         absorptionPerSlot[s] += perSlot;
-        gutBySlot[s] += m.kcal * (1 - (s - eatSlot) / ABSORPTION_SLOTS);
+        gutBySlot[s] += m.kcal * (1 - (s - eatSlot) / 6);
       }
+      insulinSpikes[eatSlot] += (m.kcal / 1000);
     }
   }
 
-  // ── Build per-slot exercise burn array ────────────────────────────────────
-  const exerciseBurnPerSlot = new Array<number>(NUM_SLOTS).fill(0);
-  let totalExerciseCal = 0;
-
+  // Exercise & Growth Signals
+  let strengthTrainingActive = false;
   const activeLogs = exerciseLogs?.filter(e => !e.ignored) ?? [];
   const logsToUse = activeLogs.length > 0
-    ? activeLogs.map(ex => ({
-        cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
-        durationMin: ex.durationMin || 30,
-        startMin: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
-      }))
-    : (fitbitActivities ?? []).map(act => ({
-        cal: Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80)),
-        durationMin: act.durationMin,
-        startMin: parseHHMM(act.startTime),
-      }));
+    ? activeLogs.map(ex => {
+        if (ex.category === 'strength') strengthTrainingActive = true;
+        return {
+          cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
+          dur: Math.max(15, ex.durationMin || 30),
+          start: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
+          isStrength
+        };
+      })
+    : (fitbitActivities ?? []).map(act => {
+          const isStrength = act.activityName?.toLowerCase().includes('weight') || 
+                            act.activityName?.toLowerCase().includes('lift') || 
+                            act.activityTier === 'tier3_anaerobic';
+          if (isStrength) strengthTrainingActive = true;
+          return {
+            cal: Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80)),
+            dur: Math.max(15, act.durationMin),
+            start: parseHHMM(act.startTime),
+            isStrength
+          };
+      });
 
+  let totalExerciseCal = 0;
   for (const ex of logsToUse) {
     if (ex.cal <= 0) continue;
-    const dur       = Math.max(15, ex.durationMin);
-    const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(ex.startMin)));
-    const numSlots  = Math.max(1, Math.round(dur / INTERVAL_MIN));
+    const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(ex.start)));
+    const numSlots  = Math.max(1, Math.round(ex.dur / INTERVAL_MIN));
     const perSlot   = ex.cal / numSlots;
     for (let s = startSlot; s < Math.min(startSlot + numSlots, NUM_SLOTS); s++) {
       exerciseBurnPerSlot[s] += perSlot;
+      if ((ex as any).isStrength || activeLogs.find(l => l.name === (ex as any).name)?.category === 'strength') {
+        strengthSlots[s] = true;
+      }
     }
     totalExerciseCal += ex.cal;
   }
 
-  const bmrTotal   = Math.max(0, caloriesOut - totalExerciseCal);
-  const bmrPerSlot = bmrTotal / NUM_SLOTS;
+  const bmrPerSlot = Math.max(0, caloriesOut - totalExerciseCal) / NUM_SLOTS;
 
-  // ── Slot-by-slot bucket drain simulation ──────────────────────────────────
   const slots: MetabolicSlotData[] = [];
-  let liverKcal              = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
-  let muscleGlycogenKcal     = Math.min(muscleMax, muscleGlycogenStartKcal);
-  let cumulativeFatBurned    = 0;
-  let cumulativeFatStored    = 0;
-  let cumulativeMuscleLost   = 0;
+  let liverKcal           = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
+  let muscleGlycogenKcal  = Math.min(muscleMax, muscleGlycogenStartKcal);
+  let insulinLevel        = 0;
+  let proteinLevel        = 0; // Amino acid availability (MPS window)
+  let caffeineLevel       = 0;
+  let cumulativeFatBurned  = 0;
+  let cumulativeFatStored  = 0;
+  let cumulativeMuscleLost = 0;
   let cumulativeGlycogenDrawn = 0;
+  let cumulativeAnabolicPotential = 0;
 
   for (let s = 0; s < NUM_SLOTS; s++) {
+    // 1. Decay and Update Hormones/Drugs/Nutrients
+    insulinLevel = Math.max(0, (insulinLevel + (insulinSpikes[s] || 0)) - (INSULIN_DECAY_RATE * sensitivityMultiplier));
+    insulinLevel = Math.min(1.0, insulinLevel);
+
+    // Protein decay: 20g+ clears in ~4-5 hours
+    proteinLevel = (proteinLevel * 0.9) + (proteinSpikes[s] || 0);
+    proteinLevel = Math.min(1.0, proteinLevel);
+
+    caffeineLevel = (caffeineLevel * 0.965) + (caffeineIntake[s] || 0);
+
+    // 2. Calculate Efficiency & Growth Signals
+    const caffeineBoost = Math.min(0.20, (caffeineLevel / 100) * 0.05);
+    // Hydration Drag: Alcohol processing (liverAlcoholDrain > 0) imposes a 5% systemic efficiency penalty
+    const hydrationDrag = liverAlcoholDrain[s] > 0 ? 0.95 : 1.0;
+    const fatOxEfficiency = Math.max(0, (1.0 - insulinLevel) * hrvMultiplier * (1.0 + caffeineBoost) * hydrationDrag);
+
+    // Anabolic Signal Model (MPS)
+    // - Requires amino acid availability (proteinLevel)
+    // - Boosted by strength training stimulus (strengthTrainingActive)
+    // - Taxed by alcohol (mTOR inhibition)
+    // - INTERFERENCE WINDOW: Alcohol within 4 hours (16 slots) of strength work is 2x as destructive (50% tax vs 30%)
+    let currentAlcoholTax = 1.0;
+    if (liverAlcoholDrain[s] > 0) {
+      const windowSlots = 16; // 4 hours
+      let inInterferenceWindow = false;
+      for (let i = Math.max(0, s - windowSlots); i <= s; i++) {
+        if (strengthSlots[i]) { inInterferenceWindow = true; break; }
+      }
+      currentAlcoholTax = inInterferenceWindow ? 0.5 : 0.7;
+    }
+    
+    const trainingBoost = strengthTrainingActive ? 1.5 : 1.0;
+    const anabolicSignal = Math.min(1.0, proteinLevel * trainingBoost * currentAlcoholTax);
+
     const burnThisSlot       = bmrPerSlot + exerciseBurnPerSlot[s];
     const absorptionThisSlot = absorptionPerSlot[s];
-    const gutRemaining       = gutBySlot[s];  // unabsorbed food in gut at this slot
+    const gutRemaining       = gutBySlot[s];
 
-    // Step 1: absorbed calories cover burn first
     const gutContribution = Math.min(absorptionThisSlot, burnThisSlot);
     let remaining         = burnThisSlot - gutContribution;
 
-    // Step 2: fat faucet — PAUSED while gut is non-empty (insulin suppresses lipolysis)
-    let fatContribution = 0;
-    if (gutRemaining <= 0 && remaining > 0) {
-      fatContribution = Math.min(remaining, fatFaucetPerSlot);
-    }
+    const fatFaucetPerSlot = (alpertNumber / 24 / 4) * fatOxEfficiency;
+    const fatContribution  = Math.min(remaining, fatFaucetPerSlot);
     remaining -= fatContribution;
 
-    // Step 3: liver glycogen fills remaining requirement
+    const currentLiverDrain = liverAlcoholDrain[s];
     const liverContribution = Math.min(remaining, liverKcal);
-    liverKcal = Math.max(0, liverKcal - liverContribution);
-    // Replenish liver from carb fraction of absorbed calories — track actual refill (limited by headroom)
+    liverKcal = Math.max(0, liverKcal - liverContribution - currentLiverDrain);
     const liverRefillAmt = Math.min(LIVER_MAX_KCAL - liverKcal, absorptionThisSlot * 0.06);
     liverKcal += liverRefillAmt;
     remaining -= liverContribution;
 
-    // Step 4: muscle glycogen — intramuscular stores, primary exercise buffer
-    // Prevents muscle protein catabolism during exercise when liver is depleted.
     const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
     muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
-    // Replenish from dietary carbs — track actual refill (limited by headroom)
     const muscleRefillAmt = Math.min(muscleMax - muscleGlycogenKcal, absorptionThisSlot * 0.15);
     muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
-    // Step 5: muscle protein catabolism (true last resort — all glycogen exhausted)
     const muscleContribution = Math.max(0, remaining);
-
-    // Surplus: excess absorption above burn, minus what was routed to glycogen replenishment.
-    // Glycogen refill calories were already counted above — excluding them prevents double-counting
-    // them as fat storage. Post-exercise meals with depleted glycogen tanks will now correctly show
-    // most of the surplus going to glycogen, not fat.
     const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
 
     cumulativeFatBurned     += fatContribution;
     cumulativeFatStored     += fatStoredThisSlot;
     cumulativeMuscleLost    += muscleContribution;
     cumulativeGlycogenDrawn += liverContribution + muscleGlycoContribution;
+    cumulativeAnabolicPotential += anabolicSignal;
 
     slots.push({
       slot: s,
@@ -285,10 +339,15 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       muscleGlycogenContribution: Math.round(muscleGlycoContribution),
       muscleContribution:         Math.round(muscleContribution),
       fatStoredThisSlot:          Math.round(fatStoredThisSlot),
+      insulinLevel:               Number(insulinLevel.toFixed(2)),
+      fatOxEfficiency:            Number(fatOxEfficiency.toFixed(2)),
+      anabolicSignal:             Number(anabolicSignal.toFixed(2)),
+      caffeineLevel:              Math.round(caffeineLevel),
       cumulativeFatBurned:        Math.round(cumulativeFatBurned),
       cumulativeFatStored:        Math.round(cumulativeFatStored),
       cumulativeMuscleLost:       Math.round(cumulativeMuscleLost),
       cumulativeGlycogenDrawn:    Math.round(cumulativeGlycogenDrawn),
+      cumulativeAnabolicPotential: Number(cumulativeAnabolicPotential.toFixed(2)),
       gutKcal:                    Math.round(gutRemaining),
       liverKcal:                  Math.round(liverKcal),
       muscleGlycogenKcal:         Math.round(muscleGlycogenKcal),
@@ -296,18 +355,15 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     });
   }
 
-  const totalFatBurned     = Math.round(cumulativeFatBurned);
-  const totalFatStored     = Math.round(cumulativeFatStored);
-  const totalMuscleLost    = Math.round(cumulativeMuscleLost);
-  const totalGlycogenDrawn = Math.round(cumulativeGlycogenDrawn);
-
   return {
     slots,
-    totalFatBurned,
-    totalFatStored,
-    totalMuscleLost,
-    totalGlycogenDrawn,
+    totalFatBurned: Math.round(cumulativeFatBurned),
+    totalFatStored: Math.round(cumulativeFatStored),
+    totalMuscleLost: Math.round(cumulativeMuscleLost),
+    totalGlycogenDrawn: Math.round(cumulativeGlycogenDrawn),
+    totalOmega3Mg,
+    totalAnabolicPotential: Number(cumulativeAnabolicPotential.toFixed(2)),
     muscleGlycogenMaxKcal: muscleMax,
-    score: computeMetabolicScore(totalFatBurned, totalFatStored, totalMuscleLost),
+    score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost),
   };
 }

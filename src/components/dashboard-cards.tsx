@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle, Activity, TrendingUp } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { ouraService } from '@/lib/oura-service';
@@ -14,7 +14,7 @@ import { syncOuraData, disconnectOura, OuraSyncResult } from '@/app/actions/oura
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
-import { runMetabolicSimulation } from '@/lib/metabolic-engine';
+import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -278,6 +278,30 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         if (projectedDaily <= alpertNumber) return null;
         return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
     }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
+
+  // Run the metabolic simulation for the selected day
+  const simulationResult = React.useMemo(() => {
+    if (!data || dailyCaloriesOut <= 0) return null;
+    const muscleMax = computeMuscleGlycogenMaxKcal(data.weightKg, data.bodyFatPct);
+    return runMetabolicSimulation({
+      caloriesOut: dailyCaloriesOut,
+      alpertNumber,
+      foodLogs: todayFoodLogs ?? [],
+      exerciseLogs: todayExerciseLogs ?? [],
+      fitbitActivities: fitbitActivities ?? [],
+      caloriesIn: dailyCaloriesIn,
+      muscleGlycogenMaxKcal: muscleMax,
+      morningGlycogenPct,
+      hasCreatine: prefs?.hasCreatine,
+    });
+  }, [data, dailyCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.hasCreatine]);
+
+  const nowSlot = React.useMemo(() => {
+    if (!isViewingToday) return null;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return Math.max(0, Math.min(96 - 1, Math.round((nowMin - 6 * 60) / 15)));
+  }, [isViewingToday]);
 
   if (isLoading) {
     return (
@@ -764,6 +788,30 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </CardContent>
           </Card>
 
+          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
+            <CardContent className="p-6 sm:p-10">
+              <div className="flex justify-between items-start mb-4">
+                <div className="p-3 bg-red-100 rounded-xl shadow-sm">
+                  <Activity className="w-6 h-6 text-red-600" />
+                </div>
+                {simulationResult && simulationResult.slots[nowSlot || simulationResult.slots.length-1]?.anabolicSignal > 0.5 && (
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+                )}
+              </div>
+              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Performance Audit</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Anabolic Signal (MPS Potential)</p>
+              <div className="flex items-end gap-2">
+                <h4 className="text-4xl font-black italic uppercase tracking-tighter">
+                  {simulationResult 
+                    ? `${Math.round(simulationResult.slots[nowSlot || simulationResult.slots.length-1].anabolicSignal * 100)}%` 
+                    : 'N/A'}
+                </h4>
+                <span className="text-[10px] font-black uppercase text-muted-foreground mb-1.5 opacity-60 tracking-widest">Growth</span>
+              </div>
+              <div className="mt-4 h-1 w-12 bg-red-200 rounded-full" />
+            </CardContent>
+          </Card>
+
         </div>
 
         {/* Charts section */}
@@ -780,6 +828,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           isViewingToday={isViewingToday}
           alpertNumber={alpertNumber}
           fitbitActivities={fitbitActivities}
+          hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
+          hasCreatine={prefs?.hasCreatine}
         />
       </div>
 

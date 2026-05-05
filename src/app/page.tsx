@@ -43,6 +43,9 @@ const AboutView = dynamic(() => import('@/components/about-view').then(m => ({ d
   ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
+const OnboardingTutorial = dynamic(() => import('@/components/onboarding-tutorial').then(m => ({ default: m.OnboardingTutorial })), {
+  ssr: false,
+});
 
 /** Must match SYNC_INTERVAL_MS in fitbit-sync.ts — 6 hours. */
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -55,6 +58,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('chat');
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const hasSyncedFitbit = useRef(false);
   const hasBackfilledFitbit = useRef(false);
 
@@ -120,7 +124,18 @@ export default function Home() {
     if (saved && ['chat', 'daily', 'history', 'assets', 'about'].includes(saved)) {
       setActiveTab(saved);
     }
-  }, []);
+
+    // Check if tutorial has been seen
+    const tutorialSeen = localStorage.getItem('cfo_tutorialSeen');
+    if (!tutorialSeen && user) {
+      setShowTutorial(true);
+    }
+  }, [user]);
+
+  const handleTutorialComplete = () => {
+    setShowTutorial(false);
+    localStorage.setItem('cfo_tutorialSeen', 'true');
+  };
 
   const handleTabChange = useCallback((tab: string) => {
     setActiveTab(tab);
@@ -350,6 +365,10 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl overflow-hidden md:border-x">
+      <OnboardingTutorial 
+        isOpen={showTutorial} 
+        onComplete={handleTutorialComplete} 
+      />
       <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary text-white rounded-xl shadow-md">

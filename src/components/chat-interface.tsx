@@ -579,6 +579,68 @@ export function ChatInterface() {
           <div ref={scrollRef} className="h-4" />
         </div>
       </ScrollArea>
+
+      {/* Suggested Actions / Quick Replies */}
+      {!isLoading && messages.length <= 1 && (
+        <div className="px-4 pb-2 flex gap-2 overflow-x-auto no-scrollbar">
+          {!healthData?.onboardingComplete ? (
+            <>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("I'm trying to reduce visceral fat."); }}
+              >
+                Reduce Visceral Fat
+              </Button>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("I want to build lean muscle."); }}
+              >
+                Build Muscle
+              </Button>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("I have some home gym equipment."); }}
+              >
+                I have a gym
+              </Button>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("How does the point system work?"); }}
+              >
+                How it works
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("I just finished a workout."); }}
+              >
+                Log Workout
+              </Button>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("I just ate a healthy meal."); }}
+              >
+                Log Meal
+              </Button>
+              <Button 
+                variant="outline" size="sm" 
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
+                onClick={() => { setInput("What's my status today?"); }}
+              >
+                Daily Audit
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       {InputBar}
     </div>
   );
