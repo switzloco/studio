@@ -164,17 +164,18 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   }
 
   // Rule 5: Omega-3 Sensitivity Bonus
-  // High O3 intake (1000mg+) offsets systemic inflammation and improves sensitivity.
+  // Moderate chronic effect on insulin sensitivity; acknowledged as a minor "lubricant" for fat oxidation.
   let omega3Bonus = 0;
   if (input.foodLogs) {
     const totalO3 = input.foodLogs.reduce((sum, f) => sum + (f.omega3Mg || 0), 0);
-    if (totalO3 >= 2000) omega3Bonus = 10;
-    else if (totalO3 >= 1000) omega3Bonus = 5;
+    if (totalO3 >= 2000) omega3Bonus = 3;
+    else if (totalO3 >= 1000) omega3Bonus = 1;
   }
   score += omega3Bonus;
 
   // Rule 6: Seed Oil Nudge
-  const seedOilPenalty = seedOilMeals * -5;
+  // Mild inflammation signal; represents systemic friction.
+  const seedOilPenalty = seedOilMeals * -2;
   score += seedOilPenalty;
 
   // Clamp worst case at -200
