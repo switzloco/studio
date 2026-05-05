@@ -265,18 +265,19 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
   // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
   // If deficit so far > (alpertNumber × hoursElapsed / 24), the pace is unsustainable.
-  const alpertPace = React.useMemo(() => {
-    if (!data || !isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
-    const now = new Date();
-    const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-    if (hoursElapsed < 1) return null; // too early to project
-    const hourlyBudget = alpertNumber / 24;
-    const budgetSoFar = alpertNumber * (hoursElapsed / 24);
-    if (alpertDeficit <= budgetSoFar) return null; // on pace, no warning
-    const currentHourlyRate = alpertDeficit / hoursElapsed;
-    const projectedDaily = Math.round(currentHourlyRate * 24);
-    return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
-  }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
+    const alpertPace = React.useMemo(() => {
+        if (!data || !isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
+        const now = new Date();
+        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+        if (hoursElapsed < 4) return null; // Wait until 10 AM to start warnings (prevents early morning noise)
+        const hourlyBudget = alpertNumber / 24;
+        const budgetSoFar = alpertNumber * (hoursElapsed / 24);
+        if (alpertDeficit <= budgetSoFar * 1.15) return null; // 15% grace buffer
+        const currentHourlyRate = alpertDeficit / hoursElapsed;
+        const projectedDaily = Math.round(currentHourlyRate * 24);
+        if (projectedDaily <= alpertNumber) return null;
+        return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
+    }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
 
   if (isLoading) {
     return (
@@ -641,7 +642,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <p className="text-[11px] font-black uppercase tracking-[0.25em] opacity-70">{isViewingToday ? "Today's Score" : "Day's Score"}</p>
-                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Alpert Fat Burn Index</p>
+                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Fat Burn Index</p>
                 </div>
                 <div className="p-2.5 bg-white/15 rounded-xl">
                   <Zap className="w-5 h-5" />
@@ -662,7 +663,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
               <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
                 <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0 ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}` : 'Log food to calculate'}</span>
-                <span>Alpert max: {alpertNumber.toLocaleString()} kcal</span>
+                <span>Max burn: {alpertNumber.toLocaleString()} kcal</span>
               </div>
             </div>
             {(scoreHasFoodPending || scoreHasDevicePending) && (
@@ -683,7 +684,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   </p>
                   <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
                     Burning at {alpertPace.currentHourlyRate} kcal/hr vs {alpertPace.hourlyBudget} kcal/hr ceiling.
-                    Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds Alpert max of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
+                    Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds max burn of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
                   </p>
                 </div>
               </div>
