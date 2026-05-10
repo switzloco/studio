@@ -7,10 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Briefcase, Dumbbell, ScanLine, MessageSquare, CheckCircle2, Loader2 } from 'lucide-react';
-
-// Replace with your Formspree form ID: https://formspree.io
-const FORMSPREE_ENDPOINT = 'https://formspree.io/f/YOUR_FORM_ID';
+import { Briefcase, Dumbbell, ScanLine, MessageSquare, CheckCircle2, Loader2, ExternalLink, Activity } from 'lucide-react';
+import { submitContactForm } from '@/app/actions/contact';
 
 type FormStatus = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -24,12 +22,8 @@ export function AboutView() {
     e.preventDefault();
     setStatus('submitting');
     try {
-      const res = await fetch(FORMSPREE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ name, email, message }),
-      });
-      if (res.ok) {
+      const res = await submitContactForm({ name, email, message });
+      if (res.success) {
         setStatus('success');
         setName('');
         setEmail('');
@@ -101,6 +95,49 @@ export function AboutView() {
               This app is very much in beta. It&apos;s a sandbox for me to stay compliant with my own health protocols while experimenting with some new coding tools behind the scenes.
             </p>
           </CardContent>
+        </Card>
+      </div>
+
+      {/* Monetization / Hardware Recommendations */}
+      <div className="space-y-4">
+        <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Hardware & Data Accuracy</h3>
+        
+        <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all">
+          <CardContent className="p-6 md:p-8 space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 rounded-xl shrink-0">
+                <Activity className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black uppercase tracking-widest text-foreground">BodySpec DEXA Scans</h4>
+                <p className="text-xs font-medium text-muted-foreground mt-0.5">The gold standard for body composition.</p>
+              </div>
+            </div>
+            <p className="text-sm font-medium text-muted-foreground leading-relaxed">
+              If you want to truly audit your physique, you can&apos;t rely on smart scales. A DEXA scan gives you clinical-grade accuracy on visceral fat, bone density, and muscle mass. We use this data to calibrate the metabolic engine to your exact biology.
+            </p>
+            <Button asChild variant="outline" className="w-full sm:w-auto font-black uppercase tracking-widest text-xs border-2 mt-2">
+              <a href="https://www.bodyspec.com/" target="_blank" rel="noopener noreferrer">
+                Book a Scan (Affiliate) <ExternalLink className="w-3 h-3 ml-2" />
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Substack link */}
+      <div className="space-y-4">
+        <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Read The Blog</h3>
+        <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all group">
+          <Link href="https://nickswitzer1.substack.com/" target="_blank" rel="noopener noreferrer">
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-black uppercase tracking-widest text-foreground group-hover:text-primary transition-colors">Nick Switzer&apos;s Substack</h4>
+                <p className="text-xs font-medium text-muted-foreground mt-0.5">Where I write about fitness, protocols, and building this app.</p>
+              </div>
+              <ExternalLink className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </CardContent>
+          </Link>
         </Card>
       </div>
 
