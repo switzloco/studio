@@ -72,6 +72,7 @@ export interface MetabolicEngineParams {
   hasCreatine?: boolean;
   weightKg?: number;
   bodyFatPct?: number;
+  muscleGlycogenMaxKcal?: number;
 }
 
 export interface MetabolicSlotData {
@@ -218,7 +219,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
           cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
           dur: Math.max(15, ex.durationMin || 30),
           start: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
-          isStrength
+          isStrength: ex.category === 'strength'
         };
       })
     : (fitbitActivities ?? []).map(act => {

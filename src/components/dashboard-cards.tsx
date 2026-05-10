@@ -292,9 +292,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       caloriesIn: dailyCaloriesIn,
       muscleGlycogenMaxKcal: muscleMax,
       morningGlycogenPct,
-      hasCreatine: prefs?.hasCreatine,
+      hasCreatine: prefs?.profile?.hasCreatine,
     });
-  }, [data, dailyCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.hasCreatine]);
+  }, [data, dailyCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
 
   const nowSlot = React.useMemo(() => {
     if (!isViewingToday) return null;
@@ -829,7 +829,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           alpertNumber={alpertNumber}
           fitbitActivities={fitbitActivities}
           hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
-          hasCreatine={prefs?.hasCreatine}
+          hasCreatine={prefs?.profile?.hasCreatine}
         />
       </div>
 

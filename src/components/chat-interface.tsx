@@ -177,7 +177,7 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, healthLoading, prefsLoading, initDone, user, autoChatEnabled, coachingRequested]);
+  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested]);
 
   useEffect(() => {
     if (scrollRef.current) {

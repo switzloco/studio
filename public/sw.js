@@ -27,6 +27,24 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Share Target — intercept POST from OS share sheet and redirect to GET with params
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.pathname === '/incoming-share' && event.request.method === 'POST') {
+    event.respondWith(
+      (async () => {
+        const formData = await event.request.formData();
+        const title = formData.get('title') || '';
+        const text = formData.get('text') || '';
+        const sharedUrl = formData.get('url') || '';
+        const params = new URLSearchParams({ title, text, url: sharedUrl });
+        return Response.redirect(`/incoming-share?${params.toString()}`, 303);
+      })()
+    );
+    return;
+  }
+});
+
 // Fetch — network-first for navigation & API, cache-first for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event;

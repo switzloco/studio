@@ -22,15 +22,15 @@ The simulation moves beyond simple calories by modeling systemic factors that co
 #### A. Insulin Load (Storage Mode)
 *   **Trigger**: GI-weighted carbohydrate ingestion.
 *   **Impact**: Suppresses fat oxidation efficiency. At `insulinLevel > 0.5`, fat burning effectively stops.
-*   **Sensitivity**: Boosted by 10% if Daily Omega-3 intake ≥ 2000mg.
+*   **Sensitivity**: Acknowledged with a minor **"Metabolic Lubricant" bonus (+1 to +3 points)** if Daily Omega-3 intake ≥ 1000mg.
 
 #### B. HRV (Systemic Readiness)
 *   **Low HRV (<30ms)**: Imposes a **Metabolic Tax (0.85x efficiency)**.
 *   **High HRV (>80ms)**: Grants a **Recovery Bonus (1.10x efficiency)**.
 
-#### C. The Alcohol Interference Window
-*   **Interference Window**: Alcohol within 4 hours of strength work is 2x as destructive (50% tax vs 30% on anabolic signaling). 
-*   **Hydration Drag**: Alcohol processing imposes a 5% systemic efficiency penalty on all metabolic pathways.
+*   **Interference Window**: Alcohol within 4 hours of strength work is highly destructive (50% tax on anabolic signaling). 
+*   **Efficiency Drag**: Alcohol processing imposes a **5% systemic efficiency penalty** (Hydration Drag) on all metabolic pathways until cleared.
+*   **Seed Oil Nudge**: Every seed-oil-heavy meal (fried/processed) adds a **minor inflammation liability (-2 points)** to the daily ledger.
 
 ---
 

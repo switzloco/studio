@@ -103,7 +103,7 @@ export default function Home() {
         console.error('[AutoSync] Failed:', e);
       }
     })();
-  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice]);
+  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice, toast]);
 
   // Backfill historical Fitbit snapshots once per session if yesterday is missing.
   // Silently fires in the background — no toast, no spinner.
@@ -116,7 +116,7 @@ export default function Home() {
     if (hasYesterday) return; // already populated, skip
     hasBackfilledFitbit.current = true;
     backfillFitbitHistory(user.uid).catch(e => console.error('[BackfillFitbit] Failed:', e));
-  }, [user, healthData?.isDeviceVerified, healthData?.fitbitByDate]);
+  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice, healthData?.fitbitByDate]);
 
   // Persist active tab across page reloads (prevents native PTR from resetting to 'chat').
   useEffect(() => {

@@ -366,6 +366,8 @@ export function DashboardCharts({
                 insulinLevel:            s.insulinLevel,
                 fatOxEfficiency:         s.fatOxEfficiency,
                 caffeineLevel:           s.caffeineLevel,
+                anabolicSignal:          s.anabolicSignal,
+                fatStoredThisSlot:       s.fatStoredThisSlot,
                 totalOmega3Mg:           simulationResult.totalOmega3Mg,
             };
         });
@@ -612,6 +614,7 @@ export function DashboardCharts({
                 nowSlot={nowSlot}
                 isLabMode={isLabMode}
                 hrv={hrv}
+                totalAnabolicPotential={simulationResult?.totalAnabolicPotential}
             />
         )}
         </>
@@ -642,6 +645,12 @@ interface BucketSlot {
     fatOxEfficiency: number;
     /** Caffeine level in mg. */
     caffeineLevel: number;
+    /** Anabolic Signal 0-1 (MPS window). */
+    anabolicSignal: number;
+    /** Running total of kcal stored as fat (surplus absorption). */
+    cumulativeFatStored: number;
+    /** Kcal stored as fat in this specific slot. */
+    fatStoredThisSlot: number;
     /** Total Omega-3 mg for the day. */
     totalOmega3Mg: number;
 }
@@ -659,6 +668,7 @@ interface MetabolicBucketsViewProps {
     nowSlot: number | null;
     isLabMode?: boolean;
     hrv?: number;
+    totalAnabolicPotential?: number;
 }
 
 /** Single vertical gauge card used in the top row. */
@@ -697,7 +707,7 @@ function BucketGauge({
 }
 
 export function MetabolicBucketsView({
-    bucketData, alpertNumber, nowSlot, isLabMode, hrv,
+    bucketData, alpertNumber, nowSlot, isLabMode, hrv, totalAnabolicPotential,
 }: MetabolicBucketsViewProps) {
 
     const current = nowSlot != null ? bucketData[nowSlot] : bucketData[bucketData.length - 1];
@@ -962,7 +972,7 @@ export function MetabolicBucketsView({
                         <CardHeader className="pb-2 flex flex-row items-center justify-between">
                             <div>
                                 <CardTitle className="text-[12px] font-black uppercase tracking-widest text-muted-foreground">Anabolic Signal</CardTitle>
-                                <CardDescription className="text-xs font-medium text-emerald-600 font-bold">Daily Potential: {(result.totalAnabolicPotential / 4).toFixed(1)} pts</CardDescription>
+                                <CardDescription className="text-xs font-medium text-emerald-600 font-bold">Daily Potential: {((totalAnabolicPotential || 0) / 4).toFixed(1)} pts</CardDescription>
                             </div>
                             <Zap className="w-4 h-4 text-emerald-500 animate-pulse" />
                         </CardHeader>

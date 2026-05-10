@@ -9,6 +9,16 @@
   "background_color": "#E8EAF6",
   "theme_color": "#3F51B5",
   "categories": ["health", "fitness", "lifestyle"],
+  "share_target": {
+    "action": "/incoming-share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
   "icons": [
     {
       "src": "/icons/icon-72x72.png",
