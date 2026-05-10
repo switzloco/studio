@@ -1,7 +1,5 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export async function sendAdminReportEmail(to: string, subject: string, html: string) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('RESEND_API_KEY not configured — email not sent.');
@@ -9,6 +7,8 @@ export async function sendAdminReportEmail(to: string, subject: string, html: st
     console.log(html);
     return { success: false, error: 'API key missing' };
   }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
   try {
     const { data, error } = await resend.emails.send({
