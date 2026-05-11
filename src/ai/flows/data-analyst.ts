@@ -107,8 +107,8 @@ export const dataAnalystFlow = ai.defineFlow(
   },
   async (input) => {
     const { text } = await ai.generate({
-      // We use Gemini 2.5 Pro for advanced reasoning
-      model: 'googleai/gemini-2.5-pro',
+      // We use Gemini 3 Flash Preview for everything
+      model: 'googleai/gemini-3-flash-preview',
       system: `You are the "Data Analyst" agent for a fitness/health app.
 Your job is to answer complex analytical questions from the user about their fitness data (e.g., comparing days of the week, analyzing variances in calorie burn, spotting long-term trends).
 You have tools to fetch their historical data (up to 180 days) and to calculate statistics (mean, variance, standard deviation).

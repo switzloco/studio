@@ -143,7 +143,7 @@ export const shareIngestionFlow = ai.defineFlow(
 
       // Ask the Coach LLM to parse the raw text
       const { output } = await ai.generate({
-        model: 'googleai/gemini-2.5-flash',
+        model: 'googleai/gemini-3-flash-preview',
         system: SHARE_PARSER_SYSTEM,
         prompt: combinedText,
         output: { schema: ParsedShareDataSchema },
