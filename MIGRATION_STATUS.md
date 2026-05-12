@@ -24,7 +24,7 @@ The app is currently in **Testing** mode in the Google Cloud Console.
 - [x] **Support Link:** Added to footer (mailto:nicholas.switzer@gmail.com).
 - [x] **Branding:** App name should be set to "The CFO" in Google Cloud Console.
 - [x] **Domain Ownership:** Complete. Verification file added to `/public` and meta tag added to `layout.tsx`.
-- [ ] **Verification Submission:** Pending. Once ownership is verified and branding matches, submit for "Restricted Scope" review.
+- [x] **Verification Submission:** In Progress. Branding matches and ownership is configured. Pushing final layout changes to ensure visibility during manual review.
 
 ## 3. How to Sync Data
 - The system checks the `provider` field.
@@ -32,6 +32,6 @@ The app is currently in **Testing** mode in the Google Cloud Console.
 - If `'fitbit'`, it uses the legacy Fitbit REST API.
 
 ## 4. Current Workstream for Next Agents
-1. **Ownership Verification:** When the user provides the Google Search Console code, update the `google` key in `src/app/layout.tsx`.
-2. **Branding Alignment:** Ensure the logo uploaded to the OAuth consent screen matches the one in the app.
+1. **Logs Monitoring:** Monitor Cloud Run logs for `[syncFitbitData]` and `[FitbitService]` markers to debug token refresh failures (401/403).
+2. **Verification File:** Ensure `public/googlee89a7536a417e453.html` is accessible at the root. If 404 persists, verify build inclusion.
 3. **Restricted Scope Verification:** Monitor any feedback from the Google Trust & Safety team regarding "Limited Use" requirements.

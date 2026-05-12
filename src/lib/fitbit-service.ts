@@ -310,7 +310,7 @@ export const fitbitService = {
       const clientSecret = process.env.GOOGLE_HEALTH_CLIENT_SECRET?.trim();
 
       if (!clientId || !clientSecret) {
-        console.warn('[FitbitService] Cannot refresh — no Google credentials. Mock mode.');
+        console.warn(`[FitbitService] Cannot refresh Google token — missing credentials (clientId: ${!!clientId}, clientSecret: ${!!clientSecret})`);
         return null;
       }
 
@@ -344,7 +344,7 @@ export const fitbitService = {
     const clientSecret = process.env.FITBIT_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
-      console.warn('[FitbitService] Cannot refresh — no credentials. Still in mock mode.');
+      console.warn(`[FitbitService] Cannot refresh Fitbit token — missing credentials (clientId: ${!!clientId}, clientSecret: ${!!clientSecret})`);
       return null;
     }
 

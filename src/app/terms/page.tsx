@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 
 export const metadata = {
   title: 'Terms of Service | CFO Fitness',
@@ -58,7 +59,7 @@ export default function TermsPage() {
       </section>
 
       <footer className="mt-12 pt-8 border-t text-sm text-muted-foreground">
-        <a href="/" className="hover:text-foreground">← Back to Dashboard</a>
+        <Link href="/" className="hover:text-foreground">← Back to Dashboard</Link>
       </footer>
     </div>
   );

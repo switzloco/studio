@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 
 export const metadata = {
   title: 'Privacy Policy | CFO Fitness',
@@ -39,8 +40,8 @@ export default function PrivacyPage() {
         </p>
         <ul className="list-disc pl-6 space-y-2 mt-4">
           <li>Sync and display your fitness metrics in your dashboard.</li>
-          <li>Provide AI-powered analysis and recommendations via our "Coach" feature.</li>
-          <li>Help you manage your fitness like a "financial portfolio."</li>
+          <li>Provide AI-powered analysis and recommendations via our &quot;Coach&quot; feature.</li>
+          <li>Help you manage your fitness like a &quot;financial portfolio.&quot;</li>
         </ul>
         <p className="mt-4 font-semibold">
           We do not sell your personal data to third parties.
@@ -50,14 +51,14 @@ export default function PrivacyPage() {
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">4. Data Sharing and Security</h2>
         <p>
-          We use industry-standard security measures to protect your data. Your health data is processed using Google Cloud/Firebase infrastructure and AI models. We only share data with service providers (like LLM providers) necessary to provide the application's core functionality.
+          We use industry-standard security measures to protect your data. Your health data is processed using Google Cloud/Firebase infrastructure and AI models. We only share data with service providers (like LLM providers) necessary to provide the application&apos;s core functionality.
         </p>
       </section>
 
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">5. Google API Disclosure</h2>
         <p>
-          The CFO's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google API Services User Data Policy</a>, including the Limited Use requirements.
+          The CFO&apos;s use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google API Services User Data Policy</a>, including the Limited Use requirements.
         </p>
       </section>
 
@@ -69,7 +70,7 @@ export default function PrivacyPage() {
       </section>
 
       <footer className="mt-12 pt-8 border-t text-sm text-muted-foreground">
-        <a href="/" className="hover:text-foreground">← Back to Dashboard</a>
+        <Link href="/" className="hover:text-foreground">← Back to Dashboard</Link>
       </footer>
     </div>
   );

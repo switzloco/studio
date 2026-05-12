@@ -364,7 +364,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl overflow-hidden md:border-x">
+    <div className="flex flex-col flex-1 w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl md:border-x">
       <OnboardingTutorial 
         isOpen={showTutorial} 
         onComplete={handleTutorialComplete} 

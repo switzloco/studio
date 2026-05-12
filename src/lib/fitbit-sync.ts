@@ -43,41 +43,47 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
     latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt, provider };
     await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
     accessToken = refreshed.accessToken;
+    console.log(`[syncFitbitData] Token refreshed successfully for user ${userId}.`);
   }
 
   let result;
   try {
+    console.log(`[syncFitbitData] Fetching data for user ${userId} (Provider: ${provider})...`);
     result = await fitbitService.syncTodayData(accessToken, localDate, provider);
   } catch (error: any) {
     if (error?.status === 401) {
-      console.warn('[syncFitbitData] Token returned 401 Unauthorized. Attempting immediate refresh...');
+      console.warn(`[syncFitbitData] 401 Unauthorized for user ${userId}. Attempting immediate refresh...`);
       let refreshed;
       try {
         refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken, provider);
       } catch (refreshErr) {
-        console.error('[syncFitbitData] Token refresh threw an error after 401:', refreshErr);
+        console.error(`[syncFitbitData] Token refresh failed for user ${userId} after 401:`, refreshErr);
         return { success: false, reason: 'token_refresh_failed' };
       }
       if (!refreshed) {
-        console.error('[syncFitbitData] Token refresh returned null after 401 — token likely revoked.');
+        console.error(`[syncFitbitData] Token refresh returned null for user ${userId} after 401.`);
         return { success: false, reason: 'token_refresh_failed' };
       }
       latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt, provider };
       await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
       accessToken = refreshed.accessToken;
+      console.log(`[syncFitbitData] Token refreshed after 401. Retrying sync for user ${userId}...`);
       
       try {
         result = await fitbitService.syncTodayData(accessToken, localDate, provider);
       } catch (retryErr) {
-        console.error('[syncFitbitData] Fitbit API call failed on retry after refresh:', retryErr);
+        console.error(`[syncFitbitData] Retry after 401 failed for user ${userId}:`, retryErr);
         return { success: false, reason: 'api_failed' };
       }
     } else {
-      console.error('[syncFitbitData] Fitbit API call failed:', error);
+      console.error(`[syncFitbitData] Fitbit API call failed for user ${userId}:`, error);
       return { success: false, reason: 'api_failed' };
     }
   }
-  if (!result.success) return { success: false, reason: 'api_failed' };
+  if (!result.success) {
+    console.error(`[syncFitbitData] Sync failed for user ${userId}: result.success is false`);
+    return { success: false, reason: 'api_failed' };
+  }
 
   // Build update, deriving recoveryStatus from HRV (same logic as the OAuth callback).
   // Always set lastActiveDate so the dashboard's isNewDay check doesn't reset Fitbit-sourced metrics.

@@ -1,9 +1,10 @@
-import type {Metadata} from 'next';
+import type {Metadata, Viewport} from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { ServiceWorkerRegister } from '@/components/sw-register';
+import Link from 'next/link';
 import pkg from '../../package.json';
 
 const inter = Inter({
@@ -17,7 +18,6 @@ export const metadata: Metadata = {
   title: 'CFO Fitness | Chief Fitness Officer',
   description: 'Manage your body like a high-stakes financial portfolio.',
   manifest: '/manifest.json',
-  themeColor: '#3F51B5',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -33,6 +33,10 @@ export const metadata: Metadata = {
   verification: {
     google: 'googlee89a7536a417e453',
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#3F51B5',
 };
 
 export default function RootLayout({
@@ -52,9 +56,9 @@ export default function RootLayout({
         <footer className="w-full text-center text-[10px] text-muted-foreground py-4 mt-auto border-t flex flex-col gap-1 items-center">
           <p>v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}</p>
           <div className="flex gap-4">
-            <a href="/privacy" className="hover:underline">Privacy Policy</a>
+            <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
             <span>•</span>
-            <a href="/terms" className="hover:underline">Terms of Service</a>
+            <Link href="/terms" className="hover:underline">Terms of Service</Link>
             <span>•</span>
             <a href="mailto:nicholas.switzer@gmail.com" className="hover:underline">Support</a>
           </div>
