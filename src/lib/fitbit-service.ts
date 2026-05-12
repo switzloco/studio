@@ -65,23 +65,146 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
 }
 
 /**
- * Helper for Google Health API v4 requests.
+ * Google Fit REST API v1 — aggregate endpoint.
+ * Uses a single daily bucket so we get one rolled-up value per metric.
+ * @param dataTypeName e.g. 'com.google.step_count.delta'
+ * @param startTimeMillis  UTC ms for window start (local midnight is best)
+ * @param endTimeMillis    UTC ms for window end
  */
-async function googleHealthFetch(dataType: string, accessToken: string, filter?: string): Promise<any> {
-  let url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints`;
-  if (filter) {
-    url += `?filter=${encodeURIComponent(filter)}`;
-  }
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+async function googleFitAggregate(
+  dataTypeName: string,
+  accessToken: string,
+  startTimeMillis: number,
+  endTimeMillis: number,
+): Promise<any> {
+  const res = await fetch(
+    'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        aggregateBy: [{ dataTypeName }],
+        bucketByTime: { durationMillis: endTimeMillis - startTimeMillis },
+        startTimeMillis,
+        endTimeMillis,
+      }),
+    },
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error(`[FitbitService] Google Health API error ${res.status} for ${dataType}:`, body);
-    throw new FitbitApiError(res.status, url, `Google Health API ${res.status}: ${body}`);
+    console.error(`[FitbitService] Google Fit API error ${res.status} for ${dataTypeName}:`, body);
+    throw new FitbitApiError(res.status, `googlefit:${dataTypeName}`, `Google Fit API ${res.status}: ${body}`);
   }
   return res.json();
 }
+
+/** Sum all intVal data points across every bucket in a Google Fit aggregate response. */
+function fitSumInt(data: any): number {
+  let total = 0;
+  for (const bucket of (data?.bucket ?? [])) {
+    for (const dataset of (bucket?.dataset ?? [])) {
+      for (const point of (dataset?.point ?? [])) {
+        total += point?.value?.[0]?.intVal ?? 0;
+      }
+    }
+  }
+  return total;
+}
+
+/** Sum all fpVal data points across every bucket in a Google Fit aggregate response. */
+function fitSumFp(data: any): number {
+  let total = 0;
+  for (const bucket of (data?.bucket ?? [])) {
+    for (const dataset of (bucket?.dataset ?? [])) {
+      for (const point of (dataset?.point ?? [])) {
+        total += point?.value?.[0]?.fpVal ?? 0;
+      }
+    }
+  }
+  return total;
+}
+
+/**
+ * Compute total sleep duration in seconds from a Google Fit sleep segment response.
+ * Sleep segment intVal type codes:
+ *   1 = Awake (within sleep cycle — do NOT count)
+ *   2 = Sleep (generic / unclassified — count)
+ *   3 = Out of bed (do NOT count)
+ *   4 = Light sleep (count)
+ *   5 = Deep sleep (count)
+ *   6 = REM (count)
+ */
+function fitSleepSeconds(data: any): number {
+  const SLEEP_TYPES = new Set([2, 4, 5, 6]);
+  let totalSec = 0;
+  for (const bucket of (data?.bucket ?? [])) {
+    for (const dataset of (bucket?.dataset ?? [])) {
+      for (const point of (dataset?.point ?? [])) {
+        const sleepType = point?.value?.[0]?.intVal ?? 0;
+        if (SLEEP_TYPES.has(sleepType)) {
+          const startMs = Math.round(Number(point.startTimeNanos) / 1_000_000);
+          const endMs   = Math.round(Number(point.endTimeNanos)   / 1_000_000);
+          totalSec += (endMs - startMs) / 1000;
+        }
+      }
+    }
+  }
+  return totalSec;
+}
+
+/**
+ * Convert a YYYY-MM-DD local date string to UTC millisecond boundaries.
+ * Adjusts for the user's local timezone offset so the window matches their local day.
+ * @param dateStr YYYY-MM-DD
+ * @param timezoneOffset Minutes (UTC - local). e.g. 420 for PDT.
+ */
+function dateToUtcMs(dateStr: string, timezoneOffset: number = 0): { startMs: number; endMs: number } {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  // Date.UTC(y, m-1, d) is midnight UTC on that date.
+  // Adding timezoneOffset (in minutes) shifts it to the local midnight in UTC ms.
+  const startMs = Date.UTC(y, m - 1, d) + (timezoneOffset * 60 * 1000);
+  return { startMs, endMs: startMs + 86_400_000 };
+}
+
+/**
+ * Map Google Fit activity type IDs → human-readable names.
+ * Full list: https://developers.google.com/fit/rest/v1/reference/activity-types
+ */
+const GOOGLE_FIT_ACTIVITY_TYPES: Record<number, string> = {
+  0: 'In Vehicle', 1: 'Biking', 2: 'On Foot', 3: 'Still', 4: 'Unknown',
+  5: 'Tilting', 7: 'Walking', 8: 'Running', 9: 'Aerobics', 10: 'Badminton',
+  11: 'Baseball', 12: 'Basketball', 13: 'Biathlon', 14: 'Handbiking',
+  15: 'Mountain Biking', 16: 'Road Biking', 17: 'Spinning', 18: 'Stationary Biking',
+  19: 'Utility Biking', 20: 'Boxing', 21: 'Calisthenics', 22: 'Circuit Training',
+  23: 'Cricket', 24: 'Cross Country Skiing', 25: 'Cross Fit', 26: 'Curling',
+  27: 'Dancing', 28: 'Diving', 29: 'Elliptical', 30: 'Fencing',
+  31: 'Football (American)', 32: 'Football (Australian)', 33: 'Football (Soccer)',
+  34: 'Frisbee', 35: 'Gardening', 36: 'Golf', 37: 'Gymnastics',
+  38: 'Handball', 39: 'Hiking', 40: 'Hockey', 41: 'Horseback Riding',
+  42: 'Housework', 43: 'Jumping Rope', 44: 'Kayaking', 45: 'Kettlebell Training',
+  46: 'Kickboxing', 47: 'Kitesurfing', 48: 'Martial Arts', 49: 'Meditation',
+  50: 'Mixed Martial Arts', 51: 'P90X', 52: 'Paragliding', 53: 'Pilates',
+  54: 'Polo', 55: 'Racquetball', 56: 'Rock Climbing', 57: 'Rowing',
+  58: 'Rowing Machine', 59: 'Rugby', 60: 'Jogging', 61: 'Running on Sand',
+  62: 'Running (Treadmill)', 63: 'Sailing', 64: 'Scuba Diving',
+  65: 'Skateboarding', 66: 'Skating', 67: 'Cross Skating', 68: 'Indoor Skating',
+  69: 'Inline Skating', 70: 'Skiing', 71: 'Back Country Skiing',
+  72: 'Downhill Skiing', 73: 'Kite Skiing', 74: 'Nordic Skiing',
+  75: 'Snowboarding', 76: 'Snowmobile', 77: 'Snowshoeing',
+  78: 'Squash', 79: 'Stair Climbing', 80: 'Stair Climbing Machine',
+  81: 'Stand Up Paddleboarding', 82: 'Strength Training', 83: 'Surfing',
+  84: 'Swimming (Open Water)', 85: 'Swimming (Pool)', 86: 'Table Tennis',
+  87: 'Team Sports', 88: 'Tennis', 89: 'Treadmill (Walking)',
+  90: 'Volleyball (Beach)', 91: 'Volleyball (Indoor)', 92: 'Wakeboarding',
+  93: 'Walking (Fitness)', 94: 'NNordic Walking', 95: 'Walking (Treadmill)',
+  96: 'Waterpolo', 97: 'Weightlifting', 98: 'Wheelchair', 99: 'Windsurfing',
+  100: 'Yoga', 101: 'Zumba', 108: 'Diving', 109: 'Ergometer',
+  110: 'Ice Skating', 111: 'Indoor Cycling', 112: 'Stairmaster',
+  113: 'HIIT', 114: 'Interval Training', 116: 'Walking', 117: 'Swimming',
+};
 
 // Maps lowercase Fitbit activity names → accuracy tier for calorie discount.
 // Default (unrecognized): tier2_steady_state.
@@ -129,28 +252,51 @@ function classifyActivityTier(
  * Fetches Fitbit auto-detected activities for a specific date.
  * Silently returns [] on failure — non-critical for glycogen fallback.
  */
-async function fetchActivitiesForDate(accessToken: string, date: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitActivity[]> {
+async function fetchActivitiesForDate(
+  accessToken: string, 
+  date: string, 
+  provider: 'fitbit' | 'google' = 'fitbit',
+  timezoneOffset?: number
+): Promise<FitbitActivity[]> {
   if (accessToken === 'mock_token') return [];
   try {
     if (provider === 'google') {
-      const startTime = `${date}T00:00:00Z`;
-      const endTime = `${date}T23:59:59Z`;
-      const filter = `exercise.interval.start_time >= "${startTime}" AND exercise.interval.start_time <= "${endTime}"`;
-      const data = await googleHealthFetch('exercise', accessToken, filter);
-      const points = (data as any)?.dataPoints ?? [];
+      // Use a wide window (prev midnight → next midnight UTC) so we don't clip
+      // activities that straddle a local midnight boundary.
+      const { startMs, endMs } = dateToUtcMs(date, timezoneOffset);
+      const data = await googleFitAggregate('com.google.activity.segment', accessToken, startMs, endMs);
+      const activities: FitbitActivity[] = [];
 
-      return points.map((p: any) => {
-        const ex = p.exercise;
-        const start = new Date(ex.interval.startTime);
-        return {
-          activityName: ex.exerciseType || 'Unknown',
-          startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
-          durationMin: Math.round((new Date(ex.interval.endTime).getTime() - start.getTime()) / 60000),
-          calories: ex.calories || 0,
-          averageHeartRate: ex.averageHeartRate || undefined,
-          activityTier: classifyActivityTier(ex.exerciseType || '', undefined, undefined, ex.averageHeartRate),
-        } satisfies FitbitActivity;
-      });
+      for (const bucket of (data?.bucket ?? [])) {
+        for (const dataset of (bucket?.dataset ?? [])) {
+          for (const point of (dataset?.point ?? [])) {
+            const activityTypeId = point?.value?.[0]?.intVal ?? 0;
+            const startMs2 = Math.round(Number(point.startTimeNanos) / 1_000_000);
+            const endMs2   = Math.round(Number(point.endTimeNanos)   / 1_000_000);
+            const durationMin = Math.round((endMs2 - startMs2) / 60_000);
+
+            // Skip trivially short segments (GPS drift, brief pauses, etc.)
+            if (durationMin < 5) continue;
+
+            const activityName = GOOGLE_FIT_ACTIVITY_TYPES[activityTypeId] ?? 'Exercise';
+            const startDate = new Date(startMs2);
+            const hh = String(startDate.getUTCHours()).padStart(2, '0');
+            const mm = String(startDate.getUTCMinutes()).padStart(2, '0');
+
+            activities.push({
+              activityName,
+              startTime: `${hh}:${mm}`,
+              durationMin,
+              // Google Fit activity segments don't carry calorie data — that
+              // lives in com.google.calories.expended. Leave 0; calories come
+              // from the daily total in syncTodayData.
+              calories: 0,
+              activityTier: classifyActivityTier(activityName),
+            } satisfies FitbitActivity);
+          }
+        }
+      }
+      return activities;
     }
 
     const data = await fitbitFetch(
@@ -197,11 +343,12 @@ export const fitbitService = {
 
     if (provider === 'google') {
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || clientId;
+      // Google Fit REST API scopes (fitness.* namespace)
       const scopes = [
-        'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
-        'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
-        'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
-        'https://www.googleapis.com/auth/googlehealth.profile.readonly'
+        'https://www.googleapis.com/auth/fitness.activity.read',
+        'https://www.googleapis.com/auth/fitness.sleep.read',
+        'https://www.googleapis.com/auth/fitness.heart_rate.read',
+        'https://www.googleapis.com/auth/fitness.body.read',
       ].join(' ');
       return `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;
     }
@@ -378,7 +525,12 @@ export const fitbitService = {
    * Uses the provided localDate (YYYY-MM-DD) or 'today'.
    * Returns mock data if the token is the dev mock.
    */
-  async syncTodayData(accessToken: string, localDate?: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitSyncResult> {
+  async syncTodayData(
+    accessToken: string, 
+    localDate?: string, 
+    provider: 'fitbit' | 'google' = 'fitbit',
+    timezoneOffset?: number
+  ): Promise<FitbitSyncResult> {
     const targetDate = localDate || new Date().toISOString().split('T')[0];
     if (accessToken === 'mock_token') {
       return {
@@ -391,28 +543,33 @@ export const fitbitService = {
     }
 
     if (provider === 'google') {
-      const startTime = `${targetDate}T00:00:00Z`;
-      const endTime = `${targetDate}T23:59:59Z`;
+      // UTC ms window for steps/calories — strict 24 h anchored to UTC midnight.
+      const { startMs, endMs } = dateToUtcMs(targetDate, timezoneOffset);
+      // Sleep window is wider (−6 h / +12 h) so overnight sessions that start
+      // before local midnight aren't clipped by the UTC boundary.
+      const sleepStartMs = startMs - 6 * 3_600_000;
+      const sleepEndMs   = endMs   + 12 * 3_600_000;
 
-      const [stepsData, sleepData, hrvData, caloriesData, activities] = await Promise.all([
-        googleHealthFetch('steps', accessToken, `steps.interval.start_time >= "${startTime}" AND steps.interval.start_time <= "${endTime}"`),
-        googleHealthFetch('sleep', accessToken, `sleep.interval.start_time >= "${startTime}" AND sleep.interval.start_time <= "${endTime}"`),
-        googleHealthFetch('daily-heart-rate-variability', accessToken, `daily_heart_rate_variability.interval.start_time >= "${startTime}" AND daily_heart_rate_variability.interval.start_time <= "${endTime}"`),
-        googleHealthFetch('total-calories', accessToken, `total_calories.interval.start_time >= "${startTime}" AND total_calories.interval.start_time <= "${endTime}"`),
-        fetchActivitiesForDate(accessToken, targetDate, 'google'),
+      const [stepsData, sleepData, caloriesData, activities] = await Promise.all([
+        googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
+        googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
+        googleFitAggregate('com.google.calories.expended', accessToken, startMs,      endMs),
+        fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
-      const stepsCount = (stepsData as any)?.dataPoints?.reduce((acc: number, p: any) => acc + (p.steps?.count || 0), 0) ?? 0;
-      const caloriesOut = (caloriesData as any)?.dataPoints?.reduce((acc: number, p: any) => acc + (p.totalCalories?.calories || 0), 0) ?? 0;
-      const sleepDurationSec = (sleepData as any)?.dataPoints?.[0]?.sleep?.sleepSummary?.totalSleepDuration || 0;
-      const hrvValue = (hrvData as any)?.dataPoints?.[0]?.dailyHeartRateVariability?.rmssd || 0;
+      const stepsCount  = fitSumInt(stepsData);
+      const caloriesOut = Math.round(fitSumFp(caloriesData));
+      const sleepSec    = fitSleepSeconds(sleepData);
 
+      // Google Fit has no HRV data type — omit hrv so the metabolic engine
+      // runs at its neutral default (hrvMultiplier = 1.0). Recovery status is
+      // derived from sleep hours by the caller (fitbit-sync.ts).
       return {
         success: true,
-        steps: { value: stepsCount, source: 'device' },
-        sleep: { value: sleepDurationSec / 3600, source: 'device' },
-        hrv: { value: Math.round(hrvValue), source: 'device' },
-        caloriesOut: { value: caloriesOut, source: 'device' },
+        steps:      { value: stepsCount,        source: 'device' },
+        sleep:      { value: sleepSec / 3600,   source: 'device' },
+        hrv:        { value: 0,                 source: 'device' },
+        caloriesOut: caloriesOut > 0 ? { value: caloriesOut, source: 'device' } : undefined,
         activities: activities.length > 0 ? activities : undefined,
         isVerified: true,
       };
@@ -461,21 +618,57 @@ export const fitbitService = {
     }
 
     if (provider === 'google') {
-      const today = new Date().toISOString().split('T')[0];
-      const result = await this.syncTodayData(accessToken, today, 'google');
-      const [weightData, heightData] = await Promise.all([
-        googleHealthFetch('weight', accessToken),
-        googleHealthFetch('height', accessToken),
-      ]);
+      const todayDate = new Date();
+      const todayStr  = todayDate.toISOString().split('T')[0];
 
-      const weight = (weightData as any)?.dataPoints?.[0]?.weight?.kilograms;
-      const height = (heightData as any)?.dataPoints?.[0]?.height?.centimeters;
+      // Backfill the last 7 days so the dashboard has history immediately
+      // after connecting — mirrors what the Fitbit initial sync does.
+      const dailySnapshots: Record<string, import('./health-service').FitbitDailySnapshot> = {};
+      let latestResult: FitbitSyncResult | null = null;
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(todayDate);
+        d.setUTCDate(d.getUTCDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        try {
+          const r = await this.syncTodayData(accessToken, dateStr, 'google');
+          dailySnapshots[dateStr] = {
+            steps:        r.steps.value,
+            sleepHours:   r.sleep.value,
+            // No HRV from Google Fit — derive recoveryStatus from sleep
+            recoveryStatus: r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low',
+            caloriesOut:  r.caloriesOut?.value,
+            activities:   r.activities,
+          };
+          if (i === 0) latestResult = r;
+        } catch (dayErr) {
+          console.warn(`[FitbitService] Google initial sync: skipping ${dateStr}:`, dayErr);
+        }
+      }
+
+      // Fetch body composition — weight in kg, height in metres (×100 → cm)
+      const { startMs: bodyStart, endMs: bodyEnd } = dateToUtcMs(todayStr, undefined); // Offset not strictly needed for body composition but let's be consistent
+      const [weightData, heightData] = await Promise.all([
+        googleFitAggregate('com.google.weight', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),
+        googleFitAggregate('com.google.height', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),
+      ]);
+      const weightKg = fitSumFp(weightData) > 0 ? Math.round(fitSumFp(weightData) * 10) / 10 : undefined;
+      const heightM  = fitSumFp(heightData) > 0 ? fitSumFp(heightData) : undefined;
+
+      const base = latestResult ?? {
+        success: true,
+        steps: { value: 0, source: 'device' as const },
+        sleep: { value: 0, source: 'device' as const },
+        hrv:   { value: 0, source: 'device' as const },
+        isVerified: true,
+      };
 
       return {
-        ...result,
-        weightKg: weight,
-        heightCm: height,
-        dataDate: today,
+        ...base,
+        weightKg,
+        heightCm: heightM ? Math.round(heightM * 100) : undefined,
+        dataDate: todayStr,
+        dailySnapshots,
       };
     }
 
@@ -553,6 +746,6 @@ export const fitbitService = {
       await healthService.saveFitbitCredentials(db, userId, creds);
     }
 
-    return fitbitService.syncTodayData(creds.accessToken, undefined, provider);
+    return fitbitService.syncTodayData(creds.accessToken, undefined, provider, creds.timezoneOffset);
   },
 };

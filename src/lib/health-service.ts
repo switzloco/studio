@@ -136,6 +136,7 @@ export interface FitbitCredentials {
   expiresAt: number; // Unix ms timestamp
   lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
   provider?: 'fitbit' | 'google'; // Indicates which OAuth provider was used
+  timezoneOffset?: number; // Offset in minutes (UTC - local)
 }
 
 export interface OuraCredentials {
