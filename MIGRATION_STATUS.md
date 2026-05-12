@@ -20,6 +20,7 @@ The app is currently in **Testing** mode in the Google Cloud Console.
 
 ### Verification Requirements Checklist:
 - [x] **Privacy Policy:** Created at `/privacy`. Linked in global footer.
+- [x] **Terms of Service:** Created at `/terms`. Linked in global footer.
 - [x] **Support Link:** Added to footer (mailto:nicholas.switzer@gmail.com).
 - [x] **Branding:** App name should be set to "The CFO" in Google Cloud Console.
 - [x] **Domain Ownership:** Complete. Verification file added to `/public` and meta tag added to `layout.tsx`.

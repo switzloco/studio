@@ -54,6 +54,8 @@ export default function RootLayout({
           <div className="flex gap-4">
             <a href="/privacy" className="hover:underline">Privacy Policy</a>
             <span>•</span>
+            <a href="/terms" className="hover:underline">Terms of Service</a>
+            <span>•</span>
             <a href="mailto:nicholas.switzer@gmail.com" className="hover:underline">Support</a>
           </div>
         </footer>
