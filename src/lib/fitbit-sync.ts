@@ -47,9 +47,34 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   let result;
   try {
     result = await fitbitService.syncTodayData(accessToken, localDate);
-  } catch (error) {
-    console.error('[syncFitbitData] Fitbit API call failed:', error);
-    return { success: false, reason: 'api_failed' };
+  } catch (error: any) {
+    if (error?.status === 401) {
+      console.warn('[syncFitbitData] Token returned 401 Unauthorized. Attempting immediate refresh...');
+      let refreshed;
+      try {
+        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken);
+      } catch (refreshErr) {
+        console.error('[syncFitbitData] Token refresh threw an error after 401:', refreshErr);
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+      if (!refreshed) {
+        console.error('[syncFitbitData] Token refresh returned null after 401 — token likely revoked.');
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt };
+      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
+      
+      try {
+        result = await fitbitService.syncTodayData(accessToken, localDate);
+      } catch (retryErr) {
+        console.error('[syncFitbitData] Fitbit API call failed on retry after refresh:', retryErr);
+        return { success: false, reason: 'api_failed' };
+      }
+    } else {
+      console.error('[syncFitbitData] Fitbit API call failed:', error);
+      return { success: false, reason: 'api_failed' };
+    }
   }
   if (!result.success) return { success: false, reason: 'api_failed' };
 
@@ -144,9 +169,34 @@ export async function syncFitbitSnapshot(userId: string, date: string): Promise<
   let result;
   try {
     result = await fitbitService.syncTodayData(accessToken, date);
-  } catch (error) {
-    console.error('[syncFitbitSnapshot] Fitbit API call failed:', error);
-    return { success: false, reason: 'api_failed' };
+  } catch (error: any) {
+    if (error?.status === 401) {
+      console.warn('[syncFitbitSnapshot] Token returned 401 Unauthorized. Attempting immediate refresh...');
+      let refreshed;
+      try {
+        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken);
+      } catch (refreshErr) {
+        console.error('[syncFitbitSnapshot] Token refresh threw an error after 401:', refreshErr);
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+      if (!refreshed) {
+        console.error('[syncFitbitSnapshot] Token refresh returned null after 401 — token likely revoked.');
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt };
+      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
+      
+      try {
+        result = await fitbitService.syncTodayData(accessToken, date);
+      } catch (retryErr) {
+        console.error('[syncFitbitSnapshot] Fitbit API call failed on retry after refresh:', retryErr);
+        return { success: false, reason: 'api_failed' };
+      }
+    } else {
+      console.error('[syncFitbitSnapshot] Fitbit API call failed:', error);
+      return { success: false, reason: 'api_failed' };
+    }
   }
   if (!result.success) return { success: false, reason: 'api_failed' };
 
