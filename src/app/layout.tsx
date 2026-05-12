@@ -30,6 +30,9 @@ export const metadata: Metadata = {
     ],
     apple: '/apple-touch-icon.png',
   },
+  verification: {
+    google: 'YOUR_GOOGLE_VERIFICATION_CODE_HERE',
+  },
 };
 
 export default function RootLayout({
@@ -46,8 +49,13 @@ export default function RootLayout({
         </FirebaseClientProvider>
         <Toaster />
         <ServiceWorkerRegister />
-        <footer className="w-full text-center text-xs text-muted-foreground py-4 mt-auto border-t">
-          v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}
+        <footer className="w-full text-center text-[10px] text-muted-foreground py-4 mt-auto border-t flex flex-col gap-1 items-center">
+          <p>v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}</p>
+          <div className="flex gap-4">
+            <a href="/privacy" className="hover:underline">Privacy Policy</a>
+            <span>•</span>
+            <a href="mailto:nicholas.switzer@gmail.com" className="hover:underline">Support</a>
+          </div>
         </footer>
       </body>
     </html>
