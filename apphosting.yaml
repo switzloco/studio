@@ -44,6 +44,12 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  
+  - variable: NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID
+    value: "473903412658-olu2depq9l2fh5j460l9j61fhmblnkgj.apps.googleusercontent.com"
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: GOOGLE_GENAI_API_KEY
     secret: GOOGLE_GENAI_API_KEY
@@ -63,6 +69,11 @@ env:
 
   - variable: OURA_CLIENT_SECRET
     secret: OURA_CLIENT_SECRET
+    availability:
+      - RUNTIME
+
+  - variable: GOOGLE_HEALTH_CLIENT_SECRET
+    secret: GOOGLE_HEALTH_CLIENT_SECRET
     availability:
       - RUNTIME
 

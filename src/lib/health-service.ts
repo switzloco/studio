@@ -135,6 +135,7 @@ export interface FitbitCredentials {
   fitbitUserId: string;
   expiresAt: number; // Unix ms timestamp
   lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
+  provider?: 'fitbit' | 'google'; // Indicates which OAuth provider was used
 }
 
 export interface OuraCredentials {

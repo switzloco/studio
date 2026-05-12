@@ -64,6 +64,25 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
   return res.json();
 }
 
+/**
+ * Helper for Google Health API v4 requests.
+ */
+async function googleHealthFetch(dataType: string, accessToken: string, filter?: string): Promise<any> {
+  let url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints`;
+  if (filter) {
+    url += `?filter=${encodeURIComponent(filter)}`;
+  }
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error(`[FitbitService] Google Health API error ${res.status} for ${dataType}:`, body);
+    throw new FitbitApiError(res.status, url, `Google Health API ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
 // Maps lowercase Fitbit activity names → accuracy tier for calorie discount.
 // Default (unrecognized): tier2_steady_state.
 const ACTIVITY_TIER_MAP: Record<string, FitbitActivity['activityTier']> = {
@@ -110,9 +129,30 @@ function classifyActivityTier(
  * Fetches Fitbit auto-detected activities for a specific date.
  * Silently returns [] on failure — non-critical for glycogen fallback.
  */
-async function fetchActivitiesForDate(accessToken: string, date: string): Promise<FitbitActivity[]> {
+async function fetchActivitiesForDate(accessToken: string, date: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitActivity[]> {
   if (accessToken === 'mock_token') return [];
   try {
+    if (provider === 'google') {
+      const startTime = `${date}T00:00:00Z`;
+      const endTime = `${date}T23:59:59Z`;
+      const filter = `exercise.interval.start_time >= "${startTime}" AND exercise.interval.start_time <= "${endTime}"`;
+      const data = await googleHealthFetch('exercise', accessToken, filter);
+      const points = (data as any)?.dataPoints ?? [];
+
+      return points.map((p: any) => {
+        const ex = p.exercise;
+        const start = new Date(ex.interval.startTime);
+        return {
+          activityName: ex.exerciseType || 'Unknown',
+          startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+          durationMin: Math.round((new Date(ex.interval.endTime).getTime() - start.getTime()) / 60000),
+          calories: ex.calories || 0,
+          averageHeartRate: ex.averageHeartRate || undefined,
+          activityTier: classifyActivityTier(ex.exerciseType || '', undefined, undefined, ex.averageHeartRate),
+        } satisfies FitbitActivity;
+      });
+    }
+
     const data = await fitbitFetch(
       `/1/user/-/activities/list.json?afterDate=${date}&sort=asc&limit=20&offset=0`,
       accessToken,
@@ -121,7 +161,6 @@ async function fetchActivitiesForDate(accessToken: string, date: string): Promis
     return raw
       .filter((a: any) => {
         if (!a.startTime) return false;
-        // Only include activities whose local start date matches the target date.
         return new Date(a.startTime).toLocaleDateString('en-CA') === date;
       })
       .map((a: any) => {
@@ -150,16 +189,24 @@ export const fitbitService = {
   /**
    * Generates the authorization URL for the client.
    */
-  getAuthUrl(userId: string): string {
+  getAuthUrl(userId: string, provider: 'fitbit' | 'google' = 'google'): string {
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
     const redirectUri = `${origin}/api/auth/fitbit/callback`;
+    const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri, provider }));
+
+    if (provider === 'google') {
+      const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || clientId;
+      const scopes = [
+        'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+        'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+        'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+        'https://www.googleapis.com/auth/googlehealth.profile.readonly'
+      ].join(' ');
+      return `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;
+    }
+
     const scope = 'activity heartrate sleep profile';
-    // Encode both userId and the exact redirectUri in state so the callback
-    // uses the identical redirect_uri for the token exchange (prevents mismatch).
-    const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri }));
-    // expires_in=31536000 requests a 1-year access token (Fitbit max).
-    // The Auth Code flow only accepts 31536000 for long-lived tokens; 30 days (2592000) falls back to 8 hours, forcing daily reconnects.
     return `https://api.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=31536000&state=${state}`;
   },
 
@@ -169,8 +216,51 @@ export const fitbitService = {
    */
   async exchangeCodeForTokens(
     code: string,
-    redirectUri: string
+    redirectUri: string,
+    provider: 'fitbit' | 'google' = 'google'
   ): Promise<FitbitCredentials | null> {
+    if (provider === 'google') {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID?.trim();
+      const clientSecret = process.env.GOOGLE_HEALTH_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) {
+        console.warn('[FitbitService] Missing Google credentials — running in mock mode.');
+        return {
+          accessToken: 'mock_token',
+          refreshToken: 'mock_refresh',
+          fitbitUserId: 'mock_google_user',
+          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          provider: 'google'
+        };
+      }
+
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        }).toString()
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.text().catch(() => 'No body');
+        console.error(`[FitbitService] Google Token exchange failed: Status ${res.status}, Body: ${errorBody}`);
+        return null;
+      }
+
+      const data = await res.json();
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        fitbitUserId: 'google_health_user',
+        expiresAt: Date.now() + data.expires_in * 1000,
+        provider: 'google'
+      };
+    }
+
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID?.trim();
     const clientSecret = process.env.FITBIT_CLIENT_SECRET?.trim();
 
@@ -181,6 +271,7 @@ export const fitbitService = {
         refreshToken: 'mock_refresh',
         fitbitUserId: 'mock_fitbit_user',
         expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        provider: 'fitbit'
       };
     }
 
@@ -206,13 +297,49 @@ export const fitbitService = {
       refreshToken: data.refresh_token,
       fitbitUserId: data.user_id,
       expiresAt: Date.now() + data.expires_in * 1000,
+      provider: 'fitbit'
     };
   },
 
   /**
    * Uses the refresh token to get a new access token before it expires.
    */
-  async refreshAccessToken(refreshToken: string): Promise<FitbitCredentials | null> {
+  async refreshAccessToken(refreshToken: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitCredentials | null> {
+    if (provider === 'google') {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID?.trim();
+      const clientSecret = process.env.GOOGLE_HEALTH_CLIENT_SECRET?.trim();
+
+      if (!clientId || !clientSecret) {
+        console.warn('[FitbitService] Cannot refresh — no Google credentials. Mock mode.');
+        return null;
+      }
+
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: clientId,
+          client_secret: clientSecret
+        }).toString()
+      });
+
+      if (!res.ok) {
+        console.error('[FitbitService] Google Token refresh failed:', res.status, await res.text());
+        return null;
+      }
+
+      const data = await res.json();
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || refreshToken,
+        fitbitUserId: 'google_health_user',
+        expiresAt: Date.now() + data.expires_in * 1000,
+        provider: 'google'
+      };
+    }
+
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
     const clientSecret = process.env.FITBIT_CLIENT_SECRET;
 
@@ -242,6 +369,7 @@ export const fitbitService = {
       refreshToken: data.refresh_token,
       fitbitUserId: data.user_id,
       expiresAt: Date.now() + data.expires_in * 1000,
+      provider: 'fitbit'
     };
   },
 
@@ -250,8 +378,7 @@ export const fitbitService = {
    * Uses the provided localDate (YYYY-MM-DD) or 'today'.
    * Returns mock data if the token is the dev mock.
    */
-  async syncTodayData(accessToken: string, localDate?: string): Promise<FitbitSyncResult> {
-    // Fitbit API requires YYYY-MM-DD — it does NOT accept 'today' as a keyword.
+  async syncTodayData(accessToken: string, localDate?: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitSyncResult> {
     const targetDate = localDate || new Date().toISOString().split('T')[0];
     if (accessToken === 'mock_token') {
       return {
@@ -263,15 +390,39 @@ export const fitbitService = {
       };
     }
 
-    // Fetch all endpoints in parallel. Individual endpoints may return null (204 /
-    // no data today) — that's fine. If a request throws (auth error, rate limit)
-    // we let it propagate so the caller knows. Activities are non-critical:
-    // failure is caught inside fetchActivitiesForDate and returns [].
+    if (provider === 'google') {
+      const startTime = `${targetDate}T00:00:00Z`;
+      const endTime = `${targetDate}T23:59:59Z`;
+
+      const [stepsData, sleepData, hrvData, caloriesData, activities] = await Promise.all([
+        googleHealthFetch('steps', accessToken, `steps.interval.start_time >= "${startTime}" AND steps.interval.start_time <= "${endTime}"`),
+        googleHealthFetch('sleep', accessToken, `sleep.interval.start_time >= "${startTime}" AND sleep.interval.start_time <= "${endTime}"`),
+        googleHealthFetch('daily-heart-rate-variability', accessToken, `daily_heart_rate_variability.interval.start_time >= "${startTime}" AND daily_heart_rate_variability.interval.start_time <= "${endTime}"`),
+        googleHealthFetch('total-calories', accessToken, `total_calories.interval.start_time >= "${startTime}" AND total_calories.interval.start_time <= "${endTime}"`),
+        fetchActivitiesForDate(accessToken, targetDate, 'google'),
+      ]);
+
+      const stepsCount = (stepsData as any)?.dataPoints?.reduce((acc: number, p: any) => acc + (p.steps?.count || 0), 0) ?? 0;
+      const caloriesOut = (caloriesData as any)?.dataPoints?.reduce((acc: number, p: any) => acc + (p.totalCalories?.calories || 0), 0) ?? 0;
+      const sleepDurationSec = (sleepData as any)?.dataPoints?.[0]?.sleep?.sleepSummary?.totalSleepDuration || 0;
+      const hrvValue = (hrvData as any)?.dataPoints?.[0]?.dailyHeartRateVariability?.rmssd || 0;
+
+      return {
+        success: true,
+        steps: { value: stepsCount, source: 'device' },
+        sleep: { value: sleepDurationSec / 3600, source: 'device' },
+        hrv: { value: Math.round(hrvValue), source: 'device' },
+        caloriesOut: { value: caloriesOut, source: 'device' },
+        activities: activities.length > 0 ? activities : undefined,
+        isVerified: true,
+      };
+    }
+
     const [activitiesData, sleepData, hrvData, activities] = await Promise.all([
       fitbitFetch(`/1/user/-/activities/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1.2/user/-/sleep/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1/user/-/hrv/date/${targetDate}.json`, accessToken),
-      fetchActivitiesForDate(accessToken, targetDate),
+      fetchActivitiesForDate(accessToken, targetDate, 'fitbit'),
     ]);
 
     const steps = (activitiesData as any)?.summary?.steps ?? 0;
@@ -296,7 +447,7 @@ export const fitbitService = {
    * dashboard has real data immediately — even if the device hasn't
    * synced yet today.  Falls back to today-only if time-series fails.
    */
-  async syncInitialData(accessToken: string): Promise<FitbitInitialSyncResult> {
+  async syncInitialData(accessToken: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitInitialSyncResult> {
     if (accessToken === 'mock_token') {
       return {
         success: true,
@@ -306,6 +457,25 @@ export const fitbitService = {
         weightKg: 80,
         heightCm: 175,
         isVerified: true,
+      };
+    }
+
+    if (provider === 'google') {
+      const today = new Date().toISOString().split('T')[0];
+      const result = await this.syncTodayData(accessToken, today, 'google');
+      const [weightData, heightData] = await Promise.all([
+        googleHealthFetch('weight', accessToken),
+        googleHealthFetch('height', accessToken),
+      ]);
+
+      const weight = (weightData as any)?.dataPoints?.[0]?.weight?.kilograms;
+      const height = (heightData as any)?.dataPoints?.[0]?.height?.centimeters;
+
+      return {
+        ...result,
+        weightKg: weight,
+        heightCm: height,
+        dataDate: today,
       };
     }
 
@@ -322,10 +492,7 @@ export const fitbitService = {
       fitbitFetch('/1/user/-/profile.json', accessToken),
     ]);
 
-    // Steps: time series returns { "activities-steps": [{ dateTime, value }] }
-    // Walk backwards to find the most recent day with steps > 0.
-    const stepsSeries: { dateTime: string; value: string }[] =
-      (stepsData as any)?.['activities-steps'] ?? [];
+    const stepsSeries: { dateTime: string; value: string }[] = (stepsData as any)?.['activities-steps'] ?? [];
     let bestSteps = 0;
     let dataDate: string | undefined;
     for (let i = stepsSeries.length - 1; i >= 0; i--) {
@@ -337,7 +504,6 @@ export const fitbitService = {
       }
     }
 
-    // Sleep: array of sleep records — pick the most recent main sleep.
     const sleepRecords: any[] = (sleepData as any)?.sleep ?? [];
     let bestSleepMinutes = 0;
     for (let i = sleepRecords.length - 1; i >= 0; i--) {
@@ -347,7 +513,6 @@ export const fitbitService = {
       }
     }
 
-    // HRV: { hrv: [{ dateTime, value: { dailyRmssd } }] }
     const hrvSeries: any[] = (hrvData as any)?.hrv ?? [];
     let bestHrv = 0;
     for (let i = hrvSeries.length - 1; i >= 0; i--) {
@@ -358,84 +523,15 @@ export const fitbitService = {
       }
     }
 
-    // Profile: weight in kg, height in cm
     const profile = (profileData as any)?.user;
-    const weightKg = profile?.weight ? parseFloat(profile.weight) : undefined;
-    const heightCm = profile?.height ? parseFloat(profile.height) : undefined;
-
-    // Fetch per-day activity summaries (calories) for each date in the range.
-    // These can't be fetched as a single time-series for caloriesOut (TDEE),
-    // so we batch 7 individual calls in parallel — well within the free-tier rate limit.
-    const dates: string[] = [];
-    for (let d = new Date(weekAgo); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(toFitbitDate(new Date(d)));
-    }
-    const activityByDate = await Promise.all(
-      dates.map(date =>
-        fitbitFetch(`/1/user/-/activities/date/${date}.json`, accessToken)
-          .catch(() => null)
-          .then(data => ({ date, data }))
-      )
-    );
-
-    // Build per-day snapshot map — steps from time series, calories from daily summary,
-    // sleep from sleep records keyed by date, HRV from HRV series keyed by date.
-    const sleepByDate: Record<string, number> = {};
-    for (const rec of sleepRecords) {
-      if (rec.isMainSleep && rec.minutesAsleep > 0 && rec.dateOfSleep) {
-        sleepByDate[rec.dateOfSleep] = rec.minutesAsleep;
-      }
-    }
-    const hrvByDate: Record<string, number> = {};
-    for (const entry of hrvSeries) {
-      const rmssd = entry?.value?.dailyRmssd;
-      if (rmssd > 0 && entry.dateTime) {
-        hrvByDate[entry.dateTime] = Math.round(rmssd);
-      }
-    }
-    const stepsMap: Record<string, number> = {};
-    for (const entry of stepsSeries) {
-      const v = parseInt(entry.value, 10);
-      if (v > 0) stepsMap[entry.dateTime] = v;
-    }
-
-    const dailySnapshots: Record<string, import('./health-service').FitbitDailySnapshot> = {};
-    let bestCalories = 0;
-    for (const { date, data } of activityByDate) {
-      const caloriesOut = (data as any)?.summary?.caloriesOut ?? 0;
-      const steps = stepsMap[date] ?? 0;
-      const sleepMinutes = sleepByDate[date] ?? 0;
-      const hrv = hrvByDate[date] ?? 0;
-      // Only write a snapshot if we have at least one meaningful data point.
-      if (steps > 0 || sleepMinutes > 0 || hrv > 0 || caloriesOut > 0) {
-        const snap: import('./health-service').FitbitDailySnapshot = {};
-        if (steps > 0) snap.steps = steps;
-        if (sleepMinutes > 0) snap.sleepHours = sleepMinutes / 60;
-        if (hrv > 0) {
-          snap.hrv = hrv;
-          snap.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
-        }
-        if (caloriesOut > 0) {
-          snap.caloriesOut = Math.round(caloriesOut * 0.90); // same 10% Fitbit adjustment
-        }
-        dailySnapshots[date] = snap;
-      }
-      // Track the most recent day's calories for the main health doc.
-      if (date === endDate && caloriesOut > 0) {
-        bestCalories = Math.round(caloriesOut * 0.90);
-      }
-    }
-
     return {
       success: true,
       steps: { value: bestSteps, source: 'device' },
       sleep: { value: bestSleepMinutes / 60, source: 'device' },
       hrv: { value: bestHrv, source: 'device' },
-      caloriesOut: { value: bestCalories, source: 'device' },
-      weightKg,
-      heightCm,
+      weightKg: profile?.weight ? parseFloat(profile.weight) : undefined,
+      heightCm: profile?.height ? parseFloat(profile.height) : undefined,
       dataDate,
-      dailySnapshots,
       isVerified: true,
     };
   },
@@ -449,13 +545,14 @@ export const fitbitService = {
     if (!creds) return null;
 
     const fiveMinutes = 5 * 60 * 1000;
+    const provider = creds.provider || 'fitbit';
     if (Date.now() + fiveMinutes >= creds.expiresAt) {
-      const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+      const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
       if (!refreshed) return null;
-      creds = { ...refreshed, fitbitUserId: creds.fitbitUserId };
+      creds = { ...refreshed, fitbitUserId: creds.fitbitUserId, provider };
       await healthService.saveFitbitCredentials(db, userId, creds);
     }
 
-    return fitbitService.syncTodayData(creds.accessToken);
+    return fitbitService.syncTodayData(creds.accessToken, undefined, provider);
   },
 };

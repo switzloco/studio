@@ -210,6 +210,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
   const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
 
+  const isLegacyFitbit = fitbitCreds?.provider === 'fitbit';
+  const isGoogleHealth = fitbitCreds?.provider === 'google';
+
   // Use computed totals from food_log (accurate) or fall back to user doc counter
   const dailyProteinG = computedTotals?.proteinG ?? (data?.dailyProteinG || 0);
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data?.dailyCaloriesIn || 0);
@@ -353,18 +356,22 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && (data && !data.isDeviceVerified);
 
-  const handleConnectFitbit = async () => {
+  const handleConnectFitbit = async (provider: 'fitbit' | 'google' = 'google') => {
     if (!user) return;
 
-    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    const clientId = provider === 'google' 
+      ? process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID 
+      : process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+
     if (!clientId) {
-      // No real Fitbit credentials — run mock handshake locally
+      // No real credentials — run mock handshake locally
       try {
         await healthService.saveFitbitCredentials(db, user.uid, {
           accessToken: 'mock_token',
           refreshToken: 'mock_refresh',
           fitbitUserId: 'mock_fitbit_user',
           expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+          provider,
         });
         await healthService.updateHealthData(db, user.uid, {
           isDeviceVerified: true,
@@ -372,15 +379,18 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           sleepHours: 7.2,
           hrv: 62,
         });
-        toast({ title: 'Fitbit Linked (Demo)', description: 'Mock device data loaded. Set NEXT_PUBLIC_FITBIT_CLIENT_ID for real integration.' });
+        toast({ 
+          title: `${provider === 'google' ? 'Google Health' : 'Fitbit'} Linked (Demo)`, 
+          description: `Mock device data loaded. Set ${provider === 'google' ? 'NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID' : 'NEXT_PUBLIC_FITBIT_CLIENT_ID'} for real integration.` 
+        });
       } catch (e) {
-        console.error('[Fitbit Mock] Failed:', e);
-        toast({ variant: 'destructive', title: 'Connection Failed', description: 'Could not simulate Fitbit link.' });
+        console.error(`[${provider} Mock] Failed:`, e);
+        toast({ variant: 'destructive', title: 'Connection Failed', description: `Could not simulate ${provider} link.` });
       }
       return;
     }
 
-    window.location.href = fitbitService.getAuthUrl(user.uid);
+    window.location.href = fitbitService.getAuthUrl(user.uid, provider);
   };
 
   const handleResync = async () => {
@@ -605,33 +615,57 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           </Card>
         ) : data.isDeviceVerified ? (
           // Fitbit connected (default / connectedDevice === 'fitbit')
-          <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-100 rounded-lg">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+          <div className="space-y-4">
+            {isLegacyFitbit && (
+              <Card className="border-none bg-amber-50 ring-1 ring-amber-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-100 rounded-lg">
+                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-tight text-amber-800">Action Required: Migration</p>
+                      <p className="text-[10px] font-bold text-amber-700/70">
+                        The legacy Fitbit API is being decommissioned. Upgrade to Google Health infrastructure for continued service.
+                      </p>
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                    Upgrade Now
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+            <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
+              <CardContent className="p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-100 rounded-lg">
+                    <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
+                      {isGoogleHealth ? 'Google Health Connected' : 'Fitbit Connected'}
+                    </p>
+                    <p className="text-[10px] font-bold text-emerald-700/70">
+                      {fitbitCreds?.lastSyncedAt
+                        ? `Last synced ${formatTimeAgo(fitbitCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
+                        : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-tight text-emerald-800">Fitbit Connected</p>
-                  <p className="text-[10px] font-bold text-emerald-700/70">
-                    {fitbitCreds?.lastSyncedAt
-                      ? `Last synced ${formatTimeAgo(fitbitCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
-                      : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
-                  </p>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                    <Unplug className="w-3 h-3 mr-1.5" />
+                    Reset
+                  </Button>
+                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                    {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
+                    {isViewingToday ? 'Sync Now' : 'Sync Date'}
+                  </Button>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
-                  <Unplug className="w-3 h-3 mr-1.5" />
-                  Reset
-                </Button>
-                <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                  {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                  {isViewingToday ? 'Sync Now' : 'Sync Date'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         ) : (
           // No device connected — offer both options
           <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
@@ -650,8 +684,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   Oura Ring
                   <CloudLightning className="w-3 h-3 ml-2" />
                 </Button>
-                <Button size="sm" onClick={handleConnectFitbit} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                  Fitbit
+                <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-orange-600 hover:bg-orange-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  Google Health
                   <CloudLightning className="w-3 h-3 ml-2" />
                 </Button>
               </div>
@@ -743,7 +777,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from your {data.connectedDevice === 'oura' ? 'Oura Ring' : 'Fitbit'}</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from {isGoogleHealth ? 'Google Health' : data.connectedDevice === 'oura' ? 'Oura Ring' : 'Fitbit'}</p>
               <h4 className="text-4xl font-black italic">
                 {isViewingToday
                   ? (data.steps || 0).toLocaleString()

@@ -21,6 +21,7 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
 
   const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
   if (!creds) return { success: false, reason: 'no_credentials' };
+  const provider = creds.provider || 'fitbit';
 
   // Refresh token if within 5 minutes of expiry.
   let accessToken = creds.accessToken;
@@ -30,7 +31,7 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
   if (Date.now() + fiveMinutes >= creds.expiresAt) {
     let refreshed;
     try {
-      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
     } catch (error) {
       console.error('[syncFitbitData] Token refresh threw an unexpected error:', error);
       return { success: false, reason: 'token_refresh_failed' };
@@ -39,20 +40,20 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
       console.error('[syncFitbitData] Token refresh returned null — token may be revoked. Reconnect Fitbit.');
       return { success: false, reason: 'token_refresh_failed' };
     }
-    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
+    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt, provider };
     await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
     accessToken = refreshed.accessToken;
   }
 
   let result;
   try {
-    result = await fitbitService.syncTodayData(accessToken, localDate);
+    result = await fitbitService.syncTodayData(accessToken, localDate, provider);
   } catch (error: any) {
     if (error?.status === 401) {
       console.warn('[syncFitbitData] Token returned 401 Unauthorized. Attempting immediate refresh...');
       let refreshed;
       try {
-        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken);
+        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken, provider);
       } catch (refreshErr) {
         console.error('[syncFitbitData] Token refresh threw an error after 401:', refreshErr);
         return { success: false, reason: 'token_refresh_failed' };
@@ -61,12 +62,12 @@ export async function syncFitbitData(userId: string, localDate?: string): Promis
         console.error('[syncFitbitData] Token refresh returned null after 401 — token likely revoked.');
         return { success: false, reason: 'token_refresh_failed' };
       }
-      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt };
+      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt, provider };
       await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
       accessToken = refreshed.accessToken;
       
       try {
-        result = await fitbitService.syncTodayData(accessToken, localDate);
+        result = await fitbitService.syncTodayData(accessToken, localDate, provider);
       } catch (retryErr) {
         console.error('[syncFitbitData] Fitbit API call failed on retry after refresh:', retryErr);
         return { success: false, reason: 'api_failed' };
@@ -148,6 +149,7 @@ export async function syncFitbitSnapshot(userId: string, date: string): Promise<
 
   const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
   if (!creds) return { success: false, reason: 'no_credentials' };
+  const provider = creds.provider || 'fitbit';
 
   let accessToken = creds.accessToken;
   let latestCreds = creds;
@@ -155,26 +157,26 @@ export async function syncFitbitSnapshot(userId: string, date: string): Promise<
   if (Date.now() + fiveMinutes >= creds.expiresAt) {
     let refreshed;
     try {
-      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
+      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
     } catch (error) {
       console.error('[syncFitbitSnapshot] Token refresh error:', error);
       return { success: false, reason: 'token_refresh_failed' };
     }
     if (!refreshed) return { success: false, reason: 'token_refresh_failed' };
-    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
+    latestCreds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt, provider };
     await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
     accessToken = refreshed.accessToken;
   }
 
   let result;
   try {
-    result = await fitbitService.syncTodayData(accessToken, date);
+    result = await fitbitService.syncTodayData(accessToken, date, provider);
   } catch (error: any) {
     if (error?.status === 401) {
       console.warn('[syncFitbitSnapshot] Token returned 401 Unauthorized. Attempting immediate refresh...');
       let refreshed;
       try {
-        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken);
+        refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken, provider);
       } catch (refreshErr) {
         console.error('[syncFitbitSnapshot] Token refresh threw an error after 401:', refreshErr);
         return { success: false, reason: 'token_refresh_failed' };
@@ -183,12 +185,12 @@ export async function syncFitbitSnapshot(userId: string, date: string): Promise<
         console.error('[syncFitbitSnapshot] Token refresh returned null after 401 — token likely revoked.');
         return { success: false, reason: 'token_refresh_failed' };
       }
-      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt };
+      latestCreds = { ...refreshed, fitbitUserId: latestCreds.fitbitUserId, lastSyncedAt: latestCreds.lastSyncedAt, provider };
       await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
       accessToken = refreshed.accessToken;
       
       try {
-        result = await fitbitService.syncTodayData(accessToken, date);
+        result = await fitbitService.syncTodayData(accessToken, date, provider);
       } catch (retryErr) {
         console.error('[syncFitbitSnapshot] Fitbit API call failed on retry after refresh:', retryErr);
         return { success: false, reason: 'api_failed' };

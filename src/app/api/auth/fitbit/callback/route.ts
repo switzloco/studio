@@ -26,11 +26,11 @@ function getPublicOrigin(request: NextRequest): string {
  * Parse the OAuth `state` parameter. New format is JSON with uid + redirect;
  * old format is a bare userId string. This keeps the callback backward-compatible.
  */
-function parseState(raw: string, fallbackOrigin: string): { userId: string; redirectUri: string } {
+function parseState(raw: string, fallbackOrigin: string): { userId: string; redirectUri: string; provider?: 'fitbit' | 'google' } {
   try {
     const parsed = JSON.parse(raw);
     if (parsed.uid && parsed.redirect) {
-      return { userId: parsed.uid, redirectUri: parsed.redirect };
+      return { userId: parsed.uid, redirectUri: parsed.redirect, provider: parsed.provider };
     }
   } catch { /* not JSON — legacy format */ }
   return { userId: raw, redirectUri: `${fallbackOrigin}/api/auth/fitbit/callback` };
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('?error=fitbit_missing_state', appRoot));
   }
 
-  const { userId, redirectUri } = parseState(state, origin);
+  const { userId, redirectUri, provider = 'fitbit' } = parseState(state, origin);
 
   // Derive the absolute app root from the trusted redirectUri in state.
   // This bypasses unreliable header-based origin detection in Cloud Run/App Hosting.
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   try {
     const firestore = getAdminFirestore();
 
-    const creds = await fitbitService.exchangeCodeForTokens(code, redirectUri);
+    const creds = await fitbitService.exchangeCodeForTokens(code, redirectUri, provider);
 
     if (!creds) {
       await adminHealthService.logActivity(firestore, userId, {
@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
     await adminHealthService.saveFitbitCredentials(firestore, userId, {
       ...creds,
       lastSyncedAt: Date.now(),
+      provider,
     });
 
     // Mark device as verified immediately after token exchange succeeds.
