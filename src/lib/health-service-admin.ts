@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials } from './health-service';
-import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from './food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry, CustomMetricEntry, CustomMetricDef } from './food-exercise-types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -257,5 +257,97 @@ export const adminHealthService = {
     if (!snap.exists) return null;
     await docRef.update({ ignored });
     return { ...snap.data(), id: snap.id, ignored } as FastLogEntry;
+  },
+
+  // --- Custom Metrics (user-defined performance series, e.g. basketball shooting %) ---
+
+  async upsertCustomMetricDef(
+    db: Firestore,
+    userId: string,
+    def: Pick<CustomMetricDef, 'metricKey' | 'metricLabel' | 'unit'> & { higherIsBetter?: boolean }
+  ): Promise<CustomMetricDef> {
+    const docRef = db.doc(`users/${userId}/custom_metric_defs/${def.metricKey}`);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const updates: Record<string, unknown> = {
+        metricLabel: def.metricLabel,
+        unit: def.unit,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (def.higherIsBetter !== undefined) updates.higherIsBetter = def.higherIsBetter;
+      await docRef.set(updates, { merge: true });
+      const merged = await docRef.get();
+      return merged.data() as CustomMetricDef;
+    }
+    const payload = {
+      metricKey: def.metricKey,
+      metricLabel: def.metricLabel,
+      unit: def.unit,
+      ...(def.higherIsBetter !== undefined ? { higherIsBetter: def.higherIsBetter } : {}),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    await docRef.set(payload);
+    return payload as unknown as CustomMetricDef;
+  },
+
+  async listCustomMetricDefs(db: Firestore, userId: string): Promise<CustomMetricDef[]> {
+    const ref = db.collection(`users/${userId}/custom_metric_defs`);
+    const snapshot = await ref.get();
+    return snapshot.docs.map(d => d.data() as CustomMetricDef);
+  },
+
+  async getCustomMetricDef(db: Firestore, userId: string, metricKey: string): Promise<CustomMetricDef | null> {
+    const docRef = db.doc(`users/${userId}/custom_metric_defs/${metricKey}`);
+    const snap = await docRef.get();
+    return snap.exists ? (snap.data() as CustomMetricDef) : null;
+  },
+
+  async logCustomMetric(
+    db: Firestore,
+    userId: string,
+    entry: Omit<CustomMetricEntry, 'timestamp' | 'id'>
+  ): Promise<string> {
+    const ref = db.collection(`users/${userId}/custom_metric_log`);
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await ref.add(clean);
+    return docRef.id;
+  },
+
+  async queryCustomMetricLogRange(
+    db: Firestore,
+    userId: string,
+    startDate: string,
+    endDate: string,
+    opts: { metricKey?: string; limit?: number } = {}
+  ): Promise<{ entries: CustomMetricEntry[]; truncated: boolean }> {
+    const ref = db.collection(`users/${userId}/custom_metric_log`);
+    const limitCount = opts.limit ?? 500;
+    let q: FirebaseFirestore.Query = ref
+      .where('date', '>=', startDate)
+      .where('date', '<=', endDate);
+    if (opts.metricKey) q = q.where('metricKey', '==', opts.metricKey);
+    // Descending so we keep the most recent entries when the limit is hit
+    q = q.orderBy('date', 'desc').limit(limitCount);
+    const snapshot = await q.get();
+    const entries = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id }) as CustomMetricEntry)
+      .filter(e => !e.ignored);
+    return { entries, truncated: snapshot.size === limitCount };
+  },
+
+  async setCustomMetricEntryIgnored(
+    db: Firestore,
+    userId: string,
+    entryId: string,
+    ignored: boolean
+  ): Promise<CustomMetricEntry | null> {
+    const docRef = db.doc(`users/${userId}/custom_metric_log/${entryId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return null;
+    await docRef.update({ ignored });
+    return { ...snap.data(), id: snap.id, ignored } as CustomMetricEntry;
   },
 };

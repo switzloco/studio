@@ -59,6 +59,33 @@ export interface FastLogEntry {
   timestamp: FieldValue | Timestamp;
 }
 
+/**
+ * User-defined performance metric (e.g. basketball shooting %, golf putts).
+ * The def doc lives at /users/{uid}/custom_metric_defs/{metricKey} and pins
+ * the canonical label + unit so repeated logs don't fragment ("bball %" vs
+ * "shooting pct"). Logs live at /users/{uid}/custom_metric_log/{auto}.
+ */
+export interface CustomMetricDef {
+  metricKey: string;         // lowercase_snake — stable identifier (also the doc id)
+  metricLabel: string;       // human display label
+  unit: string;              // "%", "makes", "min", "rpe", "count", etc.
+  higherIsBetter?: boolean;  // helps the analyst interpret trends
+  createdAt: FieldValue | Timestamp;
+  updatedAt: FieldValue | Timestamp;
+}
+
+export interface CustomMetricEntry {
+  id?: string;
+  metricKey: string;                   // FK to CustomMetricDef.metricKey
+  value: number;                       // primary numeric value
+  secondary?: Record<string, number>;  // optional structured fields (e.g. { makes: 12, attempts: 20 })
+  notes?: string;
+  date: string;                        // "YYYY-MM-DD"
+  performedAt?: string;                // "HH:MM" (24h)
+  ignored?: boolean;
+  timestamp: FieldValue | Timestamp;
+}
+
 export interface UserProfile {
   heightCm?: number;
   weightKg?: number;
