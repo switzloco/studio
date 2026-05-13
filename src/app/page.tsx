@@ -96,7 +96,7 @@ export default function Home() {
           const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
           const result = await syncFitbitData(user.uid, localDate);
           if (!result.success && result.reason === 'token_refresh_failed') {
-            toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your Fitbit.' });
+            toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your device.' });
           }
         }
       } catch (e) {
@@ -157,7 +157,7 @@ export default function Home() {
       if (result.success) {
         toast({ title: 'Synced', description: 'Portfolio data updated.' });
       } else if (result.reason === 'token_refresh_failed') {
-        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired — reconnect your Fitbit.' });
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired — reconnect your device.' });
       } else if (result.reason === 'no_credentials') {
         toast({ title: 'Refreshed', description: 'Data is live from Firestore.' });
       } else {

@@ -77,6 +77,26 @@ const GoogleLogo = ({ className }: { className?: string }) => (
   </svg>
 );
 
+/**
+ * Fitbit wordmark-style logo using the official teal/cyan brand colour.
+ * Rendered as an inline SVG so it works without any external assets.
+ */
+const FitbitLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    {/* Dot-grid pattern that evokes the Fitbit brand mark */}
+    <circle cx="4"  cy="12" r="2" fill="#00B0B9" />
+    <circle cx="9"  cy="12" r="2" fill="#00B0B9" />
+    <circle cx="14" cy="12" r="2" fill="#00B0B9" />
+    <circle cx="4"  cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="9"  cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="14" cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="4"  cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="9"  cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="14" cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
+    <circle cx="19" cy="12" r="2.5" fill="#00B0B9" />
+  </svg>
+);
+
   // Read Fitbit credentials to show lastSyncedAt in the UI.
   const fitbitTokensRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'fitbit_tokens') : null,
@@ -667,8 +687,10 @@ const GoogleLogo = ({ className }: { className?: string }) => (
             <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
               <CardContent className="p-4 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-100 rounded-lg">
-                    <GoogleLogo className="w-5 h-5" />
+                  <div className="p-2 bg-emerald-100 rounded-lg shrink-0">
+                    {isGoogleHealth
+                      ? <GoogleLogo className="w-5 h-5" />
+                      : <FitbitLogo className="w-5 h-5" />}
                   </div>
                   <div>
                     <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
@@ -712,10 +734,10 @@ const GoogleLogo = ({ className }: { className?: string }) => (
                   <OuraLogo className="w-3.5 h-3.5 mr-2" />
                   Oura Ring
                 </Button>
-                <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
-                  <GoogleLogo className="w-3.5 h-3.5 mr-2" />
-                  Google Health
-                </Button>
+                <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-3 rounded-lg shadow-sm">
+                   <GoogleLogo className="w-3.5 h-3.5 mr-1.5" />
+                   Google
+                 </Button>
               </div>
             </CardContent>
           </Card>
