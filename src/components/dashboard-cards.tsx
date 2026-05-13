@@ -405,7 +405,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && (data && !data.isDeviceVerified);
 
-  const handleConnectFitbit = async (provider: 'fitbit' | 'google' = 'google') => {
+  const handleConnectFitbit = async (provider: 'fitbit' | 'google' = 'fitbit') => {
     if (!user) return;
 
     const clientId = provider === 'google' 
@@ -691,7 +691,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
                       </p>
                     </div>
                   </div>
-                  <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  <Button size="sm" onClick={() => handleConnectFitbit('fitbit')} className="bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
                     Upgrade Now
                   </Button>
                 </CardContent>
@@ -753,7 +753,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
                   <OuraLogo className="w-3.5 h-3.5 mr-2" />
                   Oura Ring
                 </Button>
-                <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-3 rounded-lg shadow-sm">
+                <Button size="sm" onClick={() => handleConnectFitbit('fitbit')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-3 rounded-lg shadow-sm">
                    <div className="flex items-center">
                      <GoogleLogo className="w-3.5 h-3.5 mr-1" />
                      <FitbitLogo className="w-3 h-3 text-slate-400 mr-1.5" />

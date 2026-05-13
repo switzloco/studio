@@ -335,7 +335,7 @@ export const fitbitService = {
   /**
    * Generates the authorization URL for the client.
    */
-  getAuthUrl(userId: string, provider: 'fitbit' | 'google' = 'google'): string {
+  getAuthUrl(userId: string, provider: 'fitbit' | 'google' = 'fitbit'): string {
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
     const redirectUri = `${origin}/api/auth/fitbit/callback`;
