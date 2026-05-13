@@ -677,7 +677,8 @@ const FitbitLogo = ({ className }: { className?: string }) => (
         ) : data.isDeviceVerified ? (
           // Fitbit connected (default / connectedDevice === 'fitbit')
           <div className="space-y-4">
-            {isLegacyFitbit && (
+            {/* Migration banner — re-enable when Google Health API is ready (~Sept 2026 before Fitbit Web API sunset). */}
+            {false && isLegacyFitbit && (
               <Card className="border-none bg-amber-50 ring-1 ring-amber-200 shadow-sm overflow-hidden">
                 <CardContent className="p-4 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
