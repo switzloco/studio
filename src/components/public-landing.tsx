@@ -115,7 +115,7 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             <h3 className="text-sm font-black uppercase tracking-[0.3em] text-primary italic">Our Purpose</h3>
             <h4 className="text-4xl font-black tracking-tight leading-none uppercase">Health is the ultimate <span className="italic">Solvency</span></h4>
             <p className="text-lg text-muted-foreground leading-relaxed">
-              We believe health tracking is often too vague. "the CFO" was built to bring clinical-grade rigor to daily habits. By quantifying your activity, nutrition, and sleep into a unified "Equity Score," we help you stay accountable to the only ledger that truly matters.
+              We believe health tracking is often too vague. &quot;the CFO&quot; was built to bring clinical-grade rigor to daily habits. By quantifying your activity, nutrition, and sleep into a unified &quot;Equity Score,&quot; we help you stay accountable to the only ledger that truly matters.
             </p>
             <ul className="space-y-3">
               {[
