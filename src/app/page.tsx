@@ -85,7 +85,7 @@ export default function Home() {
   // Sync Fitbit data on load if the last sync was more than 6 hours ago
   // (or if we've never synced). Runs once per session.
   useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || hasSyncedFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google' || hasSyncedFitbit.current) return;
     hasSyncedFitbit.current = true;
 
     (async () => {
@@ -108,7 +108,7 @@ export default function Home() {
   // Backfill historical Fitbit snapshots once per session if yesterday is missing.
   // Silently fires in the background — no toast, no spinner.
   useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || hasBackfilledFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google' || hasBackfilledFitbit.current) return;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toLocaleDateString('en-CA');
@@ -161,7 +161,7 @@ export default function Home() {
       } else if (result.reason === 'no_credentials') {
         toast({ title: 'Refreshed', description: 'Data is live from Firestore.' });
       } else {
-        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not reach Fitbit API.' });
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not reach the health API. Please try again.' });
       }
     } finally {
       setIsPullRefreshing(false);

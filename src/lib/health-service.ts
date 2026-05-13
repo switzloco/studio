@@ -96,7 +96,7 @@ export interface HealthData {
   onboardingDay: number;
   onboardingComplete: boolean;
   isDeviceVerified: boolean;
-  connectedDevice?: 'fitbit' | 'oura' | null; // which wearable is currently linked
+  connectedDevice?: 'fitbit' | 'oura' | 'google' | null; // which wearable is currently linked
   lastActiveDate?: string;
 }
 

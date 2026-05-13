@@ -448,15 +448,15 @@ const GoogleLogo = ({ className }: { className?: string }) => (
       toast({
         title: 'Sync Complete',
         description: isViewingToday
-          ? 'Fitbit data refreshed from your device.'
-          : `${selectedDateStr} data refreshed from Fitbit.`,
+          ? 'Device data refreshed successfully.'
+          : `${selectedDateStr} data refreshed from your device.`,
       });
     } else {
       const descriptions: Record<string, string> = {
-        no_credentials: 'Security handshake missing. Please reconnect your Fitbit.',
-        token_refresh_failed: 'Fitbit access has expired. Re-authentication is required to restore sync.',
-        api_failed: 'Fitbit API is currently unavailable or returning an error. Please try again later.',
-        write_failed: 'Metadata retrieved but database update failed. Your progress is safe but unrecorded.',
+        no_credentials: 'Security handshake missing. Please reconnect your device.',
+        token_refresh_failed: 'Device access has expired. Re-authenticate to restore sync.',
+        api_failed: 'Health API is currently unavailable. Please try again later.',
+        write_failed: 'Data retrieved but database update failed. Your progress is safe but unrecorded.',
       };
       toast({
         variant: 'destructive',

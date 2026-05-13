@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     // This ensures the connection is established even if the initial data sync fails.
     await adminHealthService.updateHealthData(firestore, userId, {
       isDeviceVerified: true,
-      connectedDevice: 'fitbit',
+      connectedDevice: provider === 'google' ? 'google' : 'fitbit',
       onboardingDay: 1,
     });
 
