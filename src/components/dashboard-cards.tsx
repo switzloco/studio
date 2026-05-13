@@ -448,7 +448,8 @@ const FitbitLogo = ({ className }: { className?: string }) => (
     try {
       if (isViewingToday) {
         const localDate = new Date().toLocaleDateString('en-CA');
-        result = await syncFitbitData(user.uid, localDate);
+        const tz = new Date().getTimezoneOffset();
+        result = await syncFitbitData(user.uid, localDate, tz);
       } else {
         // Viewing a past date — sync that date's snapshot only, never clobber today's live metrics.
         result = await syncFitbitSnapshot(user.uid, selectedDateStr);
@@ -475,13 +476,23 @@ const FitbitLogo = ({ className }: { className?: string }) => (
       const descriptions: Record<string, string> = {
         no_credentials: 'Security handshake missing. Please reconnect your device.',
         token_refresh_failed: 'Device access has expired. Re-authenticate to restore sync.',
-        api_failed: 'Health API is currently unavailable. Please try again later.',
+        api_failed: 'Health API returned an error.',
         write_failed: 'Data retrieved but database update failed. Your progress is safe but unrecorded.',
       };
-      toast({
-        variant: 'destructive',
-        title: 'Sync Failed',
-        description: descriptions[result.reason] ?? 'An unexpected error occurred during sync.',
+
+      let finalDesc = descriptions[result.reason] ?? 'An unexpected error occurred during sync.';
+      if (result.details) {
+        const { httpStatus, endpoint, body, message } = result.details;
+        finalDesc += `\n\nDetails: ${message || ''}`;
+        if (httpStatus) finalDesc += ` (Status: ${httpStatus})`;
+        if (endpoint) finalDesc += ` on ${endpoint}`;
+        if (body) finalDesc += `\nRaw: ${body}`;
+      }
+
+      toast({ 
+        variant: 'destructive', 
+        title: 'Sync Failed', 
+        description: finalDesc
       });
     }
   };
@@ -685,7 +696,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
               </Card>
             )}
             <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-emerald-100 rounded-lg shrink-0">
                     {isGoogleHealth
@@ -703,12 +714,12 @@ const FitbitLogo = ({ className }: { className?: string }) => (
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="flex-1 sm:flex-none text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
                     <Unplug className="w-3 h-3 mr-1.5" />
                     Reset
                   </Button>
-                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
                     {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
                     {isViewingToday ? 'Sync Now' : 'Sync Date'}
                   </Button>

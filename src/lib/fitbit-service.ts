@@ -44,8 +44,8 @@ function toFitbitDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-class FitbitApiError extends Error {
-  constructor(public status: number, public endpoint: string, message: string) {
+export class FitbitApiError extends Error {
+  constructor(public status: number, public endpoint: string, message: string, public body?: string) {
     super(message);
     this.name = 'FitbitApiError';
   }
@@ -59,7 +59,7 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     console.error(`[FitbitService] API error ${res.status} for ${endpoint}:`, body);
-    throw new FitbitApiError(res.status, endpoint, `Fitbit API ${res.status} on ${endpoint}: ${body}`);
+    throw new FitbitApiError(res.status, endpoint, `Fitbit API ${res.status} on ${endpoint}`, body);
   }
   return res.json();
 }
@@ -96,7 +96,7 @@ async function googleFitAggregate(
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     console.error(`[FitbitService] Google Fit API error ${res.status} for ${dataTypeName}:`, body);
-    throw new FitbitApiError(res.status, `googlefit:${dataTypeName}`, `Google Fit API ${res.status}: ${body}`);
+    throw new FitbitApiError(res.status, `googlefit:${dataTypeName}`, `Google Fit API ${res.status}`, body);
   }
   return res.json();
 }
@@ -339,7 +339,13 @@ export const fitbitService = {
     const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
     const redirectUri = `${origin}/api/auth/fitbit/callback`;
-    const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri, provider }));
+    const timezoneOffset = typeof window !== 'undefined' ? new Date().getTimezoneOffset() : 0;
+    const state = encodeURIComponent(JSON.stringify({ 
+      uid: userId, 
+      redirect: redirectUri, 
+      provider,
+      tz: timezoneOffset 
+    }));
 
     if (provider === 'google') {
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || clientId;
@@ -561,6 +567,8 @@ export const fitbitService = {
       const caloriesOut = Math.round(fitSumFp(caloriesData));
       const sleepSec    = fitSleepSeconds(sleepData);
 
+      console.log(`[FitbitService] Google Health sync for ${targetDate}: ${stepsCount} steps, ${caloriesOut} kcal, ${sleepSec} sec sleep.`);
+
       // Google Fit has no HRV data type — omit hrv so the metabolic engine
       // runs at its neutral default (hrvMultiplier = 1.0). Recovery status is
       // derived from sleep hours by the caller (fitbit-sync.ts).
@@ -604,7 +612,7 @@ export const fitbitService = {
    * dashboard has real data immediately — even if the device hasn't
    * synced yet today.  Falls back to today-only if time-series fails.
    */
-  async syncInitialData(accessToken: string, provider: 'fitbit' | 'google' = 'fitbit'): Promise<FitbitInitialSyncResult> {
+  async syncInitialData(accessToken: string, provider: 'fitbit' | 'google' = 'fitbit', timezoneOffset?: number): Promise<FitbitInitialSyncResult> {
     if (accessToken === 'mock_token') {
       return {
         success: true,
@@ -618,7 +626,9 @@ export const fitbitService = {
     }
 
     if (provider === 'google') {
-      const todayDate = new Date();
+      const now = new Date();
+      const localTime = new Date(now.getTime() - ((timezoneOffset || 0) * 60000));
+      const todayDate = localTime;
       const todayStr  = todayDate.toISOString().split('T')[0];
 
       // Backfill the last 7 days so the dashboard has history immediately
@@ -631,7 +641,7 @@ export const fitbitService = {
         d.setUTCDate(d.getUTCDate() - i);
         const dateStr = d.toISOString().split('T')[0];
         try {
-          const r = await this.syncTodayData(accessToken, dateStr, 'google');
+          const r = await this.syncTodayData(accessToken, dateStr, 'google', timezoneOffset);
           dailySnapshots[dateStr] = {
             steps:        r.steps.value,
             sleepHours:   r.sleep.value,
@@ -647,7 +657,7 @@ export const fitbitService = {
       }
 
       // Fetch body composition — weight in kg, height in metres (×100 → cm)
-      const { startMs: bodyStart, endMs: bodyEnd } = dateToUtcMs(todayStr, undefined); // Offset not strictly needed for body composition but let's be consistent
+      const { startMs: bodyStart, endMs: bodyEnd } = dateToUtcMs(todayStr, timezoneOffset); 
       const [weightData, heightData] = await Promise.all([
         googleFitAggregate('com.google.weight', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),
         googleFitAggregate('com.google.height', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),

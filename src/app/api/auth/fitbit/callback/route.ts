@@ -26,11 +26,16 @@ function getPublicOrigin(request: NextRequest): string {
  * Parse the OAuth `state` parameter. New format is JSON with uid + redirect;
  * old format is a bare userId string. This keeps the callback backward-compatible.
  */
-function parseState(raw: string, fallbackOrigin: string): { userId: string; redirectUri: string; provider?: 'fitbit' | 'google' } {
+function parseState(raw: string, fallbackOrigin: string): { userId: string; redirectUri: string; provider?: 'fitbit' | 'google'; timezoneOffset?: number } {
   try {
     const parsed = JSON.parse(raw);
     if (parsed.uid && parsed.redirect) {
-      return { userId: parsed.uid, redirectUri: parsed.redirect, provider: parsed.provider };
+      return { 
+        userId: parsed.uid, 
+        redirectUri: parsed.redirect, 
+        provider: parsed.provider,
+        timezoneOffset: parsed.tz
+      };
     }
   } catch { /* not JSON — legacy format */ }
   return { userId: raw, redirectUri: `${fallbackOrigin}/api/auth/fitbit/callback` };
@@ -53,7 +58,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('?error=fitbit_missing_state', appRoot));
   }
 
-  const { userId, redirectUri, provider = 'fitbit' } = parseState(state, origin);
+  const { userId, redirectUri, provider = 'fitbit', timezoneOffset } = parseState(state, origin);
 
   // Derive the absolute app root from the trusted redirectUri in state.
   // This bypasses unreliable header-based origin detection in Cloud Run/App Hosting.
@@ -83,6 +88,7 @@ export async function GET(request: NextRequest) {
       ...creds,
       lastSyncedAt: Date.now(),
       provider,
+      timezoneOffset,
     });
 
     // Mark device as verified immediately after token exchange succeeds.
@@ -99,7 +105,7 @@ export async function GET(request: NextRequest) {
     // the client-side auto-sync will retry on next page load.
     let syncResult: import('@/lib/fitbit-service').FitbitInitialSyncResult | null = null;
     try {
-      syncResult = await fitbitService.syncInitialData(creds.accessToken);
+      syncResult = await fitbitService.syncInitialData(creds.accessToken, provider, timezoneOffset);
     } catch (syncError) {
       console.error('[FitbitCallback] Initial data sync failed (non-fatal — device still linked):', syncError);
     }

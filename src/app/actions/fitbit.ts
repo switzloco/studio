@@ -9,8 +9,8 @@ import type { SyncResult } from '@/lib/fitbit-sync';
 
 export type { SyncResult };
 
-export async function syncFitbitData(userId: string, localDate?: string): Promise<SyncResult> {
-  return _syncFitbitData(userId, localDate);
+export async function syncFitbitData(userId: string, localDate?: string, timezoneOffset?: number): Promise<SyncResult> {
+  return _syncFitbitData(userId, localDate, timezoneOffset);
 }
 
 /** Syncs a specific past date — snapshot only, never overwrites today's live metrics. */
