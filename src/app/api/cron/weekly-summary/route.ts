@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     // 3. Construct HTML email
     const emailHtml = `
       <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: auto;">
-        <h1 style="color: #1a73e8;">The CFO: Weekly Performance Audit</h1>
+        <h1 style="color: #1a73e8;">the CFO: Weekly Performance Audit</h1>
         <p style="font-size: 0.9em; color: #666;">Period: ${metrics.dateRange.start} to ${metrics.dateRange.end}</p>
         
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     // 4. Send Email
     const result = await sendAdminReportEmail(
       'nicholas.switzer@gmail.com',
-      `[The CFO] Weekly Summary: ${metrics.dau} DAU / ${metrics.wau} WAU`,
+      `[the CFO] Weekly Summary: ${metrics.dau} DAU / ${metrics.wau} WAU`,
       emailHtml
     );
 

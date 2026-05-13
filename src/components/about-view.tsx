@@ -42,7 +42,7 @@ export function AboutView() {
       {/* Header */}
       <div className="space-y-6">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] italic">About the Tracker</h2>
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] italic">About the CFO</h2>
         </div>
 
         {/* Hero card */}
@@ -54,7 +54,7 @@ export function AboutView() {
               </div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-1">Chief Fitness Officer</p>
-                <h3 className="text-2xl font-black italic tracking-tighter leading-tight">About the Tracker</h3>
+                <h3 className="text-2xl font-black italic tracking-tighter leading-tight">the CFO Audit Suite</h3>
               </div>
             </div>
             <div className="space-y-4 text-sm font-medium opacity-80 leading-relaxed">
@@ -91,9 +91,7 @@ export function AboutView() {
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-6">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-2">Beta Status</p>
-            <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-              This app is very much in beta. It&apos;s a sandbox for me to stay compliant with my own health protocols while experimenting with some new coding tools behind the scenes.
-            </p>
+              the CFO is very much in beta. It&apos;s a sandbox for me to stay compliant with my own health protocols while experimenting with some new coding tools behind the scenes.
           </CardContent>
         </Card>
       </div>

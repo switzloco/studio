@@ -12,7 +12,7 @@ export async function sendAdminReportEmail(to: string, subject: string, html: st
 
   try {
     const { data, error } = await resend.emails.send({
-      from: 'The CFO <reports@updates.thecfo.app>', // Change to your verified domain later
+      from: 'the CFO <reports@updates.thecfo.app>', // Change to your verified domain later
       to,
       subject,
       html,

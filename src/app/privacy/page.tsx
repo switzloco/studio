@@ -2,8 +2,8 @@ import React from 'react';
 import Link from 'next/link';
 
 export const metadata = {
-  title: 'Privacy Policy | CFO Fitness',
-  description: 'Privacy policy for the CFO Fitness application.',
+  title: 'Privacy Policy | the CFO',
+  description: 'Privacy policy for the the CFO application.',
 };
 
 export default function PrivacyPage() {
@@ -16,7 +16,7 @@ export default function PrivacyPage() {
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">1. Introduction</h2>
         <p>
-          Welcome to <strong>The CFO (Chief Fitness Officer)</strong>. We are committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, and protect your data when you use our application.
+          Welcome to <strong>the CFO (Chief Fitness Officer)</strong>. We are committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, and protect your data when you use our application.
         </p>
       </section>
 
@@ -58,7 +58,7 @@ export default function PrivacyPage() {
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">5. Google API Disclosure</h2>
         <p>
-          The CFO&apos;s use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google API Services User Data Policy</a>, including the Limited Use requirements.
+          the CFO&apos;s use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google API Services User Data Policy</a>, including the Limited Use requirements.
         </p>
       </section>
 

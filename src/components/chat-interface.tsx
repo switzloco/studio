@@ -170,7 +170,7 @@ export function ChatInterface() {
         }
       } catch (e) {
         console.error('[ChatInit] stream error:', e);
-        setMessages([{ role: 'model', content: "Hey Partner, I'm your Chief Fitness Officer. What are we working on today?" }]);
+        setMessages([{ role: 'model', content: "Hey Partner, I'm the CFO. What are we working on today?" }]);
       } finally {
         setIsLoading(false);
       }
@@ -368,7 +368,7 @@ export function ChatInterface() {
       }
     } catch (e: any) {
       console.error('[ChatSend] Error:', e);
-      toast({ variant: "destructive", title: "Audit Failed", description: e.message || "The CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
+      toast({ variant: "destructive", title: "Audit Failed", description: e.message || "the CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
     } finally {
       setIsLoading(false);
     }
@@ -376,7 +376,7 @@ export function ChatInterface() {
 
   const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints != null && healthData.visceralFatPoints > 0);
   const placeholder = hasTargets
-    ? "Log a meal, workout, or ask The CFO..."
+    ? "Log a meal, workout, or ask the CFO..."
     : "Tell me about your goals, equipment, routine...";
 
   /** Google Photos colorful pinwheel icon. */
@@ -522,7 +522,7 @@ export function ChatInterface() {
             <Zap className="w-10 h-10 text-primary" />
           </div>
           <div className="space-y-1">
-            <p className="text-lg font-black uppercase tracking-tight text-foreground italic">The CFO is standing by</p>
+            <p className="text-lg font-black uppercase tracking-tight text-foreground italic">the CFO is standing by</p>
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your portfolio, your call</p>
           </div>
           <Button
@@ -548,7 +548,7 @@ export function ChatInterface() {
           {messages.map((m, i) => (
             <div key={i} className={m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}>
               <div className="flex items-center gap-2 mb-1 px-1">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase">{m.role === 'model' ? 'The CFO' : 'User'}</span>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase">{m.role === 'model' ? 'the CFO' : 'User'}</span>
               </div>
               <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}>
                 {m.images && m.images.length > 0 && (

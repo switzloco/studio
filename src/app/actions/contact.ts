@@ -23,7 +23,7 @@ export async function submitContactForm(data: { name: string; email: string; mes
   // Send to admin email
   const result = await sendAdminReportEmail(
     'nicholas.switzer@gmail.com',
-    `[The CFO] Feedback from ${name}`,
+    `[the CFO] Feedback from ${name}`,
     html
   );
 

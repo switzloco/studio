@@ -2,8 +2,8 @@ import React from 'react';
 import Link from 'next/link';
 
 export const metadata = {
-  title: 'Terms of Service | CFO Fitness',
-  description: 'Terms of service for the CFO Fitness application.',
+  title: 'Terms of Service | the CFO',
+  description: 'Terms of service for the the CFO application.',
 };
 
 export default function TermsPage() {
@@ -16,14 +16,14 @@ export default function TermsPage() {
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">1. Acceptance of Terms</h2>
         <p>
-          By accessing or using <strong>The CFO (Chief Fitness Officer)</strong>, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the application.
+          By accessing or using <strong>the CFO (Chief Fitness Officer)</strong>, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the application.
         </p>
       </section>
 
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4 text-red-600">2. Medical Disclaimer</h2>
         <p className="font-bold">
-          The CFO is a data analysis tool and is NOT a medical device.
+          the CFO is a data analysis tool and is NOT a medical device.
         </p>
         <p className="mt-2">
           The information, including but not limited to, text, graphics, images and other material contained in this app are for informational purposes only. No material on this site is intended to be a substitute for professional medical advice, diagnosis or treatment. Always seek the advice of your physician or other qualified health care provider with any questions you may have regarding a medical condition or treatment.
@@ -40,7 +40,7 @@ export default function TermsPage() {
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">4. Limitation of Liability</h2>
         <p>
-          The CFO and its developers shall not be held liable for any health issues, injuries, or data loss resulting from the use of the application. The application provides AI-generated insights which should be verified by a professional before making any significant lifestyle changes.
+          the CFO and its developers shall not be held liable for any health issues, injuries, or data loss resulting from the use of the application. The application provides AI-generated insights which should be verified by a professional before making any significant lifestyle changes.
         </p>
       </section>
 

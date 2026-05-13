@@ -386,7 +386,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
         <div className="space-y-4">
           <h2 className="text-2xl font-black tracking-tight">Portfolio Discovery</h2>
           <p className="text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
-            The CFO is initializing your personal ledger. This secure handshake ensures your assets are properly allocated before the first audit begins.
+            the CFO is initializing your personal ledger. This secure handshake ensures your assets are properly allocated before the first audit begins.
           </p>
         </div>
         <div className="flex items-center gap-3 text-primary">

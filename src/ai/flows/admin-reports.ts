@@ -20,7 +20,7 @@ export const adminReportFlow = ai.defineFlow(
 
     const response = await ai.generate({
       prompt: `
-        You are the Executive Reporting Assistant for "The CFO" (Chief Fitness Officer) app.
+        You are the Executive Reporting Assistant for the "the CFO" (Chief Fitness Officer) app.
         Generate a professional, concise weekly summary for the founder (Nicholas Switzer).
         
         Metrics for the period ${metrics.dateRange.start} to ${metrics.dateRange.end}:

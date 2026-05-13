@@ -46,6 +46,9 @@ const AboutView = dynamic(() => import('@/components/about-view').then(m => ({ d
 const OnboardingTutorial = dynamic(() => import('@/components/onboarding-tutorial').then(m => ({ default: m.OnboardingTutorial })), {
   ssr: false,
 });
+const PublicLanding = dynamic(() => import('@/components/public-landing').then(m => ({ default: m.PublicLanding })), {
+  ssr: false,
+});
 
 /** Must match SYNC_INTERVAL_MS in fitbit-sync.ts — 6 hours. */
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -289,65 +292,11 @@ export default function Home() {
 
   if (!user && !isUserLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6 relative overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/5 rounded-full blur-3xl" />
-
-        <div className="max-w-md w-full space-y-10 text-center relative z-10">
-          <div className="space-y-6">
-            <div className="mx-auto p-5 bg-primary text-white w-fit rounded-[2rem] shadow-2xl rotate-3 hover:rotate-0 transition-transform duration-500">
-              <Briefcase className="w-10 h-10" />
-            </div>
-            <div className="space-y-2">
-              <h1 className="text-5xl font-black tracking-tighter italic uppercase text-foreground leading-none">The CFO</h1>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.4em]">Chief Fitness Officer</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <p className="text-lg font-medium text-muted-foreground leading-relaxed px-4">
-              Your body is a high-stakes portfolio. We&apos;ve been hired to audit your visceral fat and protein solvency.
-            </p>
-            <div className="h-1 w-12 bg-primary/20 mx-auto rounded-full" />
-          </div>
-
-          <div className="grid gap-4 px-2">
-            <Button
-              className="h-16 rounded-2xl text-base font-black uppercase tracking-widest shadow-xl group"
-              onClick={handleGoogleLogin}
-              disabled={isLoggingIn}
-            >
-              {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                <>
-                  Log In / Create Account
-                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              className="h-16 rounded-2xl text-xs font-black uppercase tracking-widest border-2"
-              onClick={handleAnonymousLogin}
-              disabled={isLoggingIn}
-            >
-              Quick Audit (Anonymous)
-            </Button>
-          </div>
-
-          <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-40">
-            Strict Data Solvency • Encrypted Audit Trails • No Garbage Data
-          </p>
-          <div className="flex items-center justify-center gap-4">
-            <Link href="/privacy" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-              Privacy Policy
-            </Link>
-            <span className="text-muted-foreground/30 text-[9px]">•</span>
-            <Link href="/terms" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-              Terms of Service
-            </Link>
-          </div>
-        </div>
-      </div>
+      <PublicLanding 
+        onLogin={handleGoogleLogin} 
+        onAnonymousLogin={handleAnonymousLogin} 
+        isLoggingIn={isLoggingIn} 
+      />
     );
   }
 
@@ -375,7 +324,7 @@ export default function Home() {
             <Briefcase className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">The CFO</h1>
+            <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">the CFO</h1>
             <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">
               Chief Fitness Officer <span className="opacity-50 font-mono normal-case">· {process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev'}</span>
             </p>

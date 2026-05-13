@@ -15,13 +15,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'CFO Fitness | Chief Fitness Officer',
+  title: 'the CFO | Chief Fitness Officer',
   description: 'Manage your body like a high-stakes financial portfolio.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'CFO Fitness',
+    title: 'the CFO',
   },
   icons: {
     icon: [
