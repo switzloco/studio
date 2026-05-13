@@ -82,18 +82,19 @@ const GoogleLogo = ({ className }: { className?: string }) => (
  * Rendered as an inline SVG so it works without any external assets.
  */
 const FitbitLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    {/* Dot-grid pattern that evokes the Fitbit brand mark */}
-    <circle cx="4"  cy="12" r="2" fill="#00B0B9" />
-    <circle cx="9"  cy="12" r="2" fill="#00B0B9" />
-    <circle cx="14" cy="12" r="2" fill="#00B0B9" />
-    <circle cx="4"  cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="9"  cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="14" cy="7"  r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="4"  cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="9"  cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="14" cy="17" r="1.5" fill="#00B0B9" opacity="0.6" />
-    <circle cx="19" cy="12" r="2.5" fill="#00B0B9" />
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+    {/* Diamond of dots — standard Fitbit brand mark */}
+    <circle cx="12" cy="12" r="2" />
+    <circle cx="17" cy="12" r="2" />
+    <circle cx="22" cy="12" r="2" />
+    <circle cx="12" cy="7"  r="2" />
+    <circle cx="12" cy="17" r="2" />
+    <circle cx="7"  cy="12" r="2" />
+    <circle cx="17" cy="7"  r="2" />
+    <circle cx="17" cy="17" r="2" />
+    <circle cx="12" cy="2"  r="2" />
+    <circle cx="12" cy="22" r="2" />
+    <circle cx="2"  cy="12" r="2" />
   </svg>
 );
 
@@ -449,7 +450,8 @@ const FitbitLogo = ({ className }: { className?: string }) => (
       const tzOffset = new Date().getTimezoneOffset();
       if (isViewingToday) {
         const localDate = new Date().toLocaleDateString('en-CA');
-        result = await syncFitbitData(user.uid, localDate, tzOffset);
+        const tz = new Date().getTimezoneOffset();
+        result = await syncFitbitData(user.uid, localDate, tz);
       } else {
         // Viewing a past date — sync that date's snapshot only, never clobber today's live metrics.
         result = await syncFitbitSnapshot(user.uid, selectedDateStr, tzOffset);
@@ -476,13 +478,23 @@ const FitbitLogo = ({ className }: { className?: string }) => (
       const descriptions: Record<string, string> = {
         no_credentials: 'Security handshake missing. Please reconnect your device.',
         token_refresh_failed: 'Device access has expired. Re-authenticate to restore sync.',
-        api_failed: 'Health API is currently unavailable. Please try again later.',
+        api_failed: 'Health API returned an error.',
         write_failed: 'Data retrieved but database update failed. Your progress is safe but unrecorded.',
       };
-      toast({
-        variant: 'destructive',
-        title: 'Sync Failed',
-        description: descriptions[result.reason] ?? 'An unexpected error occurred during sync.',
+
+      let finalDesc = descriptions[result.reason] ?? 'An unexpected error occurred during sync.';
+      if (result.details) {
+        const { httpStatus, endpoint, body, message } = result.details;
+        finalDesc += `\n\nDetails: ${message || ''}`;
+        if (httpStatus) finalDesc += ` (Status: ${httpStatus})`;
+        if (endpoint) finalDesc += ` on ${endpoint}`;
+        if (body) finalDesc += `\nRaw: ${body}`;
+      }
+
+      toast({ 
+        variant: 'destructive', 
+        title: 'Sync Failed', 
+        description: finalDesc
       });
     }
   };
@@ -686,12 +698,18 @@ const FitbitLogo = ({ className }: { className?: string }) => (
               </Card>
             )}
             <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-100 rounded-lg shrink-0">
-                    {isGoogleHealth
-                      ? <GoogleLogo className="w-5 h-5" />
-                      : <FitbitLogo className="w-5 h-5" />}
+                  <div className="p-2 bg-emerald-100 rounded-lg shrink-0 flex items-center gap-1.5">
+                    {isGoogleHealth ? (
+                      <>
+                        <GoogleLogo className="w-5 h-5" />
+                        <div className="w-px h-3 bg-emerald-300" />
+                        <FitbitLogo className="w-4 h-4 text-emerald-600" />
+                      </>
+                    ) : (
+                      <FitbitLogo className="w-5 h-5 text-emerald-600" />
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
@@ -704,12 +722,12 @@ const FitbitLogo = ({ className }: { className?: string }) => (
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="flex-1 sm:flex-none text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
                     <Unplug className="w-3 h-3 mr-1.5" />
                     Reset
                   </Button>
-                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
                     {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
                     {isViewingToday ? 'Sync Now' : 'Sync Date'}
                   </Button>
@@ -736,9 +754,12 @@ const FitbitLogo = ({ className }: { className?: string }) => (
                   Oura Ring
                 </Button>
                 <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-3 rounded-lg shadow-sm">
-                   <GoogleLogo className="w-3.5 h-3.5 mr-1.5" />
-                   Google
-                 </Button>
+                   <div className="flex items-center">
+                     <GoogleLogo className="w-3.5 h-3.5 mr-1" />
+                     <FitbitLogo className="w-3 h-3 text-slate-400 mr-1.5" />
+                     <span>Google Health</span>
+                   </div>
+                </Button>
               </div>
             </CardContent>
           </Card>

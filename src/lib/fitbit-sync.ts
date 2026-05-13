@@ -1,6 +1,6 @@
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { fitbitService } from '@/lib/fitbit-service';
+import { fitbitService, FitbitApiError } from '@/lib/fitbit-service';
 
 /** How often (ms) background sync should run — 6 hours. */
 export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -14,7 +14,21 @@ export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
  */
 export type SyncResult =
   | { success: true }
-  | { success: false; reason: 'no_credentials' | 'token_refresh_failed' | 'api_failed' | 'write_failed' };
+  | { success: false; 
+      reason: 'no_credentials' | 'token_refresh_failed' | 'api_failed' | 'write_failed';
+      details?: { httpStatus?: number; endpoint?: string; body?: string; message?: string } };
+
+function getErrorDetails(err: any) {
+  if (err instanceof FitbitApiError) {
+    return {
+      httpStatus: err.status,
+      endpoint: err.endpoint,
+      message: err.message,
+      body: err.body?.slice(0, 500)
+    };
+  }
+  return { message: String(err?.message ?? err) };
+}
 
 export async function syncFitbitData(userId: string, localDate?: string, timezoneOffset?: number): Promise<SyncResult> {
   const firestore = getAdminFirestore();
@@ -88,11 +102,13 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
         result = await fitbitService.syncTodayData(accessToken, localDate, provider, finalOffset);
       } catch (retryErr) {
         console.error(`[syncFitbitData] Retry after 401 failed for user ${userId}:`, retryErr);
-        return { success: false, reason: 'api_failed' };
+        const details = getErrorDetails(retryErr);
+        return { success: false, reason: 'api_failed', details };
       }
     } else {
       console.error(`[syncFitbitData] Fitbit API call failed for user ${userId}:`, error);
-      return { success: false, reason: 'api_failed' };
+      const details = getErrorDetails(error);
+      return { success: false, reason: 'api_failed', details };
     }
   }
   if (!result.success) {
@@ -102,12 +118,19 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
 
   // Build update, deriving recoveryStatus from HRV (same logic as the OAuth callback).
   // Always set lastActiveDate so the dashboard's isNewDay check doesn't reset Fitbit-sourced metrics.
-  const today = localDate || new Date().toISOString().split('T')[0];
+  // Calculate local date using the timezone offset if not explicitly provided.
+  // getTimezoneOffset() returns minutes to ADD to local time to get UTC, so we subtract to go from UTC back to local.
+  const now = new Date();
+  const localTime = new Date(now.getTime() - ((finalOffset || 0) * 60000));
+  const today = localDate || localTime.toISOString().split('T')[0];
+
   const healthUpdate: Record<string, unknown> = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
     lastActiveDate: today,
   };
+
+  console.log(`[syncFitbitData] Writing health update for ${userId} (${today}):`, JSON.stringify(healthUpdate));
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
@@ -230,11 +253,13 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
         result = await fitbitService.syncTodayData(accessToken, date, provider, finalOffset);
       } catch (retryErr) {
         console.error('[syncFitbitSnapshot] Fitbit API call failed on retry after refresh:', retryErr);
-        return { success: false, reason: 'api_failed' };
+        const details = getErrorDetails(retryErr);
+        return { success: false, reason: 'api_failed', details };
       }
     } else {
       console.error('[syncFitbitSnapshot] Fitbit API call failed:', error);
-      return { success: false, reason: 'api_failed' };
+      const details = getErrorDetails(error);
+      return { success: false, reason: 'api_failed', details };
     }
   }
   if (!result.success) return { success: false, reason: 'api_failed' };

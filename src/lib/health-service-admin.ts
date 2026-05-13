@@ -48,10 +48,27 @@ export const adminHealthService = {
     await docRef.set({ ...updates, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   },
 
+  /** 
+   * Recursively removes undefined fields from an object or array. 
+   * Firestore rejects documents containing undefined values.
+   */
+  deepClean<T>(obj: T): T {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.deepClean(item)) as unknown as T;
+    }
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, this.deepClean(v)])
+    ) as unknown as T;
+  },
+
   /** Writes a per-day Fitbit snapshot using dot-notation so other dates are not overwritten. */
   async saveFitbitDailySnapshot(db: Firestore, userId: string, date: string, snapshot: FitbitDailySnapshot): Promise<void> {
     const docRef = db.doc(`users/${userId}`);
-    await docRef.update({ [`fitbitByDate.${date}`]: snapshot, updatedAt: FieldValue.serverTimestamp() });
+    const cleanSnapshot = this.deepClean(snapshot);
+    await docRef.update({ [`fitbitByDate.${date}`]: cleanSnapshot, updatedAt: FieldValue.serverTimestamp() });
   },
 
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
