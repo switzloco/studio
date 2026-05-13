@@ -567,8 +567,6 @@ export const fitbitService = {
       const caloriesOut = Math.round(fitSumFp(caloriesData));
       const sleepSec    = fitSleepSeconds(sleepData);
 
-      console.log(`[FitbitService] Google Health sync for ${targetDate}: ${stepsCount} steps, ${caloriesOut} kcal, ${sleepSec} sec sleep.`);
-
       // Google Fit has no HRV data type — omit hrv so the metabolic engine
       // runs at its neutral default (hrvMultiplier = 1.0). Recovery status is
       // derived from sleep hours by the caller (fitbit-sync.ts).
