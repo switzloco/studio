@@ -14,8 +14,8 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
 }
 
 /** Syncs a specific past date — snapshot only, never overwrites today's live metrics. */
-export async function syncFitbitSnapshot(userId: string, date: string): Promise<SyncResult> {
-  return _syncFitbitSnapshot(userId, date);
+export async function syncFitbitSnapshot(userId: string, date: string, timezoneOffset?: number): Promise<SyncResult> {
+  return _syncFitbitSnapshot(userId, date, timezoneOffset);
 }
 
 /**

@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
     // the client-side auto-sync will retry on next page load.
     let syncResult: import('@/lib/fitbit-service').FitbitInitialSyncResult | null = null;
     try {
-      syncResult = await fitbitService.syncInitialData(creds.accessToken, provider, timezoneOffset);
+      syncResult = await fitbitService.syncInitialData(creds.accessToken, provider);
     } catch (syncError) {
       console.error('[FitbitCallback] Initial data sync failed (non-fatal — device still linked):', syncError);
     }

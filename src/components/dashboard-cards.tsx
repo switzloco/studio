@@ -447,13 +447,14 @@ const FitbitLogo = ({ className }: { className?: string }) => (
     setIsSyncing(true);
     let result: SyncResult | null = null;
     try {
+      const tzOffset = new Date().getTimezoneOffset();
       if (isViewingToday) {
         const localDate = new Date().toLocaleDateString('en-CA');
         const tz = new Date().getTimezoneOffset();
         result = await syncFitbitData(user.uid, localDate, tz);
       } else {
         // Viewing a past date — sync that date's snapshot only, never clobber today's live metrics.
-        result = await syncFitbitSnapshot(user.uid, selectedDateStr);
+        result = await syncFitbitSnapshot(user.uid, selectedDateStr, tzOffset);
       }
     } catch (e) {
       console.error('[handleResync] Fitbit sync threw:', e);
