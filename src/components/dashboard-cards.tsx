@@ -114,6 +114,11 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
 
+  // Read Oura credentials to show lastSyncedAt in the UI.
+  const ouraTokensRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'oura_tokens') : null,
+    [db, user]
+  );
   const { data: ouraCreds } = useDoc<OuraCredentials>(ouraTokensRef);
 
   // Read Withings credentials to show lastSyncedAt in the UI.

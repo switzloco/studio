@@ -179,32 +179,42 @@ describe('VF Rule 3 — Alcohol Drag (biology: ~1h suppressed fat oxidation per 
   });
 });
 
-// ─── Rule 4: Cortisol Tax ───────────────────────────────────────────────────
-describe('VF Rule 4 — Cortisol Tax (biology: ~20% impaired fat oxidation)', () => {
-  it('reduces a positive score by 20% when sleep < 6h', () => {
-    const good = calculateDailyVFScore(cleanDay({ sleepHours: 8 }));
-    const bad = calculateDailyVFScore(cleanDay({ sleepHours: 5 }));
-    expect(bad.score).toBe(Math.round(good.score * 0.8));
-    expect(bad.breakdown.cortisolMultiplier).toBe(0.8);
+// ─── Rule 4: HRV Multiplier ─────────────────────────────────────────────────
+describe('VF Rule 4 — HRV Multiplier (biology: recovery-based fat oxidation)', () => {
+  it('reduces a positive score by 15% when HRV < 30', () => {
+    const good = calculateDailyVFScore(cleanDay({ hrv: 50 })); // neutral
+    const bad = calculateDailyVFScore(cleanDay({ hrv: 20 }));
+    expect(bad.score).toBe(Math.round(good.score * 0.85));
+    expect(bad.breakdown.hrvMultiplier).toBe(0.85);
+    expect(bad.breakdown.hrvStatus).toBe('tax');
   });
 
-  it('does NOT reduce a negative score (bad sleep should not help surplus)', () => {
+  it('awards +10% bonus when HRV > 80', () => {
+    const neutral = calculateDailyVFScore(cleanDay({ hrv: 50 }));
+    const elite = calculateDailyVFScore(cleanDay({ hrv: 95 }));
+    expect(elite.score).toBe(Math.round(neutral.score * 1.10));
+    expect(elite.breakdown.hrvMultiplier).toBe(1.10);
+    expect(elite.breakdown.hrvStatus).toBe('bonus');
+  });
+
+  it('does NOT reduce a negative score (bad recovery should not help surplus)', () => {
     const result = calculateDailyVFScore(cleanDay({
       caloriesIn: 3000,
       caloriesOut: 2000,
-      sleepHours: 4,
+      hrv: 20,
     }));
-    const withGoodSleep = calculateDailyVFScore(cleanDay({
+    const withGoodRecovery = calculateDailyVFScore(cleanDay({
       caloriesIn: 3000,
       caloriesOut: 2000,
-      sleepHours: 8,
+      hrv: 50,
     }));
-    expect(result.score).toBeLessThanOrEqual(withGoodSleep.score);
+    expect(result.score).toBeLessThanOrEqual(withGoodRecovery.score);
   });
 
-  it('does not penalize when sleep >= 6h', () => {
-    const result = calculateDailyVFScore(cleanDay({ sleepHours: 7 }));
-    expect(result.breakdown.cortisolMultiplier).toBe(1);
+  it('is neutral when HRV is between 30 and 80', () => {
+    const result = calculateDailyVFScore(cleanDay({ hrv: 50 }));
+    expect(result.breakdown.hrvMultiplier).toBe(1);
+    expect(result.breakdown.hrvStatus).toBe('neutral');
   });
 });
 
@@ -241,13 +251,13 @@ describe('VF Scoring — Combined Scenarios', () => {
     expect(result.score).toBe(-200);
   });
 
-  it('fasting day with bad sleep: +100 base × 0.8 = +80', () => {
+  it('fasting day with poor recovery: +100 base × 0.85 = +85', () => {
     const result = calculateDailyVFScore(cleanDay({
       fastingHours: 24,
       caloriesIn: 0,
-      sleepHours: 5,
+      hrv: 25,
     }));
-    expect(result.score).toBe(80);
+    expect(result.score).toBe(85);
   });
 
   it('returns a summary string describing the breakdown', () => {
