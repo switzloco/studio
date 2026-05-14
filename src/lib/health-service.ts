@@ -96,7 +96,7 @@ export interface HealthData {
   onboardingDay: number;
   onboardingComplete: boolean;
   isDeviceVerified: boolean;
-  connectedDevice?: 'fitbit' | 'oura' | 'google' | null; // which wearable is currently linked
+  connectedDevice?: 'fitbit' | 'oura' | 'google' | 'withings' | null; // which wearable is currently linked
   lastActiveDate?: string;
 }
 
@@ -143,6 +143,14 @@ export interface OuraCredentials {
   accessToken: string;
   refreshToken: string;
   ouraUserId: string;
+  expiresAt: number; // Unix ms timestamp
+  lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
+}
+
+export interface WithingsCredentials {
+  accessToken: string;
+  refreshToken: string;
+  withingsUserId: string;
   expiresAt: number; // Unix ms timestamp
   lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
 }
@@ -254,6 +262,22 @@ export const healthService = {
 
   async deleteOuraCredentials(db: Firestore, userId: string): Promise<void> {
     const docRef = doc(db, 'users', userId, 'preferences', 'oura_tokens');
+    await deleteDoc(docRef);
+  },
+
+  async saveWithingsCredentials(db: Firestore, userId: string, creds: WithingsCredentials): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'withings_tokens');
+    await setDoc(docRef, creds);
+  },
+
+  async getWithingsCredentials(db: Firestore, userId: string): Promise<WithingsCredentials | null> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'withings_tokens');
+    const snap = await getDoc(docRef);
+    return snap.exists() ? (snap.data() as WithingsCredentials) : null;
+  },
+
+  async deleteWithingsCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'preferences', 'withings_tokens');
     await deleteDoc(docRef);
   },
 

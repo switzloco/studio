@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials } from './health-service';
+import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials, WithingsCredentials } from './health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from './food-exercise-types';
 
 /**
@@ -131,6 +131,22 @@ export const adminHealthService = {
 
   async deleteOuraCredentials(db: Firestore, userId: string): Promise<void> {
     const docRef = db.doc(`users/${userId}/preferences/oura_tokens`);
+    await docRef.delete();
+  },
+
+  async saveWithingsCredentials(db: Firestore, userId: string, creds: WithingsCredentials): Promise<void> {
+    const docRef = db.doc(`users/${userId}/preferences/withings_tokens`);
+    await docRef.set(creds);
+  },
+
+  async getWithingsCredentials(db: Firestore, userId: string): Promise<WithingsCredentials | null> {
+    const docRef = db.doc(`users/${userId}/preferences/withings_tokens`);
+    const snap = await docRef.get();
+    return snap.exists ? (snap.data() as WithingsCredentials) : null;
+  },
+
+  async deleteWithingsCredentials(db: Firestore, userId: string): Promise<void> {
+    const docRef = db.doc(`users/${userId}/preferences/withings_tokens`);
     await docRef.delete();
   },
 

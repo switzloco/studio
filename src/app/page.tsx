@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory } from '@/app/actions/fitbit';
+import { syncWithingsData } from '@/app/actions/withings';
 
 const ChatInterface = dynamic(() => import('@/components/chat-interface').then(m => ({ default: m.ChatInterface })), {
   ssr: false,
@@ -85,10 +86,14 @@ export default function Home() {
     }
   }, [user, db]);
 
-  // Sync Fitbit data on load if the last sync was more than 6 hours ago
+  // Sync device data on load if the last sync was more than 6 hours ago
   // (or if we've never synced). Runs once per session.
   useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google' || hasSyncedFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified || hasSyncedFitbit.current) return;
+    
+    // Skip if it's Oura (they use different patterns/background tasks usually)
+    // Actually, let's just focus on Fitbit and Withings which we manage here.
+    if (healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google') return;
     hasSyncedFitbit.current = true;
 
     (async () => {
@@ -97,9 +102,14 @@ export default function Home() {
         const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
         if (stale) {
           const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
-          const result = await syncFitbitData(user.uid, localDate);
-          if (!result.success && result.reason === 'token_refresh_failed') {
-            toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your device.' });
+          
+          if (healthData?.connectedDevice === 'withings') {
+            await syncWithingsData(user.uid);
+          } else {
+            const result = await syncFitbitData(user.uid, localDate);
+            if (!result.success && result.reason === 'token_refresh_failed') {
+              toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your device.' });
+            }
           }
         }
       } catch (e) {
@@ -156,6 +166,17 @@ export default function Home() {
     isPullRefreshingRef.current = true;
     try {
       const localDate = new Date().toLocaleDateString('en-CA');
+      
+      if (healthData?.connectedDevice === 'withings') {
+        const result = await syncWithingsData(user.uid);
+        if (result.success) {
+          toast({ title: 'Withings Synced', description: 'Calorie data refreshed.' });
+        } else {
+          toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not sync Withings data.' });
+        }
+        return;
+      }
+
       const result = await syncFitbitData(user.uid, localDate);
       if (result.success) {
         toast({ title: 'Synced', description: 'Portfolio data updated.' });
@@ -232,8 +253,14 @@ export default function Home() {
     if (params.get('fitbit_sync') === 'success') {
       toast({ title: 'Fitbit Linked', description: 'Hardware verified. Device data is now trusted.' });
       window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('withings_sync') === 'success') {
+      toast({ title: 'Withings Linked', description: 'Withings hardware verified. Calorie data is now trusted.' });
+      window.history.replaceState({}, '', window.location.pathname);
     } else if (params.get('error')?.startsWith('fitbit_')) {
       toast({ variant: 'destructive', title: 'Fitbit Link Failed', description: 'Check your Fitbit credentials and try again.' });
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('error')?.startsWith('withings_')) {
+      toast({ variant: 'destructive', title: 'Withings Link Failed', description: 'Check your Withings credentials and try again.' });
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [toast]);

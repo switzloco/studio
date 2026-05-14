@@ -11,6 +11,8 @@ import { fitbitService } from '@/lib/fitbit-service';
 import { ouraService } from '@/lib/oura-service';
 import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
 import { syncOuraData, disconnectOura, OuraSyncResult } from '@/app/actions/oura';
+import { syncWithingsData, disconnectWithings, WithingsSyncResult } from '@/app/actions/withings';
+import { withingsService } from '@/lib/withings-service';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
@@ -98,6 +100,13 @@ const FitbitLogo = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const WithingsLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+    <path d="M16.5 8l-1.5 8h-2l-1-5-1 5h-2l-1.5-8h2l.5 5 1-5h2l1 5 .5-5h2z"/>
+  </svg>
+);
+
   // Read Fitbit credentials to show lastSyncedAt in the UI.
   const fitbitTokensRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'fitbit_tokens') : null,
@@ -105,12 +114,14 @@ const FitbitLogo = ({ className }: { className?: string }) => (
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
 
-  // Read Oura credentials to show lastSyncedAt in the UI.
-  const ouraTokensRef = useMemoFirebase(
-    () => user ? doc(db, 'users', user.uid, 'preferences', 'oura_tokens') : null,
+  const { data: ouraCreds } = useDoc<OuraCredentials>(ouraTokensRef);
+
+  // Read Withings credentials to show lastSyncedAt in the UI.
+  const withingsTokensRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'withings_tokens') : null,
     [db, user]
   );
-  const { data: ouraCreds } = useDoc<OuraCredentials>(ouraTokensRef);
+  const { data: withingsCreds } = useDoc<any>(withingsTokensRef);
 
   // Today's date string (YYYY-MM-DD)
   const todayStr = React.useMemo(() => {
@@ -255,6 +266,7 @@ const FitbitLogo = ({ className }: { className?: string }) => (
 
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [isOuraSyncing, setIsOuraSyncing] = React.useState(false);
+  const [isWithingsSyncing, setIsWithingsSyncing] = React.useState(false);
 
   // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
   const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
@@ -594,6 +606,44 @@ const FitbitLogo = ({ className }: { className?: string }) => (
     }
   };
 
+  const handleConnectWithings = async () => {
+    if (!user) return;
+    const clientId = process.env.NEXT_PUBLIC_WITHINGS_CLIENT_ID;
+    if (!clientId) {
+      toast({ title: 'Withings Connection', description: 'Withings integration is not configured. Set NEXT_PUBLIC_WITHINGS_CLIENT_ID.' });
+      return;
+    }
+    window.location.href = withingsService.getAuthUrl(user.uid);
+  };
+
+  const handleResyncWithings = async () => {
+    if (!user || isWithingsSyncing) return;
+    setIsWithingsSyncing(true);
+    try {
+      const result = await syncWithingsData(user.uid);
+      if (result.success) {
+        toast({ title: 'Withings Sync Complete', description: 'Calorie data refreshed from Withings.' });
+      } else {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not sync Withings data.' });
+      }
+    } catch (e) {
+      console.error('[handleResyncWithings] Failed:', e);
+      toast({ variant: 'destructive', title: 'Sync Error', description: 'An unexpected error occurred.' });
+    } finally {
+      setIsWithingsSyncing(false);
+    }
+  };
+
+  const handleDisconnectWithings = async () => {
+    if (!user) return;
+    const result = await disconnectWithings(user.uid);
+    if (result.ok) {
+      toast({ title: 'Withings Disconnected', description: 'Withings connection removed.' });
+    } else {
+      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect Withings.' });
+    }
+  };
+
   return (
     <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
       <div className="space-y-6">
@@ -736,30 +786,63 @@ const FitbitLogo = ({ className }: { className?: string }) => (
               </CardContent>
             </Card>
           </div>
+        ) : data.isDeviceVerified && data.connectedDevice === 'withings' ? (
+          // Withings connected
+          <Card className="border-none bg-blue-50 ring-1 ring-blue-200 shadow-sm overflow-hidden">
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <WithingsLogo className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-tight text-blue-800">Withings Connected</p>
+                  <p className="text-[10px] font-bold text-blue-700/70">
+                    {withingsCreds?.lastSyncedAt
+                      ? `Last synced ${formatTimeAgo(withingsCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
+                      : 'Device-verified calorie tracking enabled.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleDisconnectWithings} className="text-blue-800 border-blue-200 hover:bg-blue-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
+                  <Unplug className="w-3 h-3 mr-1.5" />
+                  Reset
+                </Button>
+                <Button size="sm" onClick={handleResyncWithings} disabled={isWithingsSyncing} className="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
+                  {isWithingsSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
+                  Sync Now
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : (
           // No device connected — offer both options
           <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 flex items-center justify-between gap-4">
+            <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-orange-100 rounded-lg">
                   <ShieldAlert className="w-5 h-5 text-orange-600" />
                 </div>
                 <div>
                   <p className="text-xs font-black uppercase tracking-tight text-orange-800">Self-Reported Data</p>
-                  <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and HRV.</p>
+                  <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and calories.</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button size="sm" onClick={handleConnectOura} className="bg-white border border-violet-200 hover:bg-violet-50 text-violet-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
                   <OuraLogo className="w-3.5 h-3.5 mr-2" />
-                  Oura Ring
+                  Oura
                 </Button>
                 <Button size="sm" onClick={() => handleConnectFitbit('fitbit')} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-[10px] uppercase h-8 px-3 rounded-lg shadow-sm">
-                   <div className="flex items-center">
-                     <GoogleLogo className="w-3.5 h-3.5 mr-1" />
-                     <FitbitLogo className="w-3 h-3 text-slate-400 mr-1.5" />
-                     <span>Google Health</span>
-                   </div>
+                  <div className="flex items-center">
+                    <GoogleLogo className="w-3.5 h-3.5 mr-1" />
+                    <FitbitLogo className="w-3 h-3 text-slate-400 mr-1.5" />
+                    <span>Google Health</span>
+                  </div>
+                </Button>
+                <Button size="sm" onClick={handleConnectWithings} className="bg-white border border-blue-200 hover:bg-blue-50 text-blue-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
+                  <WithingsLogo className="w-3.5 h-3.5 mr-2" />
+                  Withings
                 </Button>
               </div>
             </CardContent>
