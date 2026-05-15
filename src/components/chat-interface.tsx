@@ -438,12 +438,12 @@ export function ChatInterface() {
         {/* Hidden inputs */}
         <input
           type="file" accept="image/*" capture="environment"
-          hidden ref={cameraInputRef}
+          className="sr-only" ref={cameraInputRef}
           onChange={handleFileChange}
         />
         <input
           type="file" accept="image/*" multiple
-          hidden ref={galleryInputRef}
+          className="sr-only" ref={galleryInputRef}
           onChange={handleFileChange}
         />
 
