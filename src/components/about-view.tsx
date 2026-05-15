@@ -146,7 +146,7 @@ export function AboutView() {
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-6 md:p-8 space-y-6">
             <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-              If you&apos;re testing this out, I want to hear from you. Whether you have ideas for new features, ways to improve the scoring system, or you just spotted a bug — your feedback is huge.
+              If you&apos;re testing this out, I want to hear from you. Whether you have ideas for new features, ways to improve the scoring system, or you just spotted a bug — your feedback is huge. You can use the form below, or just email me directly at <a href="mailto:nicholas.switzer@gmail.com" className="text-primary hover:underline font-bold">nicholas.switzer@gmail.com</a>.
             </p>
 
             {status === 'success' ? (
@@ -196,7 +196,7 @@ export function AboutView() {
                   />
                 </div>
                 {status === 'error' && (
-                  <p className="text-[11px] text-destructive font-bold">Something went wrong — please try again.</p>
+                  <p className="text-[11px] text-destructive font-bold">Something went wrong — please try again, or email <a href="mailto:nicholas.switzer@gmail.com" className="underline">nicholas.switzer@gmail.com</a>.</p>
                 )}
                 <Button
                   type="submit"

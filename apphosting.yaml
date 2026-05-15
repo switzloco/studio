@@ -51,6 +51,12 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: NEXT_PUBLIC_WITHINGS_CLIENT_ID
+    value: "46f572d1107de95fd0f9e62057b09adadf35ea7906156a785d962cccb57f9530"
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: GOOGLE_GENAI_API_KEY
     secret: GOOGLE_GENAI_API_KEY
     availability:
@@ -74,6 +80,11 @@ env:
 
   - variable: GOOGLE_HEALTH_CLIENT_SECRET
     secret: GOOGLE_HEALTH_CLIENT_SECRET
+    availability:
+      - RUNTIME
+
+  - variable: WITHINGS_CLIENT_SECRET
+    secret: WITHINGS_CLIENT_SECRET
     availability:
       - RUNTIME
 
