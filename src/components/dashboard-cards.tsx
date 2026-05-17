@@ -8,11 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle, Activity, TrendingUp } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
-import { ouraService } from '@/lib/oura-service';
 import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
-import { syncOuraData, disconnectOura, OuraSyncResult } from '@/app/actions/oura';
-import { syncWithingsData, disconnectWithings, WithingsSyncResult } from '@/app/actions/withings';
-import { withingsService } from '@/lib/withings-service';
+import { syncOuraData, disconnectOura, getOuraAuthUrl, OuraSyncResult } from '@/app/actions/oura';
+import { syncWithingsData, disconnectWithings, getWithingsAuthUrl, WithingsSyncResult } from '@/app/actions/withings';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
@@ -534,8 +532,14 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const handleConnectOura = async () => {
     if (!user) return;
 
-    const clientId = process.env.NEXT_PUBLIC_OURA_CLIENT_ID;
-    if (!clientId) {
+    const result = await getOuraAuthUrl(user.uid, window.location.origin);
+
+    if ('error' in result) {
+      toast({ variant: 'destructive', title: 'Connection Failed', description: result.error });
+      return;
+    }
+
+    if ('mock' in result) {
       try {
         await healthService.saveOuraCredentials(db, user.uid, {
           accessToken: 'mock_oura_token',
@@ -558,7 +562,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       return;
     }
 
-    window.location.href = ouraService.getAuthUrl(user.uid);
+    window.location.href = result.url;
   };
 
   const handleResyncOura = async () => {
@@ -613,12 +617,12 @@ const WithingsLogo = ({ className }: { className?: string }) => (
 
   const handleConnectWithings = async () => {
     if (!user) return;
-    const clientId = process.env.NEXT_PUBLIC_WITHINGS_CLIENT_ID;
-    if (!clientId) {
-      toast({ title: 'Withings Connection', description: 'Withings integration is not configured. Set NEXT_PUBLIC_WITHINGS_CLIENT_ID.' });
+    const result = await getWithingsAuthUrl(user.uid, window.location.origin);
+    if ('error' in result) {
+      toast({ variant: 'destructive', title: 'Withings Connection', description: result.error });
       return;
     }
-    window.location.href = withingsService.getAuthUrl(user.uid);
+    window.location.href = result.url;
   };
 
   const handleResyncWithings = async () => {

@@ -8,6 +8,27 @@ import type { OuraSyncResult } from '@/lib/oura-sync';
 
 export type { OuraSyncResult };
 
+const OURA_AUTH_BASE = 'https://cloud.ouraring.com';
+
+/**
+ * Builds the Oura OAuth authorize URL at request time. See the matching
+ * Withings action for the rationale (env-var build-time inlining hazard).
+ */
+export async function getOuraAuthUrl(
+  userId: string,
+  origin: string
+): Promise<{ url: string } | { mock: true } | { error: string }> {
+  const clientId = process.env.NEXT_PUBLIC_OURA_CLIENT_ID;
+  if (!clientId) {
+    return { mock: true };
+  }
+  const redirectUri = `${origin}/api/auth/oura/callback`;
+  const scope = 'daily sleep personal';
+  const state = encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri }));
+  const url = `${OURA_AUTH_BASE}/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`;
+  return { url };
+}
+
 export async function syncOuraData(userId: string, localDate?: string): Promise<OuraSyncResult> {
   return _syncOuraData(userId, localDate);
 }

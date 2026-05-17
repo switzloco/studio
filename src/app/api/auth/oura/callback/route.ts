@@ -26,6 +26,8 @@ function parseState(raw: string, fallbackOrigin: string): { userId: string; redi
       return { userId: parsed.uid, redirectUri: parsed.redirect };
     }
   } catch { /* not JSON — legacy format */ }
+  // Legacy fallback: raw state was a bare userId. Reconstruct the exact redirect_uri
+  // the auth init used so Oura's strict token-exchange validation passes.
   return { userId: raw, redirectUri: `${fallbackOrigin}/api/auth/oura/callback` };
 }
 
@@ -76,57 +78,78 @@ export async function GET(request: NextRequest) {
       lastSyncedAt: Date.now(),
     });
 
-    const syncResult = await ouraService.syncInitialData(creds.accessToken);
-
-    const healthUpdate: Record<string, unknown> = {
+    // Mark the device verified immediately after creds save. If the initial sync
+    // below fails (Oura returns 202/no-data for fresh accounts, or rate-limits),
+    // the connection still stands and the home page won't bounce the user back
+    // through the OAuth approval screen.
+    await adminHealthService.updateHealthData(firestore, userId, {
       isDeviceVerified: true,
       connectedDevice: 'oura',
       onboardingDay: 1,
-      steps: syncResult.steps.value,
-      sleepHours: syncResult.sleep.value,
-      hrv: syncResult.hrv.value,
-    };
-    if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
-    if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
-    if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-      healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
-    }
-
-    if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
-    else if (syncResult.hrv.value >= 30) healthUpdate.recoveryStatus = 'medium';
-    else if (syncResult.hrv.value > 0) healthUpdate.recoveryStatus = 'low';
-
-    await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
-
-    const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
-    const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
-      steps: syncResult.steps.value,
-      sleepHours: syncResult.sleep.value,
-    };
-    if (syncResult.hrv.value > 0) {
-      snapshot.hrv = syncResult.hrv.value;
-      snapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
-    }
-    if (healthUpdate.dailyCaloriesOut) {
-      snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
-    }
-    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
-
-    const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
-    await adminHealthService.logActivity(firestore, userId, {
-      category: 'health_sync',
-      content: `Hardware Audit Successful: Oura Ring linked${datePart}. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.${syncResult.weightKg ? ` Weight: ${syncResult.weightKg}kg.` : ''}`,
-      metrics: [
-        'status:verified',
-        'source:oura',
-        `steps:${syncResult.steps.value}`,
-        `sleep_h:${syncResult.sleep.value.toFixed(1)}`,
-        `hrv:${syncResult.hrv.value}`,
-        ...(syncResult.weightKg ? [`weight_kg:${syncResult.weightKg}`] : []),
-        ...(syncResult.heightCm ? [`height_cm:${syncResult.heightCm}`] : []),
-      ],
-      verified: true,
     });
+
+    let syncResult: import('@/lib/oura-service').OuraInitialSyncResult | null = null;
+    try {
+      syncResult = await ouraService.syncInitialData(creds.accessToken);
+    } catch (syncError) {
+      console.error('[OuraCallback] Initial data sync failed (non-fatal — ring still linked):', syncError);
+    }
+
+    if (syncResult) {
+      const healthUpdate: Record<string, unknown> = {
+        steps: syncResult.steps.value,
+        sleepHours: syncResult.sleep.value,
+        hrv: syncResult.hrv.value,
+      };
+      if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
+      if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
+      if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
+        healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
+      }
+
+      if (syncResult.hrv.value >= 50) healthUpdate.recoveryStatus = 'high';
+      else if (syncResult.hrv.value >= 30) healthUpdate.recoveryStatus = 'medium';
+      else if (syncResult.hrv.value > 0) healthUpdate.recoveryStatus = 'low';
+
+      await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+
+      const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
+      const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
+        steps: syncResult.steps.value,
+        sleepHours: syncResult.sleep.value,
+      };
+      if (syncResult.hrv.value > 0) {
+        snapshot.hrv = syncResult.hrv.value;
+        snapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
+      }
+      if (healthUpdate.dailyCaloriesOut) {
+        snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
+      }
+      await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
+
+      const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: `Hardware Audit Successful: Oura Ring linked${datePart}. Steps: ${syncResult.steps.value}, Sleep: ${syncResult.sleep.value.toFixed(1)}h, HRV: ${syncResult.hrv.value}ms.${syncResult.weightKg ? ` Weight: ${syncResult.weightKg}kg.` : ''}`,
+        metrics: [
+          'status:verified',
+          'source:oura',
+          `steps:${syncResult.steps.value}`,
+          `sleep_h:${syncResult.sleep.value.toFixed(1)}`,
+          `hrv:${syncResult.hrv.value}`,
+          ...(syncResult.weightKg ? [`weight_kg:${syncResult.weightKg}`] : []),
+          ...(syncResult.heightCm ? [`height_cm:${syncResult.heightCm}`] : []),
+        ],
+        verified: true,
+      });
+    } else {
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: 'Hardware Audit Successful: Oura Ring linked. Initial data sync deferred — will retry on next page load.',
+        metrics: ['status:verified', 'source:oura', 'initial_sync:deferred'],
+        verified: true,
+      });
+    }
 
     return NextResponse.redirect(new URL('?oura_sync=success', appRoot));
   } catch (error) {

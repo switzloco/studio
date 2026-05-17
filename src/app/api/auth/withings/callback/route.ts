@@ -58,41 +58,59 @@ export async function GET(request: NextRequest) {
       lastSyncedAt: Date.now(),
     });
 
-    const syncResult = await withingsService.syncTodayData(creds.accessToken);
-
-    const healthUpdate: Record<string, unknown> = {
+    // Mark verified immediately after creds save. Same rationale as Oura/Fitbit:
+    // a downstream sync failure must not strand the user back at the OAuth gate.
+    await adminHealthService.updateHealthData(firestore, userId, {
       isDeviceVerified: true,
       connectedDevice: 'withings',
-      steps: syncResult.steps?.value ?? 0,
-    };
-    
-    if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-      healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
+    });
+
+    let syncResult: import('@/lib/withings-service').WithingsSyncResult | null = null;
+    let latestWeight: number | undefined;
+    try {
+      syncResult = await withingsService.syncTodayData(creds.accessToken);
+      latestWeight = await withingsService.getLatestWeight(creds.accessToken);
+    } catch (syncError) {
+      console.error('[WithingsCallback] Initial data sync failed (non-fatal — device still linked):', syncError);
     }
 
-    const latestWeight = await withingsService.getLatestWeight(creds.accessToken);
-    if (latestWeight) healthUpdate.weightKg = latestWeight;
+    if (syncResult) {
+      const healthUpdate: Record<string, unknown> = {
+        steps: syncResult.steps?.value ?? 0,
+      };
+      if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
+        healthUpdate.dailyCaloriesOut = syncResult.caloriesOut.value;
+      }
+      if (latestWeight) healthUpdate.weightKg = latestWeight;
 
-    await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
+      await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
 
-    const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
-    const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
-      steps: syncResult.steps?.value ?? 0,
-      caloriesOut: healthUpdate.dailyCaloriesOut as number,
-    };
-    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
+      const snapshotDate = syncResult.dataDate || new Date().toISOString().split('T')[0];
+      const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
+        steps: syncResult.steps?.value ?? 0,
+        caloriesOut: healthUpdate.dailyCaloriesOut as number,
+      };
+      await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
 
-    await adminHealthService.logActivity(firestore, userId, {
-      category: 'health_sync',
-      content: `Hardware Audit Successful: Withings linked. Steps: ${healthUpdate.steps}${healthUpdate.weightKg ? `, Weight: ${healthUpdate.weightKg}kg` : ''}.`,
-      metrics: [
-        'status:verified',
-        'source:withings',
-        `steps:${healthUpdate.steps}`,
-        ...(healthUpdate.weightKg ? [`weight_kg:${healthUpdate.weightKg}`] : []),
-      ],
-      verified: true,
-    });
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: `Hardware Audit Successful: Withings linked. Steps: ${healthUpdate.steps}${healthUpdate.weightKg ? `, Weight: ${healthUpdate.weightKg}kg` : ''}.`,
+        metrics: [
+          'status:verified',
+          'source:withings',
+          `steps:${healthUpdate.steps}`,
+          ...(healthUpdate.weightKg ? [`weight_kg:${healthUpdate.weightKg}`] : []),
+        ],
+        verified: true,
+      });
+    } else {
+      await adminHealthService.logActivity(firestore, userId, {
+        category: 'health_sync',
+        content: 'Hardware Audit Successful: Withings linked. Initial data sync deferred — will retry on next page load.',
+        metrics: ['status:verified', 'source:withings', 'initial_sync:deferred'],
+        verified: true,
+      });
+    }
 
     return NextResponse.redirect(new URL('?withings_sync=success', appRoot));
   } catch (error) {
