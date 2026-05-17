@@ -294,6 +294,7 @@ const logFoodTool = ai.defineTool(
       carbsG: z.number(),
       fatG: z.number(),
       fiberG: z.number().optional(),
+      plantMassG: z.number().optional().describe('Raw weight in grams of fruits and vegetables only (Starrett 800g protocol). Apple = full portion. Mixed salad = ~80% of portion. Grain/meat/dairy dish = 0. Omit if not applicable.'),
       source: z.enum(['usda', 'web_search', 'user_estimate']),
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
       alcoholDrinks: z.number().optional().describe('Number of alcoholic drinks in this meal (beer, wine, cocktail = 1 each). Default 0.'),
@@ -321,6 +322,7 @@ const logFoodTool = ai.defineTool(
       carbsG: input.carbsG,
       fatG: input.fatG,
       fiberG: input.fiberG ?? 0,
+      plantMassG: input.plantMassG,
       source: input.source,
       meal: input.meal,
       alcoholDrinks: input.alcoholDrinks ?? 0,
@@ -335,11 +337,13 @@ const logFoodTool = ai.defineTool(
     const newProteinTotal = allTodayFood.reduce((s, e) => s + (e.proteinG || 0), 0);
     const newCarbsTotal = allTodayFood.reduce((s, e) => s + (e.carbsG || 0), 0);
     const newCaloriesTotal = allTodayFood.reduce((s, e) => s + (e.calories || 0), 0);
+    const newPlantTotal = allTodayFood.reduce((s, e) => s + (e.plantMassG || 0), 0);
 
     await healthService.updateHealthData(firestore, input.userId, {
       dailyProteinG: newProteinTotal,
       dailyCarbsG: newCarbsTotal,
       dailyCaloriesIn: newCaloriesTotal,
+      dailyPlantG: newPlantTotal,
       lastActiveDate: input.localDate,
     });
 

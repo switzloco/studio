@@ -14,6 +14,10 @@ export interface FoodLogEntry {
   carbsG: number;
   fatG: number;
   fiberG: number;
+  // Raw weight in grams of fruits + vegetables only (Starrett 800g protocol).
+  // Apple = 100% of portion. Salad = ~80% portion. Grain dish = 0g. Optional;
+  // 0 / undefined means "not tracked".
+  plantMassG?: number;
   glycemicIndex?: number;      // 0-100; affects absorption speed and insulin spike
   omega3Mg?: number;           // Omega-3 content (EPA/DHA); anti-inflammatory & sensitivity
   caffeineMg?: number;         // caffeine content; boosts fat oxidation rate

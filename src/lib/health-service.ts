@@ -84,6 +84,8 @@ export interface HealthData {
   dailyCarbsG: number;
   dailyCaloriesIn: number;
   dailyCaloriesOut: number;
+  /** Sum of plantMassG across today's food log entries (Starrett 800g target). */
+  dailyPlantG?: number;
   visceralFatPoints: number;
   heightCm?: number;
   weightKg?: number;
@@ -116,17 +118,37 @@ export interface TemporaryContext {
   expiresAt: string; // "YYYY-MM-DD" — context is ignored after this date
 }
 
+/**
+ * Per-section visibility toggles for the Today dashboard. Undefined keys
+ * default to "on" (the historical behavior); plant matter is opt-in.
+ */
+export interface DisplayPreferences {
+  /** Hide DashboardCharts (glycogen + fat-burn-vs-lean teaching). Default: true. */
+  showAdvancedMetabolic?: boolean;
+  /** Hide the Protein Liquidity card. Default: true. */
+  showProtein?: boolean;
+  /** Show the new Plant Matter (Starrett 800g) card. Default: false. */
+  showPlantMatter?: boolean;
+  /** Hide the Recovery Audit card. Default: true. */
+  showRecovery?: boolean;
+  /** Hide the Equity Score / VF Points card. Default: true. */
+  showVfScore?: boolean;
+}
+
 export interface UserPreferences {
   weeklySchedule: string;
   equipment: string[];
   targets: {
     proteinGoal: number;
     fatPointsGoal: number;
+    /** Daily plant-matter target in grams (raw weight, fruits + veg). Default 800. */
+    plantGoalG?: number;
   };
   profile: UserProfile;
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
   temporaryContext?: TemporaryContext;           // short-term schedule/situation override
   autoChatEnabled?: boolean;                    // auto-start chat on Coach tab mount (default true)
+  display?: DisplayPreferences;
 }
 
 export interface FitbitCredentials {
