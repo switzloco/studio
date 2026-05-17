@@ -72,9 +72,16 @@ export default function Home() {
   const dailyScrollRef = useRef<HTMLDivElement>(null);
   const touchStartY = useRef(0);
   const isPulling = useRef(false);
+  const isPullCandidate = useRef(false);
   const pullDistanceRef = useRef(0);
   const isPullRefreshingRef = useRef(false);
-  const PULL_THRESHOLD = 72;
+  // Gesture-classification dead-zone: the user must drag past this much in
+  // the downward direction before we commit to PTR. Anything less is treated
+  // as normal scrolling and never blocks the page.
+  const PULL_COMMIT_PX = 16;
+  // Distance past the dead-zone the user has to keep pulling for the refresh
+  // to actually fire. Tuned to iOS Safari's native PTR feel.
+  const PULL_THRESHOLD = 110;
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
@@ -197,8 +204,10 @@ export default function Home() {
   useEffect(() => { doFitbitSyncRef.current = doFitbitSync; }, [doFitbitSync]);
 
   // Custom pull-to-refresh on the Today tab.
-  // Uses passive:true for touchstart, passive:false for touchmove (to call preventDefault).
-  // overscroll-y-contain on the container blocks the native browser PTR.
+  // A touch at scrollTop=0 starts as a "candidate"; it only becomes a real
+  // pull once the user has dragged past PULL_COMMIT_PX downward without first
+  // moving upward. This dead-zone lets normal upward scroll-swipes through
+  // without blocking the page.
   useEffect(() => {
     const el = dailyScrollRef.current;
     if (!el || activeTab !== 'daily') return;
@@ -206,19 +215,47 @@ export default function Home() {
     const onTouchStart = (e: TouchEvent) => {
       if (el.scrollTop === 0 && !isPullRefreshingRef.current) {
         touchStartY.current = e.touches[0].clientY;
-        isPulling.current = true;
+        isPulling.current = false;
+        isPullCandidate.current = true;
       }
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (!isPulling.current || isPullRefreshingRef.current) return;
+      if (isPullRefreshingRef.current) return;
+      if (!isPullCandidate.current && !isPulling.current) return;
+
       const delta = e.touches[0].clientY - touchStartY.current;
-      if (delta > 0 && el.scrollTop === 0) {
+
+      // Classification phase: we haven't committed to PTR yet.
+      if (!isPulling.current) {
+        // Any upward movement during the dead-zone means the user is scrolling.
+        // Abandon candidacy so the rest of the gesture is owned by the browser.
+        if (delta < 0) {
+          isPullCandidate.current = false;
+          return;
+        }
+        // Still in the dead-zone — don't intercept the gesture.
+        if (delta < PULL_COMMIT_PX) return;
+        // Crossed the dead-zone going down. Only commit if we're still at the
+        // top of the scroll container — otherwise the user already scrolled
+        // somewhere and we shouldn't hijack the gesture.
+        if (el.scrollTop !== 0) {
+          isPullCandidate.current = false;
+          return;
+        }
+        isPulling.current = true;
+        isPullCandidate.current = false;
+      }
+
+      // Active pull — drive the indicator.
+      const effective = delta - PULL_COMMIT_PX;
+      if (effective > 0 && el.scrollTop === 0) {
         e.preventDefault();
-        const clamped = Math.min(delta, PULL_THRESHOLD * 1.5);
+        const clamped = Math.min(effective, PULL_THRESHOLD * 1.4);
         pullDistanceRef.current = clamped;
         setPullDistance(clamped);
-      } else if (delta < 0) {
+      } else if (effective <= 0) {
+        // User backed the pull off — release without firing.
         isPulling.current = false;
         pullDistanceRef.current = 0;
         setPullDistance(0);
@@ -226,6 +263,7 @@ export default function Home() {
     };
 
     const onTouchEnd = () => {
+      isPullCandidate.current = false;
       if (!isPulling.current) return;
       isPulling.current = false;
       const dist = pullDistanceRef.current;
@@ -236,14 +274,23 @@ export default function Home() {
       }
     };
 
+    const onTouchCancel = () => {
+      isPullCandidate.current = false;
+      isPulling.current = false;
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+    };
+
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchCancel);
 
     return () => {
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [activeTab]);
 

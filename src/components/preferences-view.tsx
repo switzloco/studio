@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity, MessageSquare } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity, MessageSquare, Sliders } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
@@ -484,6 +484,123 @@ export function PreferencesView() {
                 <Switch
                   checked={prefs.autoChatEnabled ?? true}
                   onCheckedChange={(checked) => setPrefs({ ...prefs, autoChatEnabled: checked })}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Advanced Tracking — opt-in / out for each dashboard card. */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <Sliders className="w-4 h-4" />
+                Advanced Tracking
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-4 space-y-5">
+              <p className="text-[10px] font-medium text-muted-foreground leading-relaxed">
+                Show or hide individual sections of the Today dashboard. Steps Inventory, Portfolio Weight, and the Fat Burn Index score always stay visible.
+              </p>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Advanced Metabolic</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Glycogen reservoir + fat-burned-vs-lean charts. Caloric burn stays either way.
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.display?.showAdvancedMetabolic ?? true}
+                  onCheckedChange={(checked) =>
+                    setPrefs({ ...prefs, display: { ...prefs.display, showAdvancedMetabolic: checked } })
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Protein Liquidity</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Daily protein progress card.
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.display?.showProtein ?? true}
+                  onCheckedChange={(checked) =>
+                    setPrefs({ ...prefs, display: { ...prefs.display, showProtein: checked } })
+                  }
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-1 min-w-0">
+                    <p className="text-sm font-black uppercase tracking-tight text-foreground">Plant Matter</p>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                      Starrett 800g protocol — fruits + vegetables by raw weight.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={prefs.display?.showPlantMatter ?? false}
+                    onCheckedChange={(checked) =>
+                      setPrefs({ ...prefs, display: { ...prefs.display, showPlantMatter: checked } })
+                    }
+                  />
+                </div>
+                {(prefs.display?.showPlantMatter ?? false) && (
+                  <div className="flex items-center gap-3 pl-1">
+                    <Label htmlFor="plant-goal" className="text-[10px] uppercase font-black text-muted-foreground tracking-widest">
+                      Daily target
+                    </Label>
+                    <Input
+                      id="plant-goal"
+                      type="number"
+                      min={100}
+                      max={2000}
+                      step={50}
+                      value={prefs.targets?.plantGoalG ?? 800}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isNaN(v)) return;
+                        setPrefs({
+                          ...prefs,
+                          targets: { ...prefs.targets, plantGoalG: v },
+                        });
+                      }}
+                      className="h-8 w-24 text-sm font-black"
+                    />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">grams</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Recovery Audit</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    HRV-based recovery card.
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.display?.showRecovery ?? true}
+                  onCheckedChange={(checked) =>
+                    setPrefs({ ...prefs, display: { ...prefs.display, showRecovery: checked } })
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">VF Equity Score</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Long-term visceral-fat-reduction points panel.
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.display?.showVfScore ?? true}
+                  onCheckedChange={(checked) =>
+                    setPrefs({ ...prefs, display: { ...prefs.display, showVfScore: checked } })
+                  }
                 />
               </div>
             </CardContent>

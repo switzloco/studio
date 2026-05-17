@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { ServiceWorkerRegister } from '@/components/sw-register';
+import { AddToHomePrompt } from '@/components/add-to-home-prompt';
 import Link from 'next/link';
 import pkg from '../../package.json';
 
@@ -53,6 +54,7 @@ export default function RootLayout({
         </FirebaseClientProvider>
         <Toaster />
         <ServiceWorkerRegister />
+        <AddToHomePrompt />
         <footer className="w-full text-center text-[10px] text-muted-foreground py-4 mt-auto border-t flex flex-col gap-1 items-center">
           <p>v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}</p>
           <div className="flex gap-4">

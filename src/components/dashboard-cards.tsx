@@ -295,6 +295,17 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const visceralFatPoints = data?.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
   const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
+  const plantGoalG = prefs?.targets?.plantGoalG ?? 800;
+  const dailyPlantG = data?.dailyPlantG ?? 0;
+  const plantProgress = Math.min(100, (dailyPlantG / plantGoalG) * 100);
+
+  // Display toggles — undefined defaults to "on" for legacy users; plant matter
+  // opts in by default so existing dashboards don't grow a card unannounced.
+  const showAdvancedMetabolic = prefs?.display?.showAdvancedMetabolic ?? true;
+  const showProtein = prefs?.display?.showProtein ?? true;
+  const showPlantMatter = prefs?.display?.showPlantMatter ?? false;
+  const showRecovery = prefs?.display?.showRecovery ?? true;
+  const showVfScore = prefs?.display?.showVfScore ?? true;
 
   // Alpert daily score
   const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
@@ -915,22 +926,43 @@ const WithingsLogo = ({ className }: { className?: string }) => (
           </CardContent>
         </Card>
 
-        <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-          <CardContent className="p-6 sm:p-10 flex items-center gap-8">
-            <div className="p-6 bg-purple-100 rounded-2xl shrink-0 shadow-sm">
-              <DollarSign className="w-10 h-10 text-accent" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-end mb-1">
-                <p className="text-base font-black text-foreground uppercase tracking-tight">Protein Liquidity</p>
-                <span className="text-sm font-black text-muted-foreground">{dailyProteinG}g <span className="opacity-50">/</span> {proteinGoal}g</span>
+        {showProtein && (
+          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
+            <CardContent className="p-6 sm:p-10 flex items-center gap-8">
+              <div className="p-6 bg-purple-100 rounded-2xl shrink-0 shadow-sm">
+                <DollarSign className="w-10 h-10 text-accent" />
               </div>
-              <p className="text-[10px] font-medium text-muted-foreground mb-3">Daily protein intake toward your goal. Tell the CFO what you ate to log it.</p>
-              <Progress value={proteinProgress} className="h-4 bg-purple-50" />
-              <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Solvency Status: {proteinProgress >= 100 ? 'BULLISH' : 'PENDING DEPOSIT'}</p>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-end mb-1">
+                  <p className="text-base font-black text-foreground uppercase tracking-tight">Protein Liquidity</p>
+                  <span className="text-sm font-black text-muted-foreground">{dailyProteinG}g <span className="opacity-50">/</span> {proteinGoal}g</span>
+                </div>
+                <p className="text-[10px] font-medium text-muted-foreground mb-3">Daily protein intake toward your goal. Tell the CFO what you ate to log it.</p>
+                <Progress value={proteinProgress} className="h-4 bg-purple-50" />
+                <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Solvency Status: {proteinProgress >= 100 ? 'BULLISH' : 'PENDING DEPOSIT'}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {showPlantMatter && (
+          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
+            <CardContent className="p-6 sm:p-10 flex items-center gap-8">
+              <div className="p-6 bg-green-100 rounded-2xl shrink-0 shadow-sm">
+                <Activity className="w-10 h-10 text-green-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-end mb-1">
+                  <p className="text-base font-black text-foreground uppercase tracking-tight">Plant Matter</p>
+                  <span className="text-sm font-black text-muted-foreground">{Math.round(dailyPlantG)}g <span className="opacity-50">/</span> {plantGoalG}g</span>
+                </div>
+                <p className="text-[10px] font-medium text-muted-foreground mb-3">Raw weight of fruits + vegetables (Starrett 800g protocol). Tell the CFO what you ate so plant grams get tagged.</p>
+                <Progress value={plantProgress} className="h-4 bg-green-50" />
+                <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Fiber Position: {plantProgress >= 100 ? 'FULLY ALLOCATED' : 'ACCUMULATING'}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
@@ -942,7 +974,13 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from {isGoogleHealth ? 'Google Health' : data.connectedDevice === 'oura' ? 'Oura Ring' : 'Fitbit'}</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from {
+                isGoogleHealth ? 'Google Health'
+                  : data.connectedDevice === 'oura' ? 'Oura Ring'
+                  : data.connectedDevice === 'withings' ? 'Withings'
+                  : data.connectedDevice === 'google' ? 'Google Health'
+                  : 'Fitbit'
+              }</p>
               <h4 className="text-4xl font-black italic">
                 {isViewingToday
                   ? (data.steps || 0).toLocaleString()
@@ -952,28 +990,30 @@ const WithingsLogo = ({ className }: { className?: string }) => (
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10">
-              <div className="flex justify-between items-start mb-4">
-                <div className="p-3 bg-blue-100 rounded-xl shadow-sm">
-                  <Target className="w-6 h-6 text-blue-600" />
+          {showRecovery && (
+            <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
+              <CardContent className="p-6 sm:p-10">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="p-3 bg-blue-100 rounded-xl shadow-sm">
+                    <Target className="w-6 h-6 text-blue-600" />
+                  </div>
+                  {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
                 </div>
-                {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
-              </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">
-                Based on HRV ({isViewingToday
-                  ? (data.hrv > 0 ? `${data.hrv}ms` : 'no reading')
-                  : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : 'no reading')})
-              </p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">
-                {isViewingToday
-                  ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A')
-                  : (fitbitForDate?.recoveryStatus?.toUpperCase() ?? 'N/A')}
-              </h4>
-              <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
-            </CardContent>
-          </Card>
+                <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
+                <p className="text-[10px] font-medium text-muted-foreground mb-2">
+                  Based on HRV ({isViewingToday
+                    ? (data.hrv > 0 ? `${data.hrv}ms` : 'no reading')
+                    : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : 'no reading')})
+                </p>
+                <h4 className="text-4xl font-black italic uppercase tracking-tighter">
+                  {isViewingToday
+                    ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A')
+                    : (fitbitForDate?.recoveryStatus?.toUpperCase() ?? 'N/A')}
+                </h4>
+                <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
             <CardContent className="p-6 sm:p-10">
@@ -1013,25 +1053,29 @@ const WithingsLogo = ({ className }: { className?: string }) => (
 
         </div>
 
-        {/* Charts section */}
-        <DashboardCharts
-          caloriesIn={dailyCaloriesIn}
-          caloriesOut={dailyCaloriesOut}
-          carbsG={dailyCarbsG}
-          foodLogs={todayFoodLogs ?? undefined}
-          exerciseLogs={todayExerciseLogs ?? undefined}
-          morningGlycogenPct={morningGlycogenPct}
-          weightKg={data.weightKg}
-          bodyFatPct={data.bodyFatPct}
-          isDeviceVerified={data.isDeviceVerified}
-          isViewingToday={isViewingToday}
-          alpertNumber={alpertNumber}
-          fitbitActivities={fitbitActivities}
-          hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
-          hasCreatine={prefs?.profile?.hasCreatine}
-        />
+        {/* Advanced metabolic teaching — glycogen + fat-burn-vs-lean charts.
+            Off by default for the "Basic" preset, on by default for legacy users. */}
+        {showAdvancedMetabolic && (
+          <DashboardCharts
+            caloriesIn={dailyCaloriesIn}
+            caloriesOut={dailyCaloriesOut}
+            carbsG={dailyCarbsG}
+            foodLogs={todayFoodLogs ?? undefined}
+            exerciseLogs={todayExerciseLogs ?? undefined}
+            morningGlycogenPct={morningGlycogenPct}
+            weightKg={data.weightKg}
+            bodyFatPct={data.bodyFatPct}
+            isDeviceVerified={data.isDeviceVerified}
+            isViewingToday={isViewingToday}
+            alpertNumber={alpertNumber}
+            fitbitActivities={fitbitActivities}
+            hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
+            hasCreatine={prefs?.profile?.hasCreatine}
+          />
+        )}
       </div>
 
+      {showVfScore && (
       <div className="space-y-4">
         <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Long-Term Portfolio</h2>
         {visceralFatPoints === 0 ? (
@@ -1078,6 +1122,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
           </Card>
         )}
       </div>
+      )}
     </div>
   );
 }
