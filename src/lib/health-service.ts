@@ -148,6 +148,9 @@ export interface UserPreferences {
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
   temporaryContext?: TemporaryContext;           // short-term schedule/situation override
   autoChatEnabled?: boolean;                    // auto-start chat on Coach tab mount (default true)
+  /** When false, the AI coach stops volunteering commentary on alcohol and
+   *  desserts. Default true (= classic CFO behavior). */
+  preachyMode?: boolean;
   display?: DisplayPreferences;
 }
 
