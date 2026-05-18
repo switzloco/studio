@@ -640,7 +640,8 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     if (!user || isWithingsSyncing) return;
     setIsWithingsSyncing(true);
     try {
-      const result = await syncWithingsData(user.uid);
+      const localDate = new Date().toLocaleDateString('en-CA');
+      const result = await syncWithingsData(user.uid, localDate);
       if (result.success) {
         toast({ title: 'Withings Sync Complete', description: 'Calorie data refreshed from Withings.' });
       } else {

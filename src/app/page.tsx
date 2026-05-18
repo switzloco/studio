@@ -111,7 +111,7 @@ export default function Home() {
           const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
           
           if (healthData?.connectedDevice === 'withings') {
-            await syncWithingsData(user.uid);
+            await syncWithingsData(user.uid, localDate);
           } else {
             const result = await syncFitbitData(user.uid, localDate);
             if (!result.success && result.reason === 'token_refresh_failed') {
@@ -175,7 +175,7 @@ export default function Home() {
       const localDate = new Date().toLocaleDateString('en-CA');
       
       if (healthData?.connectedDevice === 'withings') {
-        const result = await syncWithingsData(user.uid);
+        const result = await syncWithingsData(user.uid, localDate);
         if (result.success) {
           toast({ title: 'Withings Synced', description: 'Calorie data refreshed.' });
         } else {
