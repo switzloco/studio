@@ -473,7 +473,7 @@ export function PreferencesView() {
                 Coach Settings
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6 pt-4">
+            <CardContent className="p-6 pt-4 space-y-5">
               <div className="flex items-center justify-between gap-4">
                 <div className="space-y-1">
                   <p className="text-sm font-black uppercase tracking-tight text-foreground">Auto-Brief</p>
@@ -484,6 +484,19 @@ export function PreferencesView() {
                 <Switch
                   checked={prefs.autoChatEnabled ?? true}
                   onCheckedChange={(checked) => setPrefs({ ...prefs, autoChatEnabled: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Preachy Mode</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    When off, the coach logs alcohol and desserts as data without volunteering commentary
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.preachyMode ?? true}
+                  onCheckedChange={(checked) => setPrefs({ ...prefs, preachyMode: checked })}
                 />
               </div>
             </CardContent>
