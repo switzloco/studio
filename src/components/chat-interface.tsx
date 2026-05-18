@@ -5,7 +5,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Send, Camera, X, Loader2, Zap, Images, Mic, Square } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
@@ -432,48 +432,45 @@ export function ChatInterface() {
 
   /** Shared input bar used in both the idle screen and main chat view. */
   const InputBar = (
-    <div className="p-4 glass-morphism border-t shadow-2xl safe-area-bottom">
+    <div className="p-3 glass-morphism border-t shadow-2xl safe-area-bottom">
       {PhotoStrip}
-      <div className="flex items-center gap-2">
-        {/* Hidden inputs */}
-        <input
-          type="file" accept="image/*" capture="environment"
-          className="sr-only" ref={cameraInputRef}
-          onChange={handleFileChange}
-        />
-        <input
-          type="file" accept="image/*" multiple
-          className="sr-only" ref={galleryInputRef}
-          onChange={handleFileChange}
-        />
 
-        {/* Camera button — opens native camera directly */}
+      {/* Hidden file inputs */}
+      <input
+        type="file" accept="image/*" capture="environment"
+        className="sr-only" ref={cameraInputRef}
+        onChange={handleFileChange}
+      />
+      <input
+        type="file" accept="image/*" multiple
+        className="sr-only" ref={galleryInputRef}
+        onChange={handleFileChange}
+      />
+
+      {/* Row 1 — input options. Attachment cluster on the left, voice + send on the right. */}
+      <div className="flex items-center gap-1.5 mb-2">
         <Button
           variant="secondary" size="icon"
-          className="rounded-full shrink-0 w-12 h-12"
+          className="rounded-full shrink-0 w-10 h-10"
           onClick={() => cameraInputRef.current?.click()}
           disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Take photo"
         >
           <Camera className="w-5 h-5 text-muted-foreground" />
         </Button>
-
-        {/* Gallery / multi-select button */}
         <Button
           variant="secondary" size="icon"
-          className="rounded-full shrink-0 w-12 h-12"
+          className="rounded-full shrink-0 w-10 h-10"
           onClick={() => galleryInputRef.current?.click()}
           disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Choose from library"
         >
           <Images className="w-5 h-5 text-muted-foreground" />
         </Button>
-
-        {/* Google Photos Picker */}
         {GOOGLE_CLIENT_ID && (
           <Button
             variant="secondary" size="icon"
-            className="rounded-full shrink-0 w-12 h-12"
+            className="rounded-full shrink-0 w-10 h-10"
             onClick={handleGooglePhotos}
             disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
             title="Pick from Google Photos"
@@ -482,18 +479,12 @@ export function ChatInterface() {
           </Button>
         )}
 
-        <Input
-          placeholder={placeholder}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          onPaste={handlePaste}
-          className="flex-1 rounded-full border-muted bg-white/50"
-        />
+        <div className="flex-1" />
+
         <Button
           variant={micStatus === 'recording' ? 'destructive' : 'secondary'}
           size="icon"
-          className={`rounded-full shrink-0 w-12 h-12 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
+          className={`rounded-full shrink-0 w-10 h-10 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
           onClick={toggleMic}
           disabled={isLoading || micStatus === 'transcribing'}
           title={micStatus === 'recording' ? 'Stop recording' : micStatus === 'transcribing' ? 'Transcribing...' : 'Voice input'}
@@ -503,13 +494,30 @@ export function ChatInterface() {
            <Mic className="w-5 h-5 text-muted-foreground" />}
         </Button>
         <Button
-          size="icon" className="rounded-full w-12 h-12"
+          size="icon" className="rounded-full shrink-0 w-10 h-10"
           onClick={handleSend}
           disabled={isLoading || isPickerOpen || (!input.trim() && selectedPhotos.length === 0)}
+          title="Send"
         >
           <Send className="w-4 h-4" />
         </Button>
       </div>
+
+      {/* Row 2 — multi-line textarea. Auto-grows 2 → ~5 lines. Enter sends; Shift+Enter newlines. */}
+      <Textarea
+        placeholder={placeholder}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+          }
+        }}
+        onPaste={handlePaste}
+        rows={2}
+        className="w-full rounded-2xl border-muted bg-white/60 min-h-[60px] max-h-[140px] resize-none px-4 py-2.5 text-base leading-snug"
+      />
     </div>
   );
 
