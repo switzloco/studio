@@ -29,7 +29,10 @@ export async function GET(request: NextRequest) {
   let appRoot = `${origin}/`;
 
   if (!code) {
-    return NextResponse.redirect(new URL('?error=withings_auth_failed', appRoot));
+    // Withings validates registered callback URLs by issuing a parameter-less
+    // GET and rejecting anything that isn't 2xx. A redirect (307) here trips
+    // their "Fail to connect to callback url" check during app registration.
+    return new NextResponse('Withings callback endpoint is online.', { status: 200 });
   }
 
   if (!state) {
