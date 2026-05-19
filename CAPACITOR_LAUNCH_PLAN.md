@@ -242,7 +242,7 @@ This is the section that will save the project. Going broke on Google Cloud is t
 
 #### Firebase App Hosting
 
-- [ ] `apphosting.yaml` → set `minInstances: 0` once traffic is irregular. Cold start is ~2s on Next 15 + Cloud Run — acceptable for a chat app. **Cost delta: ~$15-25/month saved.**
+- [ ] Keep `minInstances: 1`. Cold starts on a chat app feel broken — the first message after a long pause would hang ~2s while the LLM spins up the container, on top of Gemini latency. Worth the ~$15-25/mo idle cost for perceived quality. Revisit only if the bill becomes a real problem.
 - [ ] `maxInstances: 3` until you have ≥100 DAU. Currently set to 10 — that's a 10x abuse ceiling.
 - [ ] Cloud Run budget alert at $20/mo, hard cap at $50/mo (`gcloud billing budgets create`).
 - [ ] Set up GCP "Billing alerts" → email at 50%, 90%, 100% of budget.
