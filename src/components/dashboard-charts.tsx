@@ -24,8 +24,10 @@ interface DashboardChartsProps {
     weightKg?: number;
     /** 0–100, from DEXA or assessment. Improves glycogen capacity estimate. */
     bodyFatPct?: number;
-    /** True when calorie burn data comes from Fitbit (−10% already applied). */
+    /** True when calorie burn data comes from a verified device. */
     isDeviceVerified?: boolean;
+    /** Which wearable is connected — controls the adjustment label shown. */
+    connectedDevice?: 'fitbit' | 'oura' | 'google' | 'withings' | null;
     /** True when showing today — enables the NOW line + projection shading. */
     isViewingToday?: boolean;
     /** Max sustainable fat oxidation kcal/day — shown as a ceiling on the Energy Balance chart. */
@@ -287,6 +289,7 @@ export function DashboardCharts({
     morningGlycogenPct = 100,
     weightKg, bodyFatPct,
     isDeviceVerified,
+    connectedDevice,
     isViewingToday = false,
     alpertNumber,
     fitbitActivities,
@@ -440,15 +443,15 @@ export function DashboardCharts({
                         </div>
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Out</p>
-                            <p className="text-lg font-black text-orange-500">{caloriesOut} <span className="text-xs font-medium text-orange-500/60">kcal</span></p>
-                            {isDeviceVerified && (
+                            <p className="text-lg font-black text-orange-500">{Math.round(caloriesOut)} <span className="text-xs font-medium text-orange-500/60">kcal</span></p>
+                            {isDeviceVerified && connectedDevice !== 'withings' && (
                                 <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Fitbit −10% adj.</p>
                             )}
                         </div>
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Net</p>
                             <p className={`text-lg font-black ${deficit > 0 ? 'text-red-500' : 'text-blue-500'}`}>
-                                {deficit > 0 ? '+' : ''}{deficit} <span className="text-xs font-medium opacity-60">kcal</span>
+                                {deficit > 0 ? '+' : ''}{Math.round(deficit)} <span className="text-xs font-medium opacity-60">kcal</span>
                             </p>
                         </div>
                     </div>
