@@ -444,6 +444,9 @@ export function DashboardCharts({
                         <div className="text-center">
                             <p className="text-[10px] font-black uppercase text-muted-foreground">Out</p>
                             <p className="text-lg font-black text-orange-500">{Math.round(caloriesOut)} <span className="text-xs font-medium text-orange-500/60">kcal</span></p>
+                            {isDeviceVerified && connectedDevice === 'withings' && (
+                                <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Withings +5% adj.</p>
+                            )}
                             {isDeviceVerified && connectedDevice !== 'withings' && (
                                 <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Fitbit −10% adj.</p>
                             )}

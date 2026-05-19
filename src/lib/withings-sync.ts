@@ -55,7 +55,8 @@ export async function syncWithingsData(userId: string, localDate?: string): Prom
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value);
+    // Withings underestimates TDEE ~74% of the time — apply a conservative +5% correction.
+    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value * 1.05);
   }
 
   // Also try to get latest weight
