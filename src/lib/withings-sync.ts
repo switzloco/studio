@@ -55,7 +55,7 @@ export async function syncWithingsData(userId: string, localDate?: string): Prom
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    healthUpdate.dailyCaloriesOut = result.caloriesOut.value;
+    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value);
   }
 
   // Also try to get latest weight

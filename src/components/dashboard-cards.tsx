@@ -1067,6 +1067,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
             weightKg={data.weightKg}
             bodyFatPct={data.bodyFatPct}
             isDeviceVerified={data.isDeviceVerified}
+            connectedDevice={data.connectedDevice}
             isViewingToday={isViewingToday}
             alpertNumber={alpertNumber}
             fitbitActivities={fitbitActivities}
