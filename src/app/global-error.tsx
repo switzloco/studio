@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { ShieldAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { rebootTerminal } from '@/lib/reboot';
 import './globals.css';
 
 export default function GlobalError({
@@ -18,13 +19,7 @@ export default function GlobalError({
   }, [error]);
 
   const handleReboot = () => {
-    try {
-      sessionStorage.clear();
-      sessionStorage.setItem('cfo_activeTab', 'chat');
-    } catch (e) {
-      console.error('[CFO Reboot] Failed to clear session:', e);
-    }
-    window.location.reload();
+    rebootTerminal();
   };
 
   return (

@@ -5,6 +5,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { ShieldAlert, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { rebootTerminal } from '@/lib/reboot';
 
 /**
  * An overlay listener that catches globally emitted 'permission-error' events.
@@ -27,15 +28,7 @@ export function FirebaseErrorListener() {
   }, []);
 
   const handleReboot = () => {
-    try {
-      // Clear session storage to reset transient UI states and active tab to 'chat'
-      sessionStorage.clear();
-      sessionStorage.setItem('cfo_activeTab', 'chat');
-    } catch (e) {
-      console.error('[CFO Reboot] Failed to clear session:', e);
-    }
-    // Hard refresh page
-    window.location.reload();
+    rebootTerminal();
   };
 
   const handleDismiss = () => {

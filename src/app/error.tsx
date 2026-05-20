@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { ShieldAlert, RefreshCw, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { rebootTerminal } from '@/lib/reboot';
 
 export default function ErrorBoundary({
   error,
@@ -17,15 +18,7 @@ export default function ErrorBoundary({
   }, [error]);
 
   const handleReboot = () => {
-    try {
-      // Reset active tab and clear session
-      sessionStorage.clear();
-      sessionStorage.setItem('cfo_activeTab', 'chat');
-    } catch (e) {
-      console.error('[CFO Reboot] Failed to clear session:', e);
-    }
-    // Hard refresh page
-    window.location.reload();
+    rebootTerminal();
   };
 
   return (
