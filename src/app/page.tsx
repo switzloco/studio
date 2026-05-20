@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -508,15 +508,15 @@ export default function Home() {
             </TabsTrigger>
             <TabsTrigger value="daily" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <Target className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">Today</span>
+              <span className="text-[9px] font-black uppercase tracking-widest">Metrics</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <History className="w-5 h-5" />
               <span className="text-[9px] font-black uppercase tracking-widest">Ledger</span>
             </TabsTrigger>
             <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <LayoutGrid className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">About Me</span>
+              <Settings className="w-5 h-5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">Settings</span>
             </TabsTrigger>
             <TabsTrigger value="about" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <Info className="w-5 h-5" />

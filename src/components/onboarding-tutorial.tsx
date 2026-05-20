@@ -43,7 +43,7 @@ const steps = [
   },
   {
     title: "Real-Time Dashboard",
-    description: "The 'Today' tab shows your current asset allocation: Steps, Sleep, HRV, and your Protein Solvency. Keep these in the green to avoid a correction.",
+    description: "The 'Metrics' tab shows your current asset allocation: Steps, Sleep, HRV, and your Protein Solvency. Keep these in the green to avoid a correction.",
     icon: <Target className="w-12 h-12 text-primary" />,
     tab: 'daily'
   },
@@ -55,7 +55,7 @@ const steps = [
   },
   {
     title: "Asset Management",
-    description: "In 'About Me', you define your goals and equipment. This context helps me tailor your audits to your specific physiological constraints.",
+    description: "In 'Settings', you define your goals and equipment. This context helps me tailor your audits to your specific physiological constraints.",
     icon: <LayoutGrid className="w-12 h-12 text-primary" />,
     tab: 'assets'
   },
