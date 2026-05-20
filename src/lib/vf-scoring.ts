@@ -136,14 +136,11 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   if (!proteinMet && !fastingOverride && score > 0) {
     const proteinRatio = Math.min(1, proteinG / proteinGoal);
     score = Math.round(score * proteinRatio);
+    score = Math.min(50, score);
   }
 
   // Rule 3: Alcohol Drag
-  // Up to 3 drinks: -5 pts/drink (oxidation suppression).
-  // 4+ drinks: -10 pts/drink (toxic load & severe liver overhead).
-  const alcoholPenalty = alcoholDrinks > 3 
-    ? (3 * -5) + ((alcoholDrinks - 3) * -10)
-    : alcoholDrinks * -5;
+  const alcoholPenalty = alcoholDrinks * -5;
   score += alcoholPenalty;
 
   // Rule 4: HRV Multiplier (Replacing Sleep/Cortisol tax)
@@ -175,7 +172,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
 
   // Rule 6: Seed Oil Nudge
   // Mild inflammation signal; represents systemic friction.
-  const seedOilPenalty = seedOilMeals * -2;
+  const seedOilPenalty = seedOilMeals * -5;
   score += seedOilPenalty;
 
   // Clamp worst case at -200
