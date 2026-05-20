@@ -115,7 +115,7 @@ export default function Home() {
           } else {
             const result = await syncFitbitData(user.uid, localDate);
             if (!result.success && result.reason === 'token_refresh_failed') {
-              toast({ variant: 'destructive', title: 'Sync Failed', description: 'Token expired and could not be refreshed. Reconnect your device.' });
+              console.warn('[AutoSync] Fitbit/Google Health token refresh failed silently.');
             }
           }
         }
@@ -198,7 +198,7 @@ export default function Home() {
       setIsPullRefreshing(false);
       isPullRefreshingRef.current = false;
     }
-  }, [user, toast]);
+  }, [user, toast, healthData?.connectedDevice]);
 
   const doFitbitSyncRef = useRef(doFitbitSync);
   useEffect(() => { doFitbitSyncRef.current = doFitbitSync; }, [doFitbitSync]);

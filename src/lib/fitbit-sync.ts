@@ -51,22 +51,39 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
       refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
     } catch (error) {
       console.error('[syncFitbitData] Token refresh threw an unexpected error:', error);
-      return { success: false, reason: 'token_refresh_failed' };
+      // Double check if another process refreshed it (e.g. concurrent request or cron)
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncFitbitData] Token refresh failed but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        return { success: false, reason: 'token_refresh_failed' };
+      }
     }
-    if (!refreshed) {
+    if (!refreshed && !accessToken) {
       console.error('[syncFitbitData] Token refresh returned null — token may be revoked. Reconnect Fitbit.');
-      return { success: false, reason: 'token_refresh_failed' };
+      // Double check if another process refreshed it
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncFitbitData] Token refresh returned null but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+    } else if (refreshed) {
+      latestCreds = { 
+        ...refreshed, 
+        fitbitUserId: creds.fitbitUserId, 
+        lastSyncedAt: creds.lastSyncedAt, 
+        provider,
+        timezoneOffset: finalOffset 
+      };
+      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
+      console.log(`[syncFitbitData] Token refreshed successfully for user ${userId}.`);
     }
-    latestCreds = { 
-      ...refreshed, 
-      fitbitUserId: creds.fitbitUserId, 
-      lastSyncedAt: creds.lastSyncedAt, 
-      provider,
-      timezoneOffset: finalOffset 
-    };
-    await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
-    accessToken = refreshed.accessToken;
-    console.log(`[syncFitbitData] Token refreshed successfully for user ${userId}.`);
   }
 
   let result;
@@ -81,22 +98,39 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
         refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken, provider);
       } catch (refreshErr) {
         console.error(`[syncFitbitData] Token refresh failed for user ${userId} after 401:`, refreshErr);
-        return { success: false, reason: 'token_refresh_failed' };
+        // Double check fallback
+        const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+        if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+          console.log('[syncFitbitData] Token refresh failed after 401 but found newer valid credentials in Firestore.');
+          latestCreds = freshCreds;
+          accessToken = freshCreds.accessToken;
+        } else {
+          return { success: false, reason: 'token_refresh_failed' };
+        }
       }
-      if (!refreshed) {
+      if (!refreshed && !accessToken) {
         console.error(`[syncFitbitData] Token refresh returned null for user ${userId} after 401.`);
-        return { success: false, reason: 'token_refresh_failed' };
+        // Double check fallback
+        const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+        if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+          console.log('[syncFitbitData] Token refresh returned null after 401 but found newer valid credentials in Firestore.');
+          latestCreds = freshCreds;
+          accessToken = freshCreds.accessToken;
+        } else {
+          return { success: false, reason: 'token_refresh_failed' };
+        }
+      } else if (refreshed) {
+        latestCreds = { 
+          ...refreshed, 
+          fitbitUserId: latestCreds.fitbitUserId, 
+          lastSyncedAt: latestCreds.lastSyncedAt, 
+          provider,
+          timezoneOffset: finalOffset 
+        };
+        await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+        accessToken = refreshed.accessToken;
+        console.log(`[syncFitbitData] Token refreshed after 401. Retrying sync for user ${userId}...`);
       }
-      latestCreds = { 
-        ...refreshed, 
-        fitbitUserId: latestCreds.fitbitUserId, 
-        lastSyncedAt: latestCreds.lastSyncedAt, 
-        provider,
-        timezoneOffset: finalOffset 
-      };
-      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
-      accessToken = refreshed.accessToken;
-      console.log(`[syncFitbitData] Token refreshed after 401. Retrying sync for user ${userId}...`);
       
       try {
         result = await fitbitService.syncTodayData(accessToken, localDate, provider, finalOffset);
@@ -208,18 +242,38 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
       refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
     } catch (error) {
       console.error('[syncFitbitSnapshot] Token refresh error:', error);
-      return { success: false, reason: 'token_refresh_failed' };
+      // Double check if another process refreshed it
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncFitbitSnapshot] Token refresh failed but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        return { success: false, reason: 'token_refresh_failed' };
+      }
     }
-    if (!refreshed) return { success: false, reason: 'token_refresh_failed' };
-    latestCreds = { 
-      ...refreshed, 
-      fitbitUserId: creds.fitbitUserId, 
-      lastSyncedAt: creds.lastSyncedAt, 
-      provider,
-      timezoneOffset: finalOffset 
-    };
-    await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
-    accessToken = refreshed.accessToken;
+    if (!refreshed && !accessToken) {
+      console.error('[syncFitbitSnapshot] Token refresh returned null — token may be revoked.');
+      // Double check if another process refreshed it
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncFitbitSnapshot] Token refresh returned null but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+    } else if (refreshed) {
+      latestCreds = { 
+        ...refreshed, 
+        fitbitUserId: creds.fitbitUserId, 
+        lastSyncedAt: creds.lastSyncedAt, 
+        provider,
+        timezoneOffset: finalOffset 
+      };
+      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
+    }
   }
 
   let result;
@@ -233,21 +287,38 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
         refreshed = await fitbitService.refreshAccessToken(latestCreds.refreshToken, provider);
       } catch (refreshErr) {
         console.error('[syncFitbitSnapshot] Token refresh threw an error after 401:', refreshErr);
-        return { success: false, reason: 'token_refresh_failed' };
+        // Double check fallback
+        const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+        if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+          console.log('[syncFitbitSnapshot] Token refresh failed after 401 but found newer valid credentials in Firestore.');
+          latestCreds = freshCreds;
+          accessToken = freshCreds.accessToken;
+        } else {
+          return { success: false, reason: 'token_refresh_failed' };
+        }
       }
-      if (!refreshed) {
+      if (!refreshed && !accessToken) {
         console.error('[syncFitbitSnapshot] Token refresh returned null after 401 — token likely revoked.');
-        return { success: false, reason: 'token_refresh_failed' };
+        // Double check fallback
+        const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+        if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+          console.log('[syncFitbitSnapshot] Token refresh returned null after 401 but found newer valid credentials in Firestore.');
+          latestCreds = freshCreds;
+          accessToken = freshCreds.accessToken;
+        } else {
+          return { success: false, reason: 'token_refresh_failed' };
+        }
+      } else if (refreshed) {
+        latestCreds = { 
+          ...refreshed, 
+          fitbitUserId: latestCreds.fitbitUserId, 
+          lastSyncedAt: latestCreds.lastSyncedAt, 
+          provider,
+          timezoneOffset: finalOffset 
+        };
+        await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
+        accessToken = refreshed.accessToken;
       }
-      latestCreds = { 
-        ...refreshed, 
-        fitbitUserId: latestCreds.fitbitUserId, 
-        lastSyncedAt: latestCreds.lastSyncedAt, 
-        provider,
-        timezoneOffset: finalOffset 
-      };
-      await adminHealthService.saveFitbitCredentials(firestore, userId, latestCreds);
-      accessToken = refreshed.accessToken;
       
       try {
         result = await fitbitService.syncTodayData(accessToken, date, provider, finalOffset);

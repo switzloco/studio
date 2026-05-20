@@ -1,4 +1,3 @@
-
 'use server';
 
 import { getAdminFirestore } from '@/firebase/admin';
@@ -58,13 +57,45 @@ export async function backfillFitbitHistory(userId: string): Promise<{ ok: boole
   let creds = await adminHealthService.getFitbitCredentials(firestore, userId);
   if (!creds) return { ok: false, days: 0 };
 
+  const provider = creds.provider || 'fitbit';
+  const finalOffset = creds.timezoneOffset;
+
   // Refresh token if near expiry.
   const fiveMinutes = 5 * 60 * 1000;
   if (Date.now() + fiveMinutes >= creds.expiresAt) {
-    const refreshed = await fitbitService.refreshAccessToken(creds.refreshToken);
-    if (!refreshed) return { ok: false, days: 0 };
-    creds = { ...refreshed, fitbitUserId: creds.fitbitUserId, lastSyncedAt: creds.lastSyncedAt };
-    await adminHealthService.saveFitbitCredentials(firestore, userId, creds);
+    let refreshed;
+    try {
+      refreshed = await fitbitService.refreshAccessToken(creds.refreshToken, provider);
+    } catch (error) {
+      console.error('[backfillFitbitHistory] Token refresh error:', error);
+      // Double check if another process refreshed it
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[backfillFitbitHistory] Token refresh failed but found newer valid credentials in Firestore.');
+        creds = freshCreds;
+      } else {
+        return { ok: false, days: 0 };
+      }
+    }
+    if (!refreshed && creds.expiresAt <= Date.now() + fiveMinutes) {
+      // Double check if another process refreshed it
+      const freshCreds = await adminHealthService.getFitbitCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[backfillFitbitHistory] Token refresh returned null but found newer valid credentials in Firestore.');
+        creds = freshCreds;
+      } else {
+        return { ok: false, days: 0 };
+      }
+    } else if (refreshed) {
+      creds = { 
+        ...refreshed, 
+        fitbitUserId: creds.fitbitUserId, 
+        lastSyncedAt: creds.lastSyncedAt,
+        provider,
+        timezoneOffset: finalOffset
+      };
+      await adminHealthService.saveFitbitCredentials(firestore, userId, creds);
+    }
   }
 
   try {
