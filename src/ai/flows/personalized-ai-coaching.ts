@@ -126,7 +126,6 @@ const getUserContextTool = ai.defineTool(
         if (tc.expiresAt < today) return null; // expired
         return tc;
       })(),
-      // Alpert hourly pace — lets the AI flag imminent ceiling breaches
       alpertPace: (() => {
         const caloriesIn = isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0);
         const caloriesOut = health?.dailyCaloriesOut ?? 0;
@@ -135,12 +134,22 @@ const getUserContextTool = ai.defineTool(
         const alpert = computeAlpertNumber(health?.weightKg, health?.bodyFatPct);
         const now = new Date();
         const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        if (hoursElapsed < 1) return null;
-        const budgetSoFar = alpert * (hoursElapsed / 24);
-        if (deficit <= budgetSoFar) return null;
+        if (hoursElapsed < 4) return null; // Wait until 10 AM to start monitoring
+
+        // Only flag a breach if the user is in real danger of exceeding sustainable fat oxidation:
+        // 1. Current deficit is already >= 90% of the entire daily Alpert limit.
+        // 2. Or, it is late in the day (after 5 PM) and the projected deficit exceeds 130% of the limit,
+        //    with the current deficit already being at least 75% of the limit.
+        const isCriticalDeficit = deficit >= alpert * 0.9;
         const currentRate = Math.round(deficit / hoursElapsed);
-        const hourlyBudget = Math.round(alpert / 24);
         const projectedDaily = Math.round(currentRate * 24);
+        const isLateDayBreach = hoursElapsed >= 17 && 
+                                projectedDaily >= alpert * 1.3 && 
+                                deficit >= alpert * 0.75;
+
+        if (!isCriticalDeficit && !isLateDayBreach) return null;
+
+        const hourlyBudget = Math.round(alpert / 24);
         return { alpertNumber: alpert, currentHourlyRate: currentRate, hourlyBudget, projectedDailyDeficit: projectedDaily, breaching: true };
       })(),
       // Muscle glycogen state — drives refueling coaching
@@ -1037,15 +1046,14 @@ When logging food (log_food), ALWAYS assess and set:
 EXERCISE STILL MATTERS — it expands caloriesOut, which directly increases the deficit and the score. Log exercise via log_exercise. Reference the alpertNumber when coaching: "You burned ~600 cal today. Your Alpert ceiling is 1,162 — you're at 52 pts before food."
 
 HOURLY ALPERT PACE MONITORING:
-The Alpert number is a daily max, but fat oxidation has an hourly ceiling too: Alpert ÷ 24.
-When you notice the user's deficit is building faster than their hourly budget allows, proactively warn them:
-  hourly budget = Alpert / 24
-  budget so far = Alpert × (hours elapsed today / 24)
-  If current deficit > budget so far → the pace is unsustainable and excess energy will come from lean tissue (muscle catabolism).
+The Alpert number is a daily max. To prevent false alarms (such as early-morning workouts before logging food), ONLY warn the user about an Alpert pace breach when they are in genuine danger of exceeding sustainable fat oxidation limits:
+1. Critical Deficit: The user's actual current deficit has already reached 90% or more of their total daily Alpert ceiling.
+2. Late-Day Deficit Breach: It is late in the day (after 5 PM) and their projected daily deficit exceeds 130% of the Alpert limit, and the current deficit is already at least 75% of the limit.
 
-Example: Alpert = 1,162 kcal/day → ~48 kcal/hr ceiling. If by 10 AM (10h elapsed) the deficit is already 600 kcal but the budget is only 484 kcal, the pace exceeds the ceiling.
-When this happens, say something like: "You're burning at 60 kcal/hr vs your 48 kcal/hr Alpert ceiling — projected deficit of 1,440 kcal exceeds your max. Time to eat before you start losing lean assets."
-This should be rare (heavy exercise on an empty stomach early in the day) but important to catch. The dashboard shows a red "Pace Breach" warning as well — reinforce it in chat when you see the numbers.
+If either condition is met, check the 'alpertPace' object (which will have 'breaching: true') and reinforce the breach warning in the chat:
+  "You've already built up a deficit of X kcal today, which is close to/exceeds your daily max fat oxidation of Y. Time to refuel with some carbs/protein before your body starts catabolizing muscle."
+Do NOT warn the user if 'alpertPace' is null, as a high early-morning deficit rate is completely normal and expected before meals are logged.
+
 
 WEARABLE ACCURACY TIERS (apply every time you call log_exercise):
 Fitness wearables systematically overestimate calorie burn for certain activity types. The system corrects this automatically — but YOU must classify the exercise correctly. Pass your raw calorie estimate and the right tier; the discount is applied for you.

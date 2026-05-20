@@ -347,14 +347,26 @@ const WithingsLogo = ({ className }: { className?: string }) => (
         if (!data || !isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
         const now = new Date();
         const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        if (hoursElapsed < 4) return null; // Wait until 10 AM to start warnings (prevents early morning noise)
-        const hourlyBudget = alpertNumber / 24;
-        const budgetSoFar = alpertNumber * (hoursElapsed / 24);
-        if (alpertDeficit <= budgetSoFar * 1.15) return null; // 15% grace buffer
+        
+        // Trigger only when user is in genuine danger of exceeding sustainable daily limit:
+        // 1. Current deficit is already 90% or more of the entire daily Alpert ceiling.
+        // 2. Or, it's after 5 PM (17:00) and the projected daily deficit exceeds 130% of the Alpert ceiling,
+        //    with the current deficit already being at least 75% of the ceiling.
+        const isCriticalDeficit = alpertDeficit >= alpertNumber * 0.9;
         const currentHourlyRate = alpertDeficit / hoursElapsed;
         const projectedDaily = Math.round(currentHourlyRate * 24);
-        if (projectedDaily <= alpertNumber) return null;
-        return { currentHourlyRate: Math.round(currentHourlyRate), hourlyBudget: Math.round(hourlyBudget), projectedDaily };
+        const isLateDayBreach = hoursElapsed >= 17 && 
+                                projectedDaily >= alpertNumber * 1.3 && 
+                                alpertDeficit >= alpertNumber * 0.75;
+
+        if (!isCriticalDeficit && !isLateDayBreach) return null;
+
+        const hourlyBudget = alpertNumber / 24;
+        return { 
+            currentHourlyRate: Math.round(currentHourlyRate), 
+            hourlyBudget: Math.round(hourlyBudget), 
+            projectedDaily 
+        };
     }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
 
   // Run the metabolic simulation for the selected day
