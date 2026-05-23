@@ -118,27 +118,27 @@ export function AddToHomePrompt() {
 
   return (
     <div className="fixed inset-x-0 bottom-20 z-40 px-4 sm:bottom-6 pointer-events-none">
-      <div className="mx-auto max-w-sm pointer-events-auto rounded-2xl border bg-card shadow-lg shadow-black/10 p-4">
+      <div className="mx-auto max-w-sm pointer-events-auto rounded-2xl border bg-card shadow-xl shadow-black/10 p-5">
         {!showIosInstructions ? (
           <div className="flex items-start gap-3">
-            <div className="shrink-0 w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Download className="w-5 h-5 text-primary" />
+            <div className="shrink-0 w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Download className="w-6 h-6 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-bold text-foreground">Install the CFO</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                Add to your home screen for one-tap access and a full-screen experience.
+              <p className="text-[15px] font-extrabold text-foreground leading-snug">Get the CFO App</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1.5 leading-relaxed">
+                Add this to your home screen for easy one-tap access. It is <strong>100% free</strong>, takes only 10 seconds, and <strong>requires no passwords</strong>.
               </p>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-4 flex gap-2.5">
                 <button
                   onClick={handleInstall}
-                  className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-[11px] font-black uppercase tracking-widest"
+                  className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-[12px] font-bold uppercase tracking-wider hover:opacity-90 active:scale-[0.98] transition-all"
                 >
-                  {deferredPrompt ? 'Install' : 'Show me how'}
+                  {deferredPrompt ? 'Install App' : 'Show me how'}
                 </button>
                 <button
                   onClick={dismiss}
-                  className="h-9 px-3 rounded-lg border text-[11px] font-black uppercase tracking-widest text-muted-foreground"
+                  className="h-10 px-4 rounded-xl border text-[12px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted/50 active:scale-[0.98] transition-all"
                 >
                   Not now
                 </button>
@@ -147,7 +147,7 @@ export function AddToHomePrompt() {
             <button
               onClick={dismiss}
               aria-label="Dismiss"
-              className="shrink-0 w-7 h-7 -mr-1 -mt-1 flex items-center justify-center text-muted-foreground hover:text-foreground"
+              className="shrink-0 w-7 h-7 -mr-2 -mt-2 flex items-center justify-center text-muted-foreground hover:text-foreground"
             >
               <X className="w-4 h-4" />
             </button>
@@ -155,39 +155,66 @@ export function AddToHomePrompt() {
         ) : (
           <div>
             <div className="flex items-start justify-between gap-2">
-              <p className="text-[13px] font-bold text-foreground">Add the CFO to your Home Screen</p>
+              <div>
+                <p className="text-base font-extrabold text-foreground">Add to Your Home Screen</p>
+                <p className="text-[11.5px] text-muted-foreground mt-0.5">Follow these 3 easy steps on your iPhone:</p>
+              </div>
               <button
                 onClick={dismiss}
                 aria-label="Dismiss"
-                className="shrink-0 w-7 h-7 -mr-1 -mt-1 flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="shrink-0 w-7 h-7 -mr-2 -mt-2 flex items-center justify-center text-muted-foreground hover:text-foreground"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <ol className="mt-2 space-y-2 text-[12px] text-muted-foreground leading-snug">
-              <li className="flex items-center gap-2">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-foreground text-[10px] font-black flex items-center justify-center">
+            
+            <ol className="mt-4 space-y-4 text-[13px] text-muted-foreground leading-relaxed font-medium">
+              <li className="flex items-start gap-3">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-extrabold flex items-center justify-center mt-0.5">
                   1
                 </span>
                 <span>
-                  Tap the <Share className="inline w-3.5 h-3.5 -mt-0.5" /> Share icon in Safari.
+                  At the bottom of your screen, tap the{' '}
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-foreground font-bold text-[11px] gap-1 mx-0.5 align-middle">
+                    <Share className="w-3.5 h-3.5 text-primary" /> Share
+                  </span>{' '}
+                  button (it looks like a square box with an arrow pointing up).
                 </span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-foreground text-[10px] font-black flex items-center justify-center">
+              
+              <li className="flex items-start gap-3">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-extrabold flex items-center justify-center mt-0.5">
                   2
                 </span>
                 <span>
-                  Scroll down and tap <Plus className="inline w-3.5 h-3.5 -mt-0.5" /> Add to Home Screen.
+                  Scroll down the menu and tap{' '}
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-foreground font-bold text-[11px] gap-1 mx-0.5 align-middle">
+                    <Plus className="w-3.5 h-3.5 text-primary" /> Add to Home Screen
+                  </span>{' '}
+                  (near the bottom of the list).
                 </span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-foreground text-[10px] font-black flex items-center justify-center">
+              
+              <li className="flex items-start gap-3">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-extrabold flex items-center justify-center mt-0.5">
                   3
                 </span>
-                <span>Tap Add. The icon now lives on your home screen.</span>
+                <span>
+                  Look in the top-right corner of your screen and tap the word{' '}
+                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-primary text-primary-foreground font-extrabold text-[11.5px] mx-0.5 align-middle">
+                    Add
+                  </span>{' '}
+                  to finish!
+                </span>
               </li>
             </ol>
+
+            <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-800 dark:text-amber-300 leading-normal flex items-start gap-2">
+              <span className="text-sm shrink-0 leading-none">💡</span>
+              <span>
+                <strong>Not seeing these buttons?</strong> Make sure you are using the <strong>Safari browser</strong> app (the blue compass icon) on your phone, not Chrome or another app.
+              </span>
+            </div>
           </div>
         )}
       </div>
