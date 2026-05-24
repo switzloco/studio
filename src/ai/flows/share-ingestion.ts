@@ -142,13 +142,28 @@ export const shareIngestionFlow = ai.defineFlow(
       ].filter(Boolean).join('\n');
 
       // Ask the Coach LLM to parse the raw text
-      const { output } = await ai.generate({
-        model: 'googleai/gemini-3-flash-preview',
+      let llmResult;
+      const generateConfig = {
         system: SHARE_PARSER_SYSTEM,
         prompt: combinedText,
         output: { schema: ParsedShareDataSchema },
         config: { temperature: 0.1 },  // Low temp for deterministic parsing
-      });
+      };
+
+      try {
+        llmResult = await ai.generate({
+          model: 'googleai/gemini-3-flash-preview',
+          ...generateConfig
+        });
+      } catch (err: any) {
+        console.warn('[ShareIngestion] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+        llmResult = await ai.generate({
+          model: 'googleai/gemini-2.5-flash',
+          ...generateConfig
+        });
+      }
+
+      const { output } = llmResult;
 
       if (!output) {
         return { success: false, error: 'LLM returned no structured output.' };

@@ -42,7 +42,48 @@ export async function POST(req: Request) {
       photoDates,
     };
 
-    const { stream } = await cfoChatPrompt.stream(input, { maxTurns: 15 });
+    let stream;
+    try {
+      const result = await cfoChatPrompt.stream(input, { maxTurns: 15 });
+      stream = result.stream;
+    } catch (err: any) {
+      console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+      try {
+        const result = await cfoChatPrompt.stream(input, {
+          model: 'googleai/gemini-2.5-flash',
+          maxTurns: 15,
+        });
+        stream = result.stream;
+      } catch (fallbackErr: any) {
+        console.error('[ChatRoute] Fallback model also failed:', fallbackErr?.message ?? String(fallbackErr));
+        
+        // Return a friendly system error message directly as a successful stream so it renders in the chat
+        const encoder = new TextEncoder();
+        const readableStream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `⚠️ **System Interruption**\n\n` +
+                `Partner, the Gemini neural ledger is currently experiencing high demand or is temporarily unavailable (503 Service Unavailable).\n\n` +
+                `I have received your message: *"${message}"*.\n\n` +
+                `**Recommendation:**\n` +
+                `* Your logs/details are safe in this chat history, but I cannot process them or run calculations right now.\n` +
+                `* Please try again in a minute, or ask me to check the ledger again once the API recovers.`
+              )
+            );
+            controller.close();
+          },
+        });
+
+        return new NextResponse(readableStream, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        });
+      }
+    }
 
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
@@ -53,8 +94,13 @@ export async function POST(req: Request) {
               controller.enqueue(encoder.encode(chunk.text));
             }
           }
-        } catch (err) {
-          controller.error(err);
+        } catch (err: any) {
+          console.error('[ChatRoute] Error during stream playback:', err?.message ?? String(err));
+          controller.enqueue(
+            encoder.encode(
+              `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation. Please resend your message or try again.*`
+            )
+          );
         } finally {
           controller.close();
         }

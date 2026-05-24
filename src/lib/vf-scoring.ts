@@ -10,10 +10,10 @@
  *   fasting days due to Alpert rate-limiting forcing deficit into muscle.
  *
  * 5 BIOLOGY-BASED MODIFIERS:
- *   1 — Caloric Engine    (base = deficit / 10; cap +50 if protein missed)
+ *   1 — Caloric Engine    (base = deficit / 10)
  *   2 — Fasting Override  (24h+ fast → +100 base — ketosis is protective)
  *   3 — Alcohol Drag      (−5 pts/drink — ~1h suppressed fat oxidation each)
- *   4 — Cortisol Tax      (sleep <6h → 0.8× positive scores — ~20% impairment)
+ *   4 — HRV Multiplier    (recovery-based multiplier for positive scores)
  *   5 — Seed Oil Nudge    (−5 pts/meal — mild inflammation signal, not acute)
  */
 
@@ -133,11 +133,6 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
   let score = baseScore;
 
-  if (!proteinMet && !fastingOverride && score > 0) {
-    const proteinRatio = Math.min(1, proteinG / proteinGoal);
-    score = Math.round(score * proteinRatio);
-    score = Math.min(50, score);
-  }
 
   // Rule 3: Alcohol Drag
   const alcoholPenalty = alcoholDrinks * -5;

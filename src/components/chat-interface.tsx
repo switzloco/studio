@@ -368,6 +368,10 @@ export function ChatInterface() {
       }
     } catch (e: any) {
       console.error('[ChatSend] Error:', e);
+      setMessages(prev => [...prev, {
+        role: 'model',
+        content: `⚠️ **Audit Failed**\n\nThe CFO is temporarily unreachable or hit a connection issue.\n\n*Error: ${e.message || "Unknown communication error"}*`
+      }]);
       toast({ variant: "destructive", title: "Audit Failed", description: e.message || "the CFO is unavailable. Check GOOGLE_GENAI_API_KEY and server logs." });
     } finally {
       setIsLoading(false);

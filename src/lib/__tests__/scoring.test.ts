@@ -116,9 +116,9 @@ describe('VF Rule 1 — Caloric Engine', () => {
     expect(result.breakdown.proteinMet).toBe(true);
   });
 
-  it('caps positive score at +50 when protein mandate is missed', () => {
+  it('does NOT affect the positive score when protein mandate is missed', () => {
     const result = calculateDailyVFScore(cleanDay({ proteinG: 80 }));
-    expect(result.score).toBeLessThanOrEqual(50);
+    expect(result.score).toBe(100);
     expect(result.breakdown.proteinMet).toBe(false);
   });
 

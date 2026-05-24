@@ -106,9 +106,8 @@ export const dataAnalystFlow = ai.defineFlow(
     outputSchema: z.string(),
   },
   async (input) => {
-    const { text } = await ai.generate({
-      // We use Gemini 3 Flash Preview for everything
-      model: 'googleai/gemini-3-flash-preview',
+    let result;
+    const generateConfig = {
       system: `You are the "Data Analyst" agent for a fitness/health app.
 Your job is to answer complex analytical questions from the user about their fitness data (e.g., comparing days of the week, analyzing variances in calorie burn, spotting long-term trends).
 You have tools to fetch their historical data (up to 180 days) and to calculate statistics (mean, variance, standard deviation).
@@ -121,8 +120,21 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
       config: {
         temperature: 0.2,
       }
-    });
+    };
 
-    return text;
+    try {
+      result = await ai.generate({
+        model: 'googleai/gemini-3-flash-preview',
+        ...generateConfig
+      });
+    } catch (err: any) {
+      console.warn('[DataAnalystFlow] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+      result = await ai.generate({
+        model: 'googleai/gemini-2.5-flash',
+        ...generateConfig
+      });
+    }
+
+    return result.text;
   }
 );
