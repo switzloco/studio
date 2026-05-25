@@ -1,6 +1,8 @@
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
 import { fitbitService, FitbitApiError } from '@/lib/fitbit-service';
+import { calculateDailyVFScore } from './vf-scoring';
+import type { HistoryEntry } from './health-service';
 
 /** How often (ms) background sync should run — 6 hours. */
 export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -353,8 +355,90 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
 
   try {
     await adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snapshot);
+
+    // Query logs and health data to recalculate score if history exists
+    const [foodLogs, exerciseLogs, health, prefs] = await Promise.all([
+      adminHealthService.queryFoodLog(firestore, userId, date, 50),
+      adminHealthService.queryExerciseLog(firestore, userId, date, 50),
+      adminHealthService.getHealthSummary(firestore, userId),
+      adminHealthService.getUserPreferences(firestore, userId),
+    ]);
+
+    if (health?.history && health.history.length > 0) {
+      const historyIndex = health.history.findIndex(h => (h.isoDate || h.date) === date);
+      if (historyIndex !== -1) {
+        const entry = health.history[historyIndex];
+        
+        const totalCaloriesIn = foodLogs.reduce((s, e) => s + (e.calories || 0), 0);
+        const totalProteinG = foodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
+        const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
+        const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
+
+        const newResult = calculateDailyVFScore({
+          caloriesIn: totalCaloriesIn,
+          caloriesOut: snapshot.caloriesOut ?? entry.breakdown?.caloriesOut ?? health.dailyCaloriesOut ?? 2000,
+          proteinG: totalProteinG,
+          proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
+          fastingHours: entry.breakdown?.fastingHours ?? 0,
+          alcoholDrinks: totalAlcoholDrinks,
+          sleepHours: snapshot.sleepHours ?? entry.breakdown?.sleepHours ?? 7,
+          seedOilMeals,
+          weightKg: health.weightKg,
+          bodyFatPct: health.bodyFatPct,
+          hrv: snapshot.hrv ?? health.fitbitByDate?.[date]?.hrv,
+          foodLogs,
+          exerciseLogs,
+          fitbitActivities: snapshot.activities,
+        });
+
+        const newScore = newResult.score;
+        if (newScore !== entry.gain) {
+          const diff = newScore - entry.gain;
+          
+          const updatedHistory = [...health.history];
+          
+          const updatedEntry: HistoryEntry = {
+            ...entry,
+            gain: newScore,
+            status: newScore >= 0 ? 'Bullish' : 'Correction',
+            detail: newResult.summary,
+            equity: entry.equity + diff,
+            breakdown: {
+              ...entry.breakdown,
+              caloriesIn: totalCaloriesIn,
+              caloriesOut: snapshot.caloriesOut ?? entry.breakdown?.caloriesOut ?? health.dailyCaloriesOut ?? 2000,
+              proteinG: totalProteinG,
+              proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
+              fastingHours: entry.breakdown?.fastingHours ?? 0,
+              alcoholDrinks: totalAlcoholDrinks,
+              sleepHours: snapshot.sleepHours ?? entry.breakdown?.sleepHours ?? 7,
+              ...newResult.breakdown,
+            }
+          };
+          
+          updatedHistory[historyIndex] = updatedEntry;
+          
+          // Update subsequent entries' cumulative equity
+          for (let i = historyIndex + 1; i < updatedHistory.length; i++) {
+            updatedHistory[i] = {
+              ...updatedHistory[i],
+              equity: updatedHistory[i].equity + diff
+            };
+          }
+          
+          const newVisceralFatPoints = (health.visceralFatPoints || 0) + diff;
+          
+          await adminHealthService.updateHealthData(firestore, userId, {
+            history: updatedHistory,
+            visceralFatPoints: newVisceralFatPoints
+          });
+          
+          console.log(`[syncFitbitSnapshot] Updated history entry for ${date}. Diff: ${diff}, New Score: ${newScore}, New VF Points: ${newVisceralFatPoints}`);
+        }
+      }
+    }
   } catch (error) {
-    console.error('[syncFitbitSnapshot] Firestore write failed:', error);
+    console.error('[syncFitbitSnapshot] Firestore write/recalculate failed:', error);
     return { success: false, reason: 'write_failed' };
   }
 
