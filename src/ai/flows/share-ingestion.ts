@@ -152,13 +152,12 @@ export const shareIngestionFlow = ai.defineFlow(
 
       try {
         llmResult = await ai.generate({
-          model: 'googleai/gemini-3-flash-preview',
           ...generateConfig
         });
       } catch (err: any) {
-        console.warn('[ShareIngestion] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+        console.warn('[ShareIngestion] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
         llmResult = await ai.generate({
-          model: 'googleai/gemini-2.5-flash',
+          model: 'googleai/gemini-2.0-flash',
           ...generateConfig
         });
       }

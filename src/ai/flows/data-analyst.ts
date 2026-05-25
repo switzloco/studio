@@ -124,13 +124,12 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
 
     try {
       result = await ai.generate({
-        model: 'googleai/gemini-3-flash-preview',
         ...generateConfig
       });
     } catch (err: any) {
-      console.warn('[DataAnalystFlow] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+      console.warn('[DataAnalystFlow] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
       result = await ai.generate({
-        model: 'googleai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.0-flash',
         ...generateConfig
       });
     }

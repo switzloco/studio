@@ -47,10 +47,10 @@ export async function POST(req: Request) {
       const result = await cfoChatPrompt.stream(input, { maxTurns: 15 });
       stream = result.stream;
     } catch (err: any) {
-      console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.5-flash):', err?.message ?? String(err));
+      console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
       try {
         const result = await cfoChatPrompt.stream(input, {
-          model: 'googleai/gemini-2.5-flash',
+          model: 'googleai/gemini-2.0-flash',
           maxTurns: 15,
         });
         stream = result.stream;
