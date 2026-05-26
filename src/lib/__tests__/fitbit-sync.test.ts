@@ -149,6 +149,11 @@ describe('syncFitbitSnapshot score recalculation', () => {
         proteinG: 160,
         carbsG: 100,
         fatG: 50,
+        portionG: 200,
+        fiberG: 5,
+        source: 'user_estimate',
+        meal: 'lunch',
+        timestamp: {} as any,
         name: 'Meal 1',
       },
     ]);
