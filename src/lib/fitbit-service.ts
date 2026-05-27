@@ -556,15 +556,22 @@ export const fitbitService = {
       const sleepStartMs = startMs - 6 * 3_600_000;
       const sleepEndMs   = endMs   + 12 * 3_600_000;
 
-      const [stepsData, sleepData, caloriesData, activities] = await Promise.all([
+      const [stepsData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
         googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
         googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
         googleFitAggregate('com.google.calories.expended', accessToken, startMs,      endMs),
+        googleFitAggregate('com.google.calories.bmr',      accessToken, startMs,      endMs),
         fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
       const stepsCount  = fitSumInt(stepsData);
-      const caloriesOut = Math.round(fitSumFp(caloriesData));
+      const expended    = fitSumFp(caloriesData);
+      const bmr         = fitSumFp(bmrData);
+      // Samsung Health via Health Connect writes only active calories to
+      // com.google.calories.expended (BMR is missing). Native Google Fit
+      // already includes BMR. Detect which case we're in: if expended < BMR
+      // it can only be active-only, so add BMR to get total TDEE.
+      const caloriesOut = Math.round(expended > bmr ? expended : expended + bmr);
       const sleepSec    = fitSleepSeconds(sleepData);
 
       // Google Fit has no HRV data type — omit hrv so the metabolic engine
