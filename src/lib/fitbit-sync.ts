@@ -170,7 +170,9 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
-    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value * 0.90);
+    // Google Health data (including Samsung Health via Health Connect) is already accurate.
+    const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
+    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value * calorieDiscount);
   }
 
   // Only update HRV and recoveryStatus when Fitbit returns a valid reading.
@@ -347,7 +349,8 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
     snapshot.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
   }
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    snapshot.caloriesOut = Math.round(result.caloriesOut.value * 0.90);
+    const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
+    snapshot.caloriesOut = Math.round(result.caloriesOut.value * calorieDiscount);
   }
   if (result.activities && result.activities.length > 0) {
     snapshot.activities = result.activities;

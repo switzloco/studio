@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
     // the client-side auto-sync will retry on next page load.
     let syncResult: import('@/lib/fitbit-service').FitbitInitialSyncResult | null = null;
     try {
-      syncResult = await fitbitService.syncInitialData(creds.accessToken, provider);
+      syncResult = await fitbitService.syncInitialData(creds.accessToken, provider, timezoneOffset);
     } catch (syncError) {
       console.error('[FitbitCallback] Initial data sync failed (non-fatal — device still linked):', syncError);
     }
@@ -121,7 +121,9 @@ export async function GET(request: NextRequest) {
       if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
       if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
         // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
-        healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * 0.90);
+        // Google Health data (including Samsung Health via Health Connect) is already accurate.
+        const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
+        healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * calorieDiscount);
       }
 
       // Derive recovery status from HRV.
