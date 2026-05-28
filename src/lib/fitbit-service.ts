@@ -560,17 +560,25 @@ export const fitbitService = {
         googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
         googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
         googleFitAggregate('com.google.calories.expended', accessToken, startMs,      endMs),
-        googleFitAggregate('com.google.calories.bmr',      accessToken, startMs,      endMs),
+        // Non-fatal: many accounts have no default BMR datasource (Google Fit
+        // returns 400 INVALID_ARGUMENT). Treat that as bmr=0 and let the caller
+        // estimate from the user's profile if needed.
+        googleFitAggregate('com.google.calories.bmr',      accessToken, startMs,      endMs)
+          .catch((err) => {
+            console.warn('[FitbitService] Google Fit BMR unavailable, falling back to 0:', err?.message ?? err);
+            return null;
+          }),
         fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
       const stepsCount  = fitSumInt(stepsData);
       const expended    = fitSumFp(caloriesData);
-      const bmr         = fitSumFp(bmrData);
+      const bmr         = bmrData ? fitSumFp(bmrData) : 0;
       // Samsung Health via Health Connect writes only active calories to
       // com.google.calories.expended (BMR is missing). Native Google Fit
       // already includes BMR. Detect which case we're in: if expended < BMR
       // it can only be active-only, so add BMR to get total TDEE.
+      // If BMR API is unavailable (bmr=0), the caller estimates from profile.
       const caloriesOut = Math.round(expended > bmr ? expended : expended + bmr);
       const sleepSec    = fitSleepSeconds(sleepData);
 

@@ -8,6 +8,28 @@ import type { HistoryEntry } from './health-service';
 export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * Estimate resting BMR from the user's stored profile using Mifflin-St Jeor.
+ * Used when Google Fit doesn't expose a BMR datasource (common for Samsung
+ * Health via Health Connect) and the reported caloriesOut is active-only.
+ * Falls back to 1600 kcal — a reasonable adult average — if no weight is set.
+ */
+async function estimateBmrFromProfile(firestore: import('firebase-admin/firestore').Firestore, userId: string): Promise<number> {
+  try {
+    const health = await adminHealthService.getHealthSummary(firestore, userId);
+    const weightKg = health?.weightKg;
+    const heightCm = health?.heightCm;
+    if (!weightKg) return 1600;
+    // Mifflin-St Jeor (male formula — sex isn't stored, this approximates).
+    // BMR = 10*kg + 6.25*cm − 5*age + 5. Without age, use 40.
+    const h = heightCm ?? 175;
+    return Math.round(10 * weightKg + 6.25 * h - 5 * 40 + 5);
+  } catch (err) {
+    console.warn('[estimateBmrFromProfile] Failed to load profile, using default 1600:', err);
+    return 1600;
+  }
+}
+
+/**
  * Syncs today's Fitbit data for a verified user.
  * Refreshes the access token if needed, fetches steps/sleep/HRV,
  * and writes the updated metrics back to Firestore.
@@ -172,7 +194,17 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
     // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
     // Google Health data (including Samsung Health via Health Connect) is already accurate.
     const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
-    healthUpdate.dailyCaloriesOut = Math.round(result.caloriesOut.value * calorieDiscount);
+    let calsOut = result.caloriesOut.value * calorieDiscount;
+    // Google Fit BMR datasource is often unavailable for Samsung Health users
+    // (returns 400 INVALID_ARGUMENT). When the reported total is implausibly low
+    // for a full day, treat it as active-only and supplement with an estimated
+    // BMR so the score isn't a fake-massive surplus.
+    if (provider === 'google' && calsOut < 1500) {
+      const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
+      console.log(`[syncFitbitData] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
+      calsOut += estimatedBmr;
+    }
+    healthUpdate.dailyCaloriesOut = Math.round(calsOut);
   }
 
   // Only update HRV and recoveryStatus when Fitbit returns a valid reading.
@@ -350,7 +382,13 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   }
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
-    snapshot.caloriesOut = Math.round(result.caloriesOut.value * calorieDiscount);
+    let calsOut = result.caloriesOut.value * calorieDiscount;
+    if (provider === 'google' && calsOut < 1500) {
+      const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
+      console.log(`[syncFitbitSnapshot] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
+      calsOut += estimatedBmr;
+    }
+    snapshot.caloriesOut = Math.round(calsOut);
   }
   if (result.activities && result.activities.length > 0) {
     snapshot.activities = result.activities;
