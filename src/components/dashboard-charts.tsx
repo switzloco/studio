@@ -447,8 +447,11 @@ export function DashboardCharts({
                             {isDeviceVerified && connectedDevice === 'withings' && (
                                 <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Withings +5% adj.</p>
                             )}
-                            {isDeviceVerified && connectedDevice !== 'withings' && (
+                            {isDeviceVerified && connectedDevice === 'fitbit' && (
                                 <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Fitbit −10% adj.</p>
+                            )}
+                            {isDeviceVerified && connectedDevice === 'google' && (
+                                <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Google Health</p>
                             )}
                         </div>
                         <div className="text-center">

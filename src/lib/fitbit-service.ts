@@ -76,7 +76,11 @@ async function googleFitAggregate(
   accessToken: string,
   startTimeMillis: number,
   endTimeMillis: number,
+  dataSourceId?: string,
 ): Promise<any> {
+  const aggregateBy = dataSourceId
+    ? [{ dataTypeName, dataSourceId }]
+    : [{ dataTypeName }];
   const res = await fetch(
     'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
     {
@@ -86,7 +90,7 @@ async function googleFitAggregate(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        aggregateBy: [{ dataTypeName }],
+        aggregateBy,
         bucketByTime: { durationMillis: endTimeMillis - startTimeMillis },
         startTimeMillis,
         endTimeMillis,
@@ -556,8 +560,20 @@ export const fitbitService = {
       const sleepStartMs = startMs - 6 * 3_600_000;
       const sleepEndMs   = endMs   + 12 * 3_600_000;
 
-      const [stepsData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
+      const [stepsDefaultData, stepsMergedData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
+        // Default aggregation — Google Fit picks one canonical step source
+        // (usually phone-pedometer-estimated). Often misses watch/Health Connect.
         googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
+        // Explicit merge datasource — combines all step sources including
+        // Health Connect bridges (Samsung Watch, etc.). Non-fatal if missing.
+        googleFitAggregate(
+          'com.google.step_count.delta',
+          accessToken, startMs, endMs,
+          'derived:com.google.step_count.delta:com.google.android.gms:merge_step_deltas',
+        ).catch((err) => {
+          console.warn('[FitbitService] Google Fit merged step datasource unavailable:', err?.message ?? err);
+          return null;
+        }),
         googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
         googleFitAggregate('com.google.calories.expended', accessToken, startMs,      endMs),
         // Non-fatal: many accounts have no default BMR datasource (Google Fit
@@ -571,7 +587,11 @@ export const fitbitService = {
         fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
-      const stepsCount  = fitSumInt(stepsData);
+      // Use whichever step source returned more — the merged source usually
+      // wins for Samsung Health users, the default wins for native Google Fit.
+      const stepsDefault = fitSumInt(stepsDefaultData);
+      const stepsMerged  = stepsMergedData ? fitSumInt(stepsMergedData) : 0;
+      const stepsCount   = Math.max(stepsDefault, stepsMerged);
       const expended    = fitSumFp(caloriesData);
       const bmr         = bmrData ? fitSumFp(bmrData) : 0;
       // Samsung Health via Health Connect writes only active calories to
