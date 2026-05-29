@@ -868,11 +868,15 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                   Oura
                 </Button>
                 
+                <Button size="sm" onClick={() => handleConnectFitbit('fitbit')} className="bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
+                  <FitbitLogo className="w-3.5 h-3.5 mr-2 text-emerald-600" />
+                  Fitbit
+                </Button>
+
                 <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg shadow-sm px-1.5 py-0.5 h-8">
                   <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-transparent hover:bg-slate-50 border-none shadow-none text-slate-700 font-black text-[10px] uppercase h-7 px-2">
                     <div className="flex items-center">
-                      <GoogleLogo className="w-3.5 h-3.5 mr-1" />
-                      <FitbitLogo className="w-3 h-3 text-slate-400 mr-1.5" />
+                      <GoogleLogo className="w-3.5 h-3.5 mr-1.5" />
                       <span>Google Health</span>
                     </div>
                   </Button>
