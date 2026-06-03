@@ -22,7 +22,7 @@ export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; //
 
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
-const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
+export const MUSCLE_PENALTY_PER_10KCAL = 2; // score points lost per 10 kcal muscle burned
 const INSULIN_DECAY_RATE           = 0.125; // clears a max spike (1.0) in ~2 hours (8 slots)
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
@@ -116,11 +116,19 @@ export function computeMetabolicScore(
   fatBurned: number,
   fatStored: number,
   muscleLost: number,
+  denominatorKcal: number = BASELINE_KCAL,
 ): number {
-  const fatBurnPts    = (fatBurned / BASELINE_KCAL) * 100;
-  const fatStorePts   = (fatStored / BASELINE_KCAL) * 100;
+  const D             = Math.max(1, denominatorKcal);
+  const fatBurnPts    = (fatBurned / D) * 100;
+  const fatStorePts   = (fatStored / D) * 100;
   const musclePenalty = (muscleLost / 10) * MUSCLE_PENALTY_PER_10KCAL;
   return Math.round(fatBurnPts - fatStorePts - musclePenalty);
+}
+
+/** Points denominator: 100 pts = burning ALPERT_SCORE_FRACTION of the Alpert ceiling in fat. */
+export const ALPERT_SCORE_FRACTION = 0.70;
+export function pointsDenominator(alpertNumber: number): number {
+  return Math.max(1, ALPERT_SCORE_FRACTION * alpertNumber);
 }
 
 export function runMetabolicSimulation(params: MetabolicEngineParams): MetabolicResult {
@@ -365,6 +373,6 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     totalOmega3Mg,
     totalAnabolicPotential: Number(cumulativeAnabolicPotential.toFixed(2)),
     muscleGlycogenMaxKcal: muscleMax,
-    score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost),
+    score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost, pointsDenominator(alpertNumber)),
   };
 }

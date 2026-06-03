@@ -566,7 +566,7 @@ const getRecentLogsTool = ai.defineTool(
 const scoreDailyVFTool = ai.defineTool(
   {
     name: 'score_daily_vf',
-    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine. Call this at end-of-day or when the user asks for their daily score. Score = (fatBurned/1200)×100 − (fatStored/1200)×100 − (muscleLost/10)×2. Score is UNCAPPED — a perfect PSMF day = ~100 pts; extended fasts can exceed 100; surplus days go negative. Fat oxidation is rate-limited per hour (Alpert 2005) and paused while the gut has food (insulin suppression of lipolysis). Returns the score, a breakdown of fat burned/stored/muscle lost, and coaching context on the 5 rules.`,
+    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine. Call this at end-of-day or when the user asks for their daily score. Score is normalized per-user to their fat-oxidation ceiling: 100 pts = burning 70% of the user's Alpert number in fat that day, so the scale means the same for everyone. Score = Σ_slot[(fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2] where D = 0.70 × Alpert. UNCAPPED both directions (no floor, no cap) — an Alpert-max day ≈ +143; surplus or muscle-bleeding days go negative. Behavioral penalties applied automatically: each drink caps the score at 0 for 3h; consecutive-day drinking = flat −25; >2 high-burn cardio sessions in 7 days with no strength session caps cardio burn at 50%; seed-oil meals = −5 each. The tool resolves yesterday's alcohol and the 7-day cardio/tension history itself — you only supply fastingHours and sleepHours. Returns the score and a breakdown of fat burned/stored/muscle lost.`,
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('YYYY-MM-DD'),
@@ -584,17 +584,34 @@ const scoreDailyVFTool = ai.defineTool(
   async (input) => {
     const firestore = getAdminFirestore();
 
-    // Gather day's food and exercise logs for the metabolic simulation
-    const [foodLogs, exerciseLogs, health, prefs] = await Promise.all([
+    // Rolling-window dates for the behavioral rules (UTC-safe arithmetic on the local date).
+    const addDays = (isoDate: string, delta: number): string => {
+      const [y, m, d] = isoDate.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() + delta);
+      return dt.toISOString().slice(0, 10);
+    };
+    const yesterday = addDays(input.localDate, -1);
+    const sevenDaysAgo = addDays(input.localDate, -6); // inclusive 7-day window ending today
+
+    // Gather day's logs plus the history needed for the behavioral penalties.
+    const [foodLogs, exerciseLogs, health, prefs, yesterdayFood, exercise7d] = await Promise.all([
       healthService.queryFoodLog(firestore, input.userId, input.localDate, 50),
       healthService.queryExerciseLog(firestore, input.userId, input.localDate, 50),
       healthService.getHealthSummary(firestore, input.userId),
       healthService.getUserPreferences(firestore, input.userId),
+      healthService.queryFoodLog(firestore, input.userId, yesterday, 50),
+      healthService.queryExerciseLogRange(firestore, input.userId, sevenDaysAgo, input.localDate, 200),
     ]);
     const totalCaloriesIn = foodLogs.reduce((s, e) => s + (e.calories || 0), 0);
     const totalProteinG = foodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
     const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
     const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
+
+    // Behavioral-rule inputs resolved from history.
+    const alcoholYesterday = yesterdayFood.some((e) => ((e as any).alcoholDrinks || 0) > 0);
+    const cardioSessions7d = exercise7d.filter((e) => e.category === 'cardio' || e.category === 'conditioning').length;
+    const tensionSessions7d = exercise7d.filter((e) => e.category === 'strength').length;
 
     const caloriesOut = health?.dailyCaloriesOut || 2000;
     const currentEquity = health?.visceralFatPoints || 0;
@@ -613,6 +630,9 @@ const scoreDailyVFTool = ai.defineTool(
       bodyFatPct: health?.bodyFatPct,
       foodLogs,
       exerciseLogs,
+      alcoholYesterday,
+      cardioSessions7d,
+      tensionSessions7d,
     });
 
     // Apply score to equity
@@ -635,8 +655,10 @@ const scoreDailyVFTool = ai.defineTool(
         proteinG: totalProteinG,
         proteinGoal,
         fastingHours: input.fastingHours,
-        alcoholDrinks: totalAlcoholDrinks,
         sleepHours: input.sleepHours,
+        alcoholYesterday,
+        cardioSessions7d,
+        tensionSessions7d,
         ...result.breakdown,
       },
     });
@@ -998,16 +1020,17 @@ HISTORICAL AVERAGES & MULTI-WEEK BREAKDOWNS (do NOT claim "insufficient data" wi
 - NEVER tell the client the books are empty, that there's "insufficient data," or that they need to log more — UNTIL you have actually queried the full period with these tools and confirmed it's genuinely sparse. The client logs diligently; assume the data exists and go get it.
 - If a real query DOES come back thin for the period, say so honestly and cite what you found ("Only 11 days logged in the last 56 — here's that sample, but treat the average as directional"). Give them the best breakdown the actual data supports rather than refusing.
 
-VF DAILY SCORING SYSTEM (Hourly Metabolic Partitioning Engine):
-Score = (fatBurned / 1200) × 100 − (fatStored / 1200) × 100 − (muscleLost / 10) × 2
+VF DAILY SCORING SYSTEM (Alpert-normalized — Hourly Metabolic Partitioning Engine):
+Score = Σ_slot [ (fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2 ],  D = 0.70 × Alpert
 
-1200 kcal = PSMF perfect-day baseline. Score is UNCAPPED:
-  • Perfect PSMF day (1,200 kcal fat burned, 0 stored, 0 muscle) → +100
-  • Extended 36h fast (~1,440 kcal fat burned) → ~+120
-  • Maintenance → ≈ 0
-  • Caloric surplus (400 kcal stored) → ~ −33
+The scale is normalized to EACH user's fat-oxidation ceiling, so 100 points means the same effort for everyone:
+  • 100 pts = burning 70% of the user's Alpert number in fat that day
+  • An Alpert-max day ≈ +143; a clean extended fast can score higher
+  • Maintenance ≈ 0; surplus or muscle-bleeding days go negative
+  • UNCAPPED in both directions — no +100 cap, no −200 floor
+  • Muscle catabolism is PRICED IN: a deficit funded by burning muscle scores far worse than the same deficit funded by fat. This is the fix for "points up, muscle down." Do NOT celebrate a big deficit if the engine shows muscle was lost — explain the difference.
 
-The engine models 5-bucket sequential drain across 15-minute slots (6 AM–10 PM):
+The engine models 5-bucket sequential drain across 15-minute slots (6 AM–midnight):
   1. Gut/Exogenous first — absorbed calories cover burn before anything else
   2. Fat faucet — rate-limited at Alpert ÷ 24 kcal/hr; PAUSED while gut has food (insulin blocks lipolysis)
   3. Liver glycogen (400 kcal cap) — fills remaining requirement
@@ -1031,21 +1054,23 @@ The Alpert number is the max sustainable fat oxidation rate:
 
 Call score_daily_vf at end-of-day or whenever the user asks "what was my VF score." The tool fetches all food and exercise logs automatically and runs the full simulation. You only need to supply fastingHours and sleepHours from the conversation.
 
-THE 5 RULES — COACHING TALKING POINTS (they do NOT directly change the score):
-These are context levers you surface when relevant. They matter because they affect the underlying deficit, hormone environment, or fat oxidation capacity:
+THE SCORING RULES — what actually moves the number (and how to coach them):
 
-Rule 1 — Protein Mandate: Below target protein (usually 150g) means muscle is more likely to be cannibalized to make up the deficit. This is not "clean" fat loss. Call it out: "You're in deficit but protein was short — you're not getting all-fat burning today."
+Rule 1 — Protein Mandate: Below target protein (usually 150g) means the engine drains muscle protein to fund the deficit — which now directly costs points (−2 per 10 kcal). Call it out: "You're in deficit but protein was short — the engine had to burn muscle, and that's docking your score, not just your physique."
 
-Rule 2 — Fasting Multiplier: Longer fasts deepen the deficit naturally and shift substrate to pure fat oxidation. Note it as a positive lever: "That 18h fast extended your fat burn window."
+Rule 2 — Volume-Based Metabolic Pause (alcohol): Each standard drink hard-caps the score at 0 for the next 3 hours — lipolysis is paused while the liver clears acetate. Multiple drinks extend/stack the window. This is a real scoring cap, not just a talking point: "Those 3 drinks paused your fat-burn scoring from 8 to 11 PM — you earned zero during the cleanup."
 
-Rule 3 — Alcohol Load: Alcohol creates a "Metabolic Efficiency Drag," not a total pause.
-  - **Efficiency Drag**: While the liver clears ethanol (acetate), fat oxidation is suppressed by ~70-80%. It's not a stop-sign, it's a speed limit.
-  - **Interference Window**: Alcohol consumed within **4 hours** of a strength workout is highly destructive. It inhibits mTOR (muscle growth signal) and redirects recovery resources.
-  - **Coaching Note**: When relevant, call out the cost realistically: "I get it, you're living. Here's the math: those drinks create an efficiency drag until ~2 AM and interfere with your leg day recovery. Expect a slower pace tomorrow."
+Rule 3 — Consecutive-Day Alcohol: Drinking on back-to-back days triggers a flat −25 before anything else. Flag it: "Second night in a row — that's an automatic −25 on the books before we even count the food."
 
-Rule 4 — Cortisol Tax: <6h sleep elevates cortisol, which promotes visceral fat retention even in deficit. Flag it: "You're in deficit but poor sleep raises cortisol — the metabolic return on that deficit is lower."
+Rule 4 — Tension Deficit Cap: More than 2 high-burn cardio sessions (basketball, Ultimate, etc.) in a rolling 7-day window with ZERO strength sessions caps cardio's calorie burn at 50% toward the score. Junk cardio volume earns half credit until tension is logged: "Your frisbee burn is only counting at 50% — three cardio sessions, no lifting. One strength session restores full value."
 
-Rule 5 — Seed Oils: Each seed-oil-heavy meal triggers systemic inflammation (seed oils oxidize to aldehydes at cooking temps). Flag it as an inflammation liability: "Good deficit, but 2 seed-oil meals put inflammation on the books."
+Rule 5 — Seed Oils: −5 pts per seed-oil-heavy meal (oxidized seed oils → systemic inflammation). "2 seed-oil meals put −10 and an inflammation liability on the books."
+
+MECHANICAL TENSION MANDATE (proactive — this is how we stop muscle loss):
+The client's failure mode is heavy cardio (basketball/Ultimate) with almost no mechanical lifting, which bleeds muscle in a deficit. Intervene PROACTIVELY:
+- When the client logs high-burn cardio (category cardio/conditioning), check the rolling 7-day exercise history (get_recent_logs type="exercise", days=7). If there are >2 cardio sessions and NO strength session, you MUST proactively recommend a 15–20 minute resistance circuit — don't wait to be asked. Warn that the Tension Deficit Cap is now halving their cardio points until they lift.
+- Build every circuit EXCLUSIVELY from the client's available equipment (from preferences — e.g. 55lb & 25lb kettlebells, 50lb ruck, pull-up rings, 18–55lb adjustable dumbbells, flat bench, ATG slant board). Never prescribe gear they don't have. Give ONE concrete circuit (sets/reps/rounds), not a menu.
+- METABOLIC REALITY CHECK: If the client logs a 3,000+ calorie burn day AND significant alcohol, explicitly explain that the fat-burning window is paused (lipolysis suppressed while the liver clears acetate), so the huge burn is NOT converting to fat loss the way the number suggests — and warn about elevated muscle-catabolism risk given the ~42-year-old metabolic shift (lower anabolic signaling, slower recovery). Direct them to defend muscle: a short tension circuit + 40g protein before bed.
 
 When logging food (log_food), ALWAYS assess and set:
 - alcoholDrinks: count of alcoholic beverages in the meal (beer/wine/cocktail = 1 each)
