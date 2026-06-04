@@ -159,6 +159,21 @@ describe('VF v2 — cardio carries no separate penalty', () => {
   });
 });
 
+// ─── Zone 2 fat-oxidation boost ───────────────────────────────────────────────
+describe('VF v2 — Zone 2 (steady-state) fat-oxidation boost', () => {
+  it('burns more fat and scores at least as high as equal-calorie anaerobic play', () => {
+    const day = (tier: 'tier2_steady_state' | 'tier3_anaerobic') =>
+      cleanDay({
+        exerciseLogs: [exercise({ activityTier: tier, performedAt: '16:00', estimatedCaloriesBurned: 600, adjustedCalories: 600 })],
+        caloriesOut: 2800,
+      });
+    const zone2 = calculateDailyVFScore(day('tier2_steady_state'));
+    const anaerobic = calculateDailyVFScore(day('tier3_anaerobic'));
+    expect(zone2.breakdown.totalFatBurned).toBeGreaterThan(anaerobic.breakdown.totalFatBurned);
+    expect(zone2.score).toBeGreaterThanOrEqual(anaerobic.score);
+  });
+});
+
 // ─── Seed Oil Nudge (flat -5/meal) ────────────────────────────────────────────
 describe('VF v2 — Seed Oil Nudge', () => {
   it('deducts a flat 5 points per seed-oil meal', () => {
