@@ -60,27 +60,16 @@ const fetchHistoricalDataTool = ai.defineTool(
     const startDateStr = startDate.toLocaleDateString('en-CA');
 
     if (input.type === 'exercise') {
-      const ref = firestore.collection(`users/${input.userId}/exercise_log`);
-      const snapshot = await ref
-        .where('date', '>=', startDateStr)
-        .where('date', '<=', input.localDate)
-        .limit(500)
-        .get();
-      return snapshot.docs
-        .map(d => ({ ...d.data(), id: d.id }))
-        .filter((e: any) => !e.ignored);
+      // Paginate the full range so a 180-day analysis isn't silently truncated.
+      return await healthService.queryLogRangeAll(
+        firestore, input.userId, 'exercise_log', startDateStr, input.localDate,
+      );
     }
 
     if (input.type === 'food') {
-      const ref = firestore.collection(`users/${input.userId}/food_log`);
-      const snapshot = await ref
-        .where('date', '>=', startDateStr)
-        .where('date', '<=', input.localDate)
-        .limit(1000)
-        .get();
-      return snapshot.docs
-        .map(d => ({ ...d.data(), id: d.id }))
-        .filter((e: any) => !e.ignored);
+      return await healthService.queryLogRangeAll(
+        firestore, input.userId, 'food_log', startDateStr, input.localDate,
+      );
     }
 
     if (input.type === 'fasting') {

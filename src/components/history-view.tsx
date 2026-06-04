@@ -2,9 +2,10 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Briefcase, TrendingUp, AlertCircle, History as HistoryIcon, Dumbbell, Timer, ChevronDown, ArrowUpDown } from "lucide-react";
+import { Briefcase, TrendingUp, AlertCircle, History as HistoryIcon, Dumbbell, Timer, ChevronDown, ArrowUpDown, Download } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
+import { fetchAllLedger, ledgerToCSV, ledgerToJSON, downloadTextFile } from '@/lib/ledger-export';
 import { HealthData, HistoryEntry } from '@/lib/health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from '@/lib/food-exercise-types';
 import { VFScoreChart } from './vf-score-chart';
@@ -82,6 +83,26 @@ export function HistoryView() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('latest');
+  const [ledgerLimit, setLedgerLimit] = useState(20);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async (format: 'csv' | 'json') => {
+    if (!user || exporting) return;
+    setExporting(true);
+    try {
+      const data = await fetchAllLedger(db, user.uid);
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'csv') {
+        downloadTextFile(`cfo-ledger-${stamp}.csv`, ledgerToCSV(data), 'text/csv;charset=utf-8');
+      } else {
+        downloadTextFile(`cfo-ledger-${stamp}.json`, ledgerToJSON(data), 'application/json');
+      }
+    } catch (err) {
+      console.error('Ledger export failed', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 1. Fetch High-Level Equity Summary (for the charts)
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
@@ -91,15 +112,15 @@ export function HistoryView() {
   const foodQuery = useMemoFirebase(() => user ? query(
     collection(db, 'users', user.uid, 'food_log'),
     orderBy('timestamp', 'desc'),
-    limit(20)
-  ) : null, [db, user]);
+    limit(ledgerLimit)
+  ) : null, [db, user, ledgerLimit]);
   const { data: foodLogs, isLoading: isFoodLoading } = useCollection<FoodLogEntry>(foodQuery);
 
   const exerciseQuery = useMemoFirebase(() => user ? query(
     collection(db, 'users', user.uid, 'exercise_log'),
     orderBy('timestamp', 'desc'),
-    limit(20)
-  ) : null, [db, user]);
+    limit(ledgerLimit)
+  ) : null, [db, user, ledgerLimit]);
   const { data: exerciseLogs, isLoading: isExerciseLoading } = useCollection<ExerciseLogEntry>(exerciseQuery);
 
   // fast_log uses a plain getDocs (not useCollection) so that a permission
@@ -111,12 +132,12 @@ export function HistoryView() {
     const q = query(
       collection(db, 'users', user.uid, 'fast_log'),
       orderBy('timestamp', 'desc'),
-      limit(20),
+      limit(ledgerLimit),
     );
     getDocs(q)
       .then(snap => setFastLogs(snap.docs.map(d => ({ ...d.data(), id: d.id } as FastLogEntry)).filter(e => !e.ignored)))
       .catch(() => { /* collection missing or rules not yet deployed — show empty */ });
-  }, [db, user]);
+  }, [db, user, ledgerLimit]);
 
   // Merge, filter ignored, and sort
   const ledgerEntries = useMemo<LedgerEntry[]>(() => {
@@ -273,23 +294,44 @@ export function HistoryView() {
 
       {/* Audit Log (Transactions) */}
       <div className="space-y-6">
-        <div className="flex items-center justify-between px-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <h3 className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.2em] italic">Transaction Ledger</h3>
-          <div className="flex items-center gap-1.5">
-            <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground" />
-            {(['latest', 'calories'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setSortMode(mode)}
-                className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-all ${
-                  sortMode === mode
-                    ? 'bg-foreground text-background shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                {mode === 'latest' ? 'Latest' : 'Calories'}
-              </button>
-            ))}
+          <div className="flex items-center gap-3">
+            {/* Export full ledger */}
+            <div className="flex items-center gap-1.5">
+              <Download className={`w-3.5 h-3.5 text-muted-foreground ${exporting ? 'animate-pulse' : ''}`} />
+              {exporting ? (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 text-muted-foreground">Exporting…</span>
+              ) : (
+                (['csv', 'json'] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => handleExport(fmt)}
+                    title={`Export your entire ledger as ${fmt.toUpperCase()}`}
+                    className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-all text-muted-foreground hover:text-foreground hover:bg-muted ring-1 ring-border"
+                  >
+                    {fmt}
+                  </button>
+                ))
+              )}
+            </div>
+            {/* Sort */}
+            <div className="flex items-center gap-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground" />
+              {(['latest', 'calories'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setSortMode(mode)}
+                  className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-all ${
+                    sortMode === mode
+                      ? 'bg-foreground text-background shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  {mode === 'latest' ? 'Latest' : 'Calories'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -428,6 +470,15 @@ export function HistoryView() {
                 </Card>
               );
             })}
+            {/* Load more — the ledger loads the most recent entries first; this pages further back. */}
+            {((foodLogs?.length ?? 0) >= ledgerLimit || (exerciseLogs?.length ?? 0) >= ledgerLimit || fastLogs.length >= ledgerLimit) && (
+              <button
+                onClick={() => setLedgerLimit((l) => l + 50)}
+                className="w-full py-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-muted rounded-xl transition-all ring-1 ring-border"
+              >
+                Load older transactions
+              </button>
+            )}
           </div>
         ) : (
           <div className="p-20 text-center bg-white/50 rounded-3xl border-2 border-dashed border-muted space-y-6 flex flex-col items-center">
