@@ -471,15 +471,10 @@ const getRecentLogsTool = ai.defineTool(
     if (input.type === 'food' || input.type === 'all') {
       let foodLogs: any[];
       if (useDateRange) {
-        const ref = firestore.collection(`users/${input.userId}/food_log`);
-        const snapshot = await ref
-          .where('date', '>=', startDateStr)
-          .where('date', '<=', input.localDate)
-          .limit(200)
-          .get();
-        foodLogs = snapshot.docs
-          .map(d => ({ ...d.data(), id: d.id }))
-          .filter((e: any) => !e.ignored);
+        // Paginate the full range so long lookbacks come back complete, not capped.
+        foodLogs = await healthService.queryLogRangeAll(
+          firestore, input.userId, 'food_log', startDateStr, input.localDate,
+        );
       } else {
         foodLogs = [];
         for (let i = 0; i < daysBack; i++) {
@@ -504,15 +499,10 @@ const getRecentLogsTool = ai.defineTool(
     if (input.type === 'exercise' || input.type === 'all') {
       let exerciseLogs: any[];
       if (useDateRange) {
-        const ref = firestore.collection(`users/${input.userId}/exercise_log`);
-        const snapshot = await ref
-          .where('date', '>=', startDateStr)
-          .where('date', '<=', input.localDate)
-          .limit(200)
-          .get();
-        exerciseLogs = snapshot.docs
-          .map(d => ({ ...d.data(), id: d.id }))
-          .filter((e: any) => !e.ignored);
+        // Paginate the full range so long lookbacks come back complete, not capped.
+        exerciseLogs = await healthService.queryLogRangeAll(
+          firestore, input.userId, 'exercise_log', startDateStr, input.localDate,
+        );
       } else {
         exerciseLogs = [];
         for (let i = 0; i < daysBack; i++) {

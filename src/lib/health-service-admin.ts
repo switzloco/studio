@@ -214,6 +214,40 @@ export const adminHealthService = {
 
   // --- Ignore / Unignore (soft-delete) ---
 
+  /**
+   * Fetch ALL non-ignored log entries in a date range, paging past Firestore's
+   * per-query ceiling so long lookbacks (e.g. 90–180 days for a heavy logger)
+   * come back complete instead of silently truncated. Cursor pagination by the
+   * document snapshot keeps multiple same-date entries intact.
+   */
+  async queryLogRangeAll(
+    db: Firestore,
+    userId: string,
+    collectionName: 'food_log' | 'exercise_log',
+    startDate: string,
+    endDate: string,
+    hardCap = 5000,
+  ): Promise<Array<Record<string, unknown>>> {
+    const ref = db.collection(`users/${userId}/${collectionName}`);
+    const PAGE = 500;
+    const out: Array<Record<string, unknown>> = [];
+    let cursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    while (out.length < hardCap) {
+      let q = ref
+        .where('date', '>=', startDate)
+        .where('date', '<=', endDate)
+        .orderBy('date', 'asc')
+        .limit(PAGE);
+      if (cursor) q = q.startAfter(cursor);
+      const snap = await q.get();
+      if (snap.empty) break;
+      for (const d of snap.docs) out.push({ ...d.data(), id: d.id });
+      cursor = snap.docs[snap.docs.length - 1];
+      if (snap.docs.length < PAGE) break;
+    }
+    return out.filter((e) => !(e as { ignored?: boolean }).ignored);
+  },
+
   async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<FoodLogEntry | null> {
     const docRef = db.doc(`users/${userId}/food_log/${entryId}`);
     const snap = await docRef.get();
