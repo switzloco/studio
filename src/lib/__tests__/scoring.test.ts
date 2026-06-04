@@ -148,28 +148,14 @@ describe('VF v2 — Consecutive-Day Alcohol', () => {
   });
 });
 
-// ─── Tension Deficit Cap ──────────────────────────────────────────────────────
-describe('VF v2 — Tension Deficit Cap', () => {
-  it('discounts cardio burn and never raises the score when >2 cardio sessions and no strength in 7 days', () => {
-    const base = cleanDay({ exerciseLogs: [exercise()], caloriesOut: 2500 });
-    const capped = calculateDailyVFScore({ ...base, cardioSessions7d: 3, tensionSessions7d: 0 });
-    const notCapped = calculateDailyVFScore({ ...base, cardioSessions7d: 3, tensionSessions7d: 1 });
-    expect(capped.breakdown.cardioCapped).toBe(true);
-    expect(notCapped.breakdown.cardioCapped).toBe(false);
-    // Half of the 700 kcal cardio burn is discounted from the simulation.
-    expect(capped.breakdown.cardioKcalRemoved).toBe(350);
-    // The cap can only ever hold the score down, never inflate it.
-    expect(capped.score).toBeLessThanOrEqual(notCapped.score);
-  });
-
-  it('does not cap when a strength session exists in the window', () => {
-    const r = calculateDailyVFScore(cleanDay({
-      exerciseLogs: [exercise()],
-      cardioSessions7d: 5,
-      tensionSessions7d: 1,
-    }));
-    expect(r.breakdown.cardioCapped).toBe(false);
-    expect(r.breakdown.cardioKcalRemoved).toBe(0);
+// ─── Cardio is not point-penalized (muscle loss is priced in instead) ─────────
+describe('VF v2 — cardio carries no separate penalty', () => {
+  it('does not dock points for logged cardio beyond its metabolic effect', () => {
+    // A pure-cardio day and a rest day with the same caloriesOut score off the
+    // same engine output — there is no extra "junk cardio" cap on the score.
+    const r = calculateDailyVFScore(cleanDay({ exerciseLogs: [exercise()] }));
+    expect(r.breakdown).not.toHaveProperty('cardioCapped');
+    expect(typeof r.score).toBe('number');
   });
 });
 

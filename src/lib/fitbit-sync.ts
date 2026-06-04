@@ -430,11 +430,9 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
           foodLogs,
           exerciseLogs,
           fitbitActivities: snapshot.activities,
-          // Preserve behavioral-rule context resolved at score time so a re-sync
-          // doesn't silently drop the consecutive-alcohol / tension-cap penalties.
+          // Preserve the consecutive-alcohol flag resolved at score time so a
+          // re-sync doesn't silently drop the -25 penalty.
           alcoholYesterday: entry.breakdown?.alcoholYesterday,
-          cardioSessions7d: entry.breakdown?.cardioSessions7d,
-          tensionSessions7d: entry.breakdown?.tensionSessions7d,
         });
 
         const newScore = newResult.score;

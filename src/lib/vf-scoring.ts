@@ -18,10 +18,11 @@
  *   • Volume-Based Metabolic Pause — each alcoholic drink hard-caps the score
  *     at 0 for the following 3 hours (lipolysis suppressed by acetate clearance).
  *   • Consecutive-Day Alcohol — flat −25 if alcohol was logged yesterday AND today.
- *   • Tension Deficit Cap — if >2 high-burn cardio sessions in the rolling 7-day
- *     window with zero strength sessions, cardio's calorie burn counts at 50%
- *     (junk cardio volume earns half credit until tension is logged).
  *   • Seed Oil Nudge — −5 pts per seed-oil meal (systemic inflammation signal).
+ *
+ * NOTE: cardio is NOT point-penalized. A deficit funded by muscle already costs
+ * points via the muscleLost term above, so there is no separate "junk cardio"
+ * cap — the engine prices muscle loss honestly and the coach handles the rest.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -39,8 +40,6 @@ const INTERVAL_MIN               = 15;
 const START_MIN                  = 6 * 60;           // engine simulates from 6:00 AM
 const ALC_PAUSE_SLOTS            = (3 * 60) / INTERVAL_MIN; // 3-hour pause = 12 slots
 const CONSECUTIVE_ALCOHOL_PENALTY = 25;              // flat points, consecutive-day drinking
-const CARDIO_CAP_FACTOR          = 0.5;              // tension-deficit cardio counts at 50%
-const CARDIO_7D_THRESHOLD        = 2;                // ">2" high-burn cardio sessions trips the cap
 const SEED_OIL_PENALTY_PER_MEAL  = 5;                // flat points per seed-oil meal
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
@@ -82,10 +81,8 @@ export interface DailyVFInput {
   foodLogs?: FoodLogEntry[];
   exerciseLogs?: ExerciseLogEntry[];
   fitbitActivities?: FitbitActivity[];
-  // ── Behavioral-rule inputs (resolved by the caller from history) ──
+  // ── Behavioral-rule input (resolved by the caller from history) ──
   alcoholYesterday?: boolean;   // alcohol logged the previous day → consecutive penalty
-  cardioSessions7d?: number;    // high-burn cardio sessions in the rolling 7-day window
-  tensionSessions7d?: number;   // strength sessions in the rolling 7-day window
 }
 
 export interface DailyVFResult {
@@ -105,8 +102,6 @@ export interface DailyVFResult {
     alcoholDrinks: number;
     alcoholPausePenalty: number;   // points removed by the 3h-per-drink pause (≤ 0)
     consecutiveAlcoholPenalty: number; // 0 or -25
-    cardioCapped: boolean;
-    cardioKcalRemoved: number;     // cardio burn discounted by the tension cap
     seedOilMeals: number;
     seedOilPenalty: number;
   };
@@ -130,42 +125,24 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     exerciseLogs,
     fitbitActivities,
     alcoholYesterday,
-    cardioSessions7d,
-    tensionSessions7d,
   } = input;
 
   const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
   const D = pointsDenominator(alpertNumber);   // 100 pts = burn 70% of Alpert in fat
   const deficit = caloriesOut - caloriesIn;
 
-  // ── Tension Deficit Cap ─────────────────────────────────────────────────────
-  // >2 high-burn cardio sessions in the rolling 7-day window with ZERO strength
-  // sessions → cardio's calorie burn counts at 50%. Implemented by halving the
-  // cardio/conditioning exercise calories fed into the simulation (and the matching
-  // slice of caloriesOut), so the fat-burn points those sessions earn are halved.
-  const cardioCapped =
-    (cardioSessions7d ?? 0) > CARDIO_7D_THRESHOLD && (tensionSessions7d ?? 0) === 0;
-
-  let simExerciseLogs = exerciseLogs;
-  let simCaloriesOut = caloriesOut;
-  let cardioKcalRemoved = 0;
-  if (cardioCapped && exerciseLogs && exerciseLogs.length > 0) {
-    simExerciseLogs = exerciseLogs.map((e) => {
-      if (e.ignored || (e.category !== 'cardio' && e.category !== 'conditioning')) return e;
-      const effective = e.adjustedCalories ?? e.estimatedCaloriesBurned ?? 0;
-      const kept = effective * CARDIO_CAP_FACTOR;
-      cardioKcalRemoved += effective - kept;
-      return { ...e, adjustedCalories: kept, estimatedCaloriesBurned: kept };
-    });
-    simCaloriesOut = Math.max(0, caloriesOut - cardioKcalRemoved);
-  }
+  // Cardio is NOT point-penalized. A deficit funded by muscle already costs points
+  // via the muscleLost term in the slot loop below, so glycogen-depleting anaerobic
+  // play shows up honestly through muscle catabolism — no separate cardio cap. The
+  // "tension deficit" pattern (lots of anaerobic play, no lifting) is handled as a
+  // coaching nudge in the CFO prompt, not as a scoring penalty.
 
   // ── Run the metabolic simulation for per-slot fat/storage/muscle figures ─────
   const sim = runMetabolicSimulation({
-    caloriesOut: simCaloriesOut,
+    caloriesOut,
     alpertNumber,
     foodLogs,
-    exerciseLogs: simExerciseLogs,
+    exerciseLogs,
     fitbitActivities,
     caloriesIn,
     hrv,
@@ -226,7 +203,6 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   if (fastingActive) parts.push(`${fastingHours}h fast`);
   if (alcoholPausePenalty < 0) parts.push(`alcohol pause ${Math.round(alcoholPausePenalty)} pts`);
   if (consecutiveAlcoholPenalty < 0) parts.push(`consecutive-day drinking -25`);
-  if (cardioCapped) parts.push(`tension deficit — cardio capped at 50% (${Math.round(cardioKcalRemoved)} kcal discounted)`);
   if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s)`);
 
   return {
@@ -244,8 +220,6 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       alcoholDrinks,
       alcoholPausePenalty: Math.round(alcoholPausePenalty),
       consecutiveAlcoholPenalty,
-      cardioCapped,
-      cardioKcalRemoved: Math.round(cardioKcalRemoved),
       seedOilMeals,
       seedOilPenalty,
     },

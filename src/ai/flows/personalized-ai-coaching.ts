@@ -566,7 +566,7 @@ const getRecentLogsTool = ai.defineTool(
 const scoreDailyVFTool = ai.defineTool(
   {
     name: 'score_daily_vf',
-    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine. Call this at end-of-day or when the user asks for their daily score. Score is normalized per-user to their fat-oxidation ceiling: 100 pts = burning 70% of the user's Alpert number in fat that day, so the scale means the same for everyone. Score = Σ_slot[(fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2] where D = 0.70 × Alpert. UNCAPPED both directions (no floor, no cap) — an Alpert-max day ≈ +143; surplus or muscle-bleeding days go negative. Behavioral penalties applied automatically: each drink caps the score at 0 for 3h; consecutive-day drinking = flat −25; >2 high-burn cardio sessions in 7 days with no strength session caps cardio burn at 50%; seed-oil meals = −5 each. The tool resolves yesterday's alcohol and the 7-day cardio/tension history itself — you only supply fastingHours and sleepHours. Returns the score and a breakdown of fat burned/stored/muscle lost.`,
+    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine. Call this at end-of-day or when the user asks for their daily score. Score is normalized per-user to their fat-oxidation ceiling: 100 pts = burning 70% of the user's Alpert number in fat that day, so the scale means the same for everyone. Score = Σ_slot[(fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2] where D = 0.70 × Alpert. UNCAPPED both directions (no floor, no cap) — an Alpert-max day ≈ +143; surplus or muscle-bleeding days go negative. Behavioral penalties applied automatically: each drink caps the score at 0 for 3h; consecutive-day drinking = flat −25; seed-oil meals = −5 each. Cardio is NOT point-penalized — muscle loss from glycogen-depleting play is already priced into the muscleLost term. The tool resolves yesterday's alcohol itself — you only supply fastingHours and sleepHours. Returns the score and a breakdown of fat burned/stored/muscle lost.`,
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('YYYY-MM-DD'),
@@ -592,26 +592,22 @@ const scoreDailyVFTool = ai.defineTool(
       return dt.toISOString().slice(0, 10);
     };
     const yesterday = addDays(input.localDate, -1);
-    const sevenDaysAgo = addDays(input.localDate, -6); // inclusive 7-day window ending today
 
-    // Gather day's logs plus the history needed for the behavioral penalties.
-    const [foodLogs, exerciseLogs, health, prefs, yesterdayFood, exercise7d] = await Promise.all([
+    // Gather day's logs plus yesterday's food (for the consecutive-alcohol penalty).
+    const [foodLogs, exerciseLogs, health, prefs, yesterdayFood] = await Promise.all([
       healthService.queryFoodLog(firestore, input.userId, input.localDate, 50),
       healthService.queryExerciseLog(firestore, input.userId, input.localDate, 50),
       healthService.getHealthSummary(firestore, input.userId),
       healthService.getUserPreferences(firestore, input.userId),
       healthService.queryFoodLog(firestore, input.userId, yesterday, 50),
-      healthService.queryExerciseLogRange(firestore, input.userId, sevenDaysAgo, input.localDate, 200),
     ]);
     const totalCaloriesIn = foodLogs.reduce((s, e) => s + (e.calories || 0), 0);
     const totalProteinG = foodLogs.reduce((s, e) => s + (e.proteinG || 0), 0);
     const totalAlcoholDrinks = foodLogs.reduce((s, e) => s + ((e as any).alcoholDrinks || 0), 0);
     const seedOilMeals = foodLogs.filter((e) => (e as any).hasSeedOils === true).length;
 
-    // Behavioral-rule inputs resolved from history.
+    // Consecutive-day alcohol flag resolved from yesterday's ledger.
     const alcoholYesterday = yesterdayFood.some((e) => ((e as any).alcoholDrinks || 0) > 0);
-    const cardioSessions7d = exercise7d.filter((e) => e.category === 'cardio' || e.category === 'conditioning').length;
-    const tensionSessions7d = exercise7d.filter((e) => e.category === 'strength').length;
 
     const caloriesOut = health?.dailyCaloriesOut || 2000;
     const currentEquity = health?.visceralFatPoints || 0;
@@ -631,8 +627,6 @@ const scoreDailyVFTool = ai.defineTool(
       foodLogs,
       exerciseLogs,
       alcoholYesterday,
-      cardioSessions7d,
-      tensionSessions7d,
     });
 
     // Apply score to equity
@@ -657,8 +651,6 @@ const scoreDailyVFTool = ai.defineTool(
         fastingHours: input.fastingHours,
         sleepHours: input.sleepHours,
         alcoholYesterday,
-        cardioSessions7d,
-        tensionSessions7d,
         ...result.breakdown,
       },
     });
@@ -1062,15 +1054,18 @@ Rule 2 — Volume-Based Metabolic Pause (alcohol): Each standard drink hard-caps
 
 Rule 3 — Consecutive-Day Alcohol: Drinking on back-to-back days triggers a flat −25 before anything else. Flag it: "Second night in a row — that's an automatic −25 on the books before we even count the food."
 
-Rule 4 — Tension Deficit Cap: More than 2 high-burn cardio sessions (basketball, Ultimate, etc.) in a rolling 7-day window with ZERO strength sessions caps cardio's calorie burn at 50% toward the score. Junk cardio volume earns half credit until tension is logged: "Your frisbee burn is only counting at 50% — three cardio sessions, no lifting. One strength session restores full value."
+Rule 4 — Seed Oils: −5 pts per seed-oil-heavy meal (oxidized seed oils → systemic inflammation). "2 seed-oil meals put −10 and an inflammation liability on the books."
 
-Rule 5 — Seed Oils: −5 pts per seed-oil-heavy meal (oxidized seed oils → systemic inflammation). "2 seed-oil meals put −10 and an inflammation liability on the books."
+(Cardio is NOT a scoring rule — it is never point-penalized. See the Mechanical Tension & Cardio Philosophy below for how muscle loss is already handled and when to coach it.)
 
-MECHANICAL TENSION MANDATE (proactive — this is how we stop muscle loss):
-The client's failure mode is heavy cardio (basketball/Ultimate) with almost no mechanical lifting, which bleeds muscle in a deficit. Intervene PROACTIVELY:
-- When the client logs high-burn cardio (category cardio/conditioning), check the rolling 7-day exercise history (get_recent_logs type="exercise", days=7). If there are >2 cardio sessions and NO strength session, you MUST proactively recommend a 15–20 minute resistance circuit — don't wait to be asked. Warn that the Tension Deficit Cap is now halving their cardio points until they lift.
-- Build every circuit EXCLUSIVELY from the client's available equipment (from preferences — e.g. 55lb & 25lb kettlebells, 50lb ruck, pull-up rings, 18–55lb adjustable dumbbells, flat bench, ATG slant board). Never prescribe gear they don't have. Give ONE concrete circuit (sets/reps/rounds), not a menu.
-- METABOLIC REALITY CHECK: If the client logs a 3,000+ calorie burn day AND significant alcohol, explicitly explain that the fat-burning window is paused (lipolysis suppressed while the liver clears acetate), so the huge burn is NOT converting to fat loss the way the number suggests — and warn about elevated muscle-catabolism risk given the ~42-year-old metabolic shift (lower anabolic signaling, slower recovery). Direct them to defend muscle: a short tension circuit + 40g protein before bed.
+MECHANICAL TENSION & CARDIO PHILOSOPHY (coaching only — NOT a score penalty):
+Cardio is GOOD. Start-and-stop play (basketball, Ultimate frisbee) is fun, builds the engine, and is FAR better than sitting still — NEVER disparage it, never call it "junk," never tell the client to do less of it. The score does not dock a single point for cardio. What you must understand so you coach it correctly:
+- Muscle loss is ALREADY priced into the daily score automatically. When a deficit forces the engine to catabolize muscle protein, the number drops on its own (−2 pts per 10 kcal). You do NOT verbally punish cardio — the score already tells the truth quietly. Do not lecture, moralize, or audit "junk cardio."
+- The ONE thing worth a gentle, occasional nudge: when glycogen-depleting anaerobic play (activityTier = tier3_anaerobic — basketball, Ultimate, HIIT, sprints) STACKS UP across the week with NO mechanical tension to defend the muscle, that's when a deficit starts eating lean mass.
+- TRIGGER (gentle, once — not every session): When the client logs a tier3_anaerobic session, glance at the rolling 7-day history (get_recent_logs type="exercise", days=7). If there are MORE THAN 2 tier3_anaerobic sessions and ZERO strength sessions, WARMLY suggest adding a short tension circuit — framed as protecting the muscle their play is built on, never as a correction. Example: "Love the run-and-gun — three hoops runs this week is a serious engine. Let's protect the chassis: 15 minutes of tension a couple times a week keeps that deficit pulling from fat, not muscle." Give ONE circuit, then drop it. Do not repeat the nudge in the same session or pile on guilt.
+- ZONE 2 IS DIFFERENT — and it's a good thing. Steady-state aerobic work (activityTier = tier2_steady_state — steady jog, easy bike, elliptical, swim, ruck walk) does NOT count toward the tension-deficit watch and should be ENCOURAGED. It builds the aerobic base and drives fat oxidation without the glycolytic muscle-bleed of stop-and-go play. When the client logs Zone 2, reinforce it positively: "That's the good stuff — Zone 2 is your fat-oxidation engine." NEVER fire the tension nudge off a Zone 2 (or walking) session; only tier3_anaerobic counts.
+- Build every recommended circuit EXCLUSIVELY from the client's available equipment (from preferences — e.g. 55lb & 25lb kettlebells, 50lb ruck, pull-up rings, 18–55lb adjustable dumbbells, flat bench, ATG slant board). Never prescribe gear they don't have. Give ONE concrete circuit (sets/reps/rounds), not a menu.
+- METABOLIC REALITY CHECK: If the client logs a 3,000+ calorie burn day AND significant alcohol, explain (matter-of-fact, not scolding) that the fat-burning window is paused (lipolysis suppressed while the liver clears acetate), so the huge burn is NOT converting to fat loss the way the number suggests — and that muscle-catabolism risk is elevated given the ~42-year-old metabolic shift (lower anabolic signaling, slower recovery). Direct them to defend muscle: a short tension circuit + 40g protein before bed.
 
 When logging food (log_food), ALWAYS assess and set:
 - alcoholDrinks: count of alcoholic beverages in the meal (beer/wine/cocktail = 1 each)

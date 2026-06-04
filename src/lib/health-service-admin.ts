@@ -212,18 +212,6 @@ export const adminHealthService = {
       .filter(e => !e.ignored);
   },
 
-  async queryExerciseLogRange(db: Firestore, userId: string, startDate: string, endDate: string, limitCount = 200): Promise<ExerciseLogEntry[]> {
-    const ref = db.collection(`users/${userId}/exercise_log`);
-    const snapshot = await ref
-      .where('date', '>=', startDate)
-      .where('date', '<=', endDate)
-      .limit(limitCount)
-      .get();
-    return snapshot.docs
-      .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
-      .filter(e => !e.ignored);
-  },
-
   // --- Ignore / Unignore (soft-delete) ---
 
   async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<FoodLogEntry | null> {
