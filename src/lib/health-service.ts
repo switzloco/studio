@@ -24,6 +24,15 @@ export interface VFBreakdown {
   fastingActive?: boolean;
   alcoholFlag?: boolean;
   poorSleep?: boolean;
+  // Alpert-normalized v2 scoring fields
+  pointsDenominator?: number;         // D = 70% of Alpert
+  totalFatBurned?: number;
+  totalFatStored?: number;
+  muscleKcal?: number;
+  alcoholPausePenalty?: number;       // points removed by the 3h-per-drink pause
+  consecutiveAlcoholPenalty?: number; // 0 or -25
+  // Behavioral-rule context (resolved at score time; reused on Fitbit re-sync)
+  alcoholYesterday?: boolean;
   // Legacy rule-based fields (kept for backward compat with old history entries)
   baseScore?: number;
   fastingOverride?: boolean;

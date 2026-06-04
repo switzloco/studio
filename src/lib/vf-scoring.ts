@@ -1,25 +1,53 @@
 /**
- * @fileOverview Visceral Fat daily scoring engine.
+ * @fileOverview Visceral Fat daily scoring engine (v2 — Alpert-normalized).
  *
- * SCORING: Linear caloric-deficit base + biology-grounded modifiers.
- *   Base  = deficit / 10   (1000 kcal deficit = 100 pts)
- *   Range = [-200 … uncapped positive]
+ * SCORING: Points are normalized to each user's fat-oxidation ceiling, so the
+ * scale means the same thing for every user regardless of body size.
+ *   100 pts = burning 70% of the user's Alpert number in fat that day.
+ *   Denominator  D = 0.70 × Alpert(weightKg, bodyFatPct)
+ *   Score is UNCAPPED in both directions — no -200 floor, no +100 cap.
  *
- *   Metabolic engine (4-bucket drain) still runs for informational breakdown
- *   but does NOT drive the score — it was producing extreme negatives on
- *   fasting days due to Alpert rate-limiting forcing deficit into muscle.
+ *   score = Σ_slot [ (fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2 ]
+ *           + behavioral penalties
  *
- * 5 BIOLOGY-BASED MODIFIERS:
- *   1 — Caloric Engine    (base = deficit / 10)
- *   2 — Fasting Override  (24h+ fast → +100 base — ketosis is protective)
- *   3 — Alcohol Drag      (−5 pts/drink — ~1h suppressed fat oxidation each)
- *   4 — HRV Multiplier    (recovery-based multiplier for positive scores)
- *   5 — Seed Oil Nudge    (−5 pts/meal — mild inflammation signal, not acute)
+ * The slot-level fat/storage/muscle figures come from the Hourly Metabolic
+ * Partitioning Engine, so muscle catabolism is now PRICED INTO the score —
+ * a deficit funded by muscle no longer scores like a deficit funded by fat.
+ *
+ * BEHAVIORAL PENALTIES (conditional):
+ *   • Volume-Based Metabolic Pause — each alcoholic drink hard-caps the score
+ *     at 0 for the following 3 hours (lipolysis suppressed by acetate clearance).
+ *   • Consecutive-Day Alcohol — flat −25 if alcohol was logged yesterday AND today.
+ *   • Seed Oil Nudge — −5 pts per seed-oil meal (systemic inflammation signal).
+ *
+ * NOTE: cardio is NOT point-penalized. A deficit funded by muscle already costs
+ * points via the muscleLost term above, so there is no separate "junk cardio"
+ * cap — the engine prices muscle loss honestly and the coach handles the rest.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 import type { FitbitActivity } from './health-service';
-import { runMetabolicSimulation, computeMetabolicScore, computeMuscleGlycogenMaxKcal } from './metabolic-engine';
+import {
+  runMetabolicSimulation,
+  computeMuscleGlycogenMaxKcal,
+  pointsDenominator,
+  MUSCLE_PENALTY_PER_10KCAL,
+  NUM_SLOTS,
+} from './metabolic-engine';
+
+// ── Scoring constants ─────────────────────────────────────────────────────────
+const INTERVAL_MIN               = 15;
+const START_MIN                  = 6 * 60;           // engine simulates from 6:00 AM
+const ALC_PAUSE_SLOTS            = (3 * 60) / INTERVAL_MIN; // 3-hour pause = 12 slots
+const CONSECUTIVE_ALCOHOL_PENALTY = 25;              // flat points, consecutive-day drinking
+const SEED_OIL_PENALTY_PER_MEAL  = 5;                // flat points per seed-oil meal
+
+const MEAL_DEFAULT_MIN: Record<string, number> = {
+  breakfast: 7 * 60,
+  lunch:     12 * 60 + 30,
+  dinner:    18 * 60 + 30,
+  snack:     15 * 60,
+};
 
 /** Compute maximum sustainable fat oxidation in kcal/day (Alpert 2005). */
 export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): number {
@@ -29,47 +57,52 @@ export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): num
   return Math.round(Math.max(500, fatMassLbs * 31)); // floor at 500 to avoid div-by-zero extremes
 }
 
+function slotOfFood(food: FoodLogEntry): number {
+  const min = food.consumedAt
+    ? (() => { const [h, m] = food.consumedAt!.split(':').map(Number); return (h || 0) * 60 + (m || 0); })()
+    : (MEAL_DEFAULT_MIN[food.meal] ?? 18 * 60 + 30);
+  return Math.max(0, Math.min(NUM_SLOTS - 1, Math.round((min - START_MIN) / INTERVAL_MIN)));
+}
+
 export interface DailyVFInput {
   caloriesIn: number;
   caloriesOut: number;
   proteinG: number;
   proteinGoal: number;       // typically 150
-  fastingHours: number;      // consecutive clean fast hours for the day
-  alcoholDrinks: number;     // number of alcoholic drinks consumed
-  sleepHours: number;
+  fastingHours: number;      // coaching context only (no longer a flat override)
+  alcoholDrinks: number;     // daily total of alcoholic drinks
+  sleepHours: number;        // coaching context only
   seedOilMeals: number;      // count of meals with heavy seed oil / deep-fried
-  weightKg?: number;         // used for Alpert number calculation
-  bodyFatPct?: number;       // 0-100; used for Alpert number calculation
-  hrv?: number;              // 0-150; used for recovery multiplier
+  weightKg?: number;         // used for Alpert number / glycogen calculation
+  bodyFatPct?: number;       // 0-100; used for Alpert number / glycogen calculation
+  hrv?: number;              // 0-150; recovery multiplier inside the engine
   hasCreatine?: boolean;     // user supplement status
   // Optional: per-entry logs for precise slot simulation
   foodLogs?: FoodLogEntry[];
   exerciseLogs?: ExerciseLogEntry[];
   fitbitActivities?: FitbitActivity[];
+  // ── Behavioral-rule input (resolved by the caller from history) ──
+  alcoholYesterday?: boolean;   // alcohol logged the previous day → consecutive penalty
 }
 
 export interface DailyVFResult {
   score: number;
   breakdown: {
-    // Metabolic engine outputs (informational)
+    // Engine outputs (now priced into the score)
     alpertNumber: number;
+    pointsDenominator: number;     // D = 70% of Alpert
     deficit: number;
     totalFatBurned: number;
     totalFatStored: number;
     muscleKcal: number;
-    // Coaching context (rule assessments)
+    baseScore: number;             // engine score before behavioral penalties
+    // Behavioral rule assessments
     proteinMet: boolean;
     fastingActive: boolean;
-    alcoholFlag: boolean;
+    alcoholDrinks: number;
+    alcoholPausePenalty: number;   // points removed by the 3h-per-drink pause (≤ 0)
+    consecutiveAlcoholPenalty: number; // 0 or -25
     seedOilMeals: number;
-    // Rule modifier fields
-    baseScore: number;
-    fastingOverride: boolean;
-    alcoholCap: boolean;
-    alcoholPenalty: number;
-    hrvMultiplier: number;
-    hrvStatus: 'tax' | 'neutral' | 'bonus';
-    omega3Bonus: number;
     seedOilPenalty: number;
   };
   summary: string;
@@ -83,128 +116,111 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     proteinGoal,
     fastingHours,
     alcoholDrinks,
-    sleepHours,
     seedOilMeals,
     weightKg,
     bodyFatPct,
+    hrv,
+    hasCreatine,
     foodLogs,
     exerciseLogs,
     fitbitActivities,
+    alcoholYesterday,
   } = input;
 
   const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
+  const D = pointsDenominator(alpertNumber);   // 100 pts = burn 70% of Alpert in fat
   const deficit = caloriesOut - caloriesIn;
 
-  // Run metabolic simulation for breakdown detail (informational display only)
-  let totalFatBurned: number;
-  let totalFatStored: number;
-  let muscleKcal: number;
+  // Cardio is NOT point-penalized. A deficit funded by muscle already costs points
+  // via the muscleLost term in the slot loop below, so glycogen-depleting anaerobic
+  // play shows up honestly through muscle catabolism — no separate cardio cap. The
+  // "tension deficit" pattern (lots of anaerobic play, no lifting) is handled as a
+  // coaching nudge in the CFO prompt, not as a scoring penalty.
 
-  if (foodLogs && foodLogs.length > 0) {
-    const result = runMetabolicSimulation({
-      caloriesOut,
-      alpertNumber,
-      foodLogs,
-      exerciseLogs,
-      fitbitActivities,
-      caloriesIn,
-      muscleGlycogenMaxKcal: computeMuscleGlycogenMaxKcal(weightKg, bodyFatPct),
-    });
-    totalFatBurned = result.totalFatBurned;
-    totalFatStored = result.totalFatStored;
-    muscleKcal     = result.totalMuscleLost;
-  } else {
-    // Daily-total approximation: treat all deficit as fat burned (no timing data)
-    totalFatBurned = Math.max(0, deficit);
-    totalFatStored = Math.max(0, -deficit);
-    muscleKcal     = 0;
+  // ── Run the metabolic simulation for per-slot fat/storage/muscle figures ─────
+  const sim = runMetabolicSimulation({
+    caloriesOut,
+    alpertNumber,
+    foodLogs,
+    exerciseLogs,
+    fitbitActivities,
+    caloriesIn,
+    hrv,
+    hasCreatine,
+    weightKg,
+    bodyFatPct,
+    muscleGlycogenMaxKcal: computeMuscleGlycogenMaxKcal(weightKg, bodyFatPct, hasCreatine),
+  });
+
+  // ── Volume-Based Metabolic Pause mask ───────────────────────────────────────
+  // Each drink hard-caps the score at 0 for the next 3 hours. Overlapping windows
+  // from multiple drinks simply union together.
+  const paused = new Array<boolean>(NUM_SLOTS).fill(false);
+  const activeFoods = (foodLogs ?? []).filter((f) => !f.ignored);
+  for (const f of activeFoods) {
+    const drinks = f.alcoholDrinks ?? 0;
+    if (drinks <= 0) continue;
+    const s0 = slotOfFood(f);
+    for (let s = s0; s < Math.min(s0 + ALC_PAUSE_SLOTS, NUM_SLOTS); s++) paused[s] = true;
   }
 
-  // ── Rule assessments ──────────────────────────────────────────────────────
-  const proteinMet    = proteinG >= proteinGoal;
-  const fastingActive = fastingHours >= 16;
-  const alcoholFlag   = alcoholDrinks > 2;
-
-  // Rule 2: Fasting Override — 24h+ fast OR calorie intake <15% of TDEE.
-  const nearFasting = caloriesIn >= 0 && caloriesIn < caloriesOut * 0.15;
-  const fastingOverride = fastingHours >= 24 || nearFasting;
-
-  // Rule 1: Base score from caloric deficit
-  const baseScore = fastingOverride ? 100 : Math.round(deficit / 10);
-  let score = baseScore;
-
-
-  // Rule 3: Alcohol Drag
-  const alcoholPenalty = alcoholDrinks * -5;
-  score += alcoholPenalty;
-
-  // Rule 4: HRV Multiplier (Replacing Sleep/Cortisol tax)
-  let hrvMultiplier = 1.0;
-  let hrvStatus: 'tax' | 'neutral' | 'bonus' = 'neutral';
-  if (input.hrv) {
-    if (input.hrv < 30) {
-      hrvMultiplier = 0.85;
-      hrvStatus = 'tax';
-    } else if (input.hrv > 80) {
-      hrvMultiplier = 1.10;
-      hrvStatus = 'bonus';
-    }
+  // ── Score the day slot-by-slot ──────────────────────────────────────────────
+  let baseScore = 0;    // engine score, Alpert-normalized, no behavioral penalties
+  let pausedScore = 0;  // same, but positive accrual zeroed during alcohol pause
+  for (const slot of sim.slots) {
+    const net =
+      (slot.fatContribution / D) * 100 -
+      (slot.fatStoredThisSlot / D) * 100 -
+      (slot.muscleContribution / 10) * MUSCLE_PENALTY_PER_10KCAL;
+    baseScore += net;
+    pausedScore += paused[slot.slot] ? Math.min(net, 0) : net;
   }
-  
-  if (score > 0) {
-    score = Math.round(score * hrvMultiplier);
-  }
+  const alcoholPausePenalty = pausedScore - baseScore; // ≤ 0
 
-  // Rule 5: Omega-3 Sensitivity Bonus
-  // Moderate chronic effect on insulin sensitivity; acknowledged as a minor "lubricant" for fat oxidation.
-  let omega3Bonus = 0;
-  if (input.foodLogs) {
-    const totalO3 = input.foodLogs.reduce((sum, f) => sum + (f.omega3Mg || 0), 0);
-    if (totalO3 >= 2000) omega3Bonus = 3;
-    else if (totalO3 >= 1000) omega3Bonus = 1;
-  }
-  score += omega3Bonus;
+  let score = pausedScore;
 
-  // Rule 6: Seed Oil Nudge
-  // Mild inflammation signal; represents systemic friction.
-  const seedOilPenalty = seedOilMeals * -5;
+  // ── Consecutive-Day Alcohol penalty (flat) ──────────────────────────────────
+  const alcoholToday = alcoholDrinks > 0 || activeFoods.some((f) => (f.alcoholDrinks ?? 0) > 0);
+  const consecutiveAlcoholPenalty =
+    alcoholToday && alcoholYesterday ? -CONSECUTIVE_ALCOHOL_PENALTY : 0;
+  score += consecutiveAlcoholPenalty;
+
+  // ── Seed Oil Nudge (flat) ───────────────────────────────────────────────────
+  const seedOilPenalty = seedOilMeals * -SEED_OIL_PENALTY_PER_MEAL;
   score += seedOilPenalty;
 
-  // Clamp worst case at -200
-  score = Math.max(-200, score);
+  // No clamp — the scale is unbounded in both directions.
+  score = Math.round(score);
 
-  // ── Summary ───────────────────────────────────────────────────────────────
-  const directionLabel = deficit >= 0 ? 'deficit' : 'surplus';
+  // ── Coaching context ────────────────────────────────────────────────────────
+  const proteinMet = proteinG >= proteinGoal;
+  const fastingActive = fastingHours >= 16;
+
   const parts: string[] = [
-    `${Math.abs(deficit)} kcal ${directionLabel}; fat burned ${totalFatBurned} kcal, stored ${totalFatStored} kcal → ${score} pts`,
+    `fat burned ${sim.totalFatBurned} kcal, stored ${sim.totalFatStored} kcal, muscle lost ${sim.totalMuscleLost} kcal → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
   ];
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
-  if (alcoholFlag) parts.push(`${alcoholDrinks} drinks — liver overhead`);
-  if (hrvStatus === 'tax') parts.push(`low HRV recovery tax`);
-  if (hrvStatus === 'bonus') parts.push(`high HRV recovery bonus`);
-  if (omega3Bonus > 0) parts.push(`omega-3 sensitivity bonus (+${omega3Bonus})`);
-  if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s) — inflammation load`);
+  if (alcoholPausePenalty < 0) parts.push(`alcohol pause ${Math.round(alcoholPausePenalty)} pts`);
+  if (consecutiveAlcoholPenalty < 0) parts.push(`consecutive-day drinking -25`);
+  if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s)`);
 
   return {
     score,
     breakdown: {
       alpertNumber,
+      pointsDenominator: Math.round(D),
       deficit,
-      totalFatBurned,
-      totalFatStored,
-      muscleKcal,
+      totalFatBurned: sim.totalFatBurned,
+      totalFatStored: sim.totalFatStored,
+      muscleKcal: sim.totalMuscleLost,
+      baseScore: Math.round(baseScore),
       proteinMet,
       fastingActive,
-      alcoholFlag,
+      alcoholDrinks,
+      alcoholPausePenalty: Math.round(alcoholPausePenalty),
+      consecutiveAlcoholPenalty,
       seedOilMeals,
-      baseScore,
-      fastingOverride,
-      alcoholCap: false,
-      alcoholPenalty,
-      hrvMultiplier,
-      hrvStatus,
-      omega3Bonus,
       seedOilPenalty,
     },
     summary: `Daily VF score: ${score}. ${parts.join('; ')}.`,

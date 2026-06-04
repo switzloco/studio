@@ -83,8 +83,28 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
 
         {hasBreakdown ? (
           <div className="space-y-3">
-            {/* Alpert math — shown when new-format breakdown exists */}
-            {b.alpertNumber != null && b.deficit != null ? (
+            {/* Alpert math — v2 shows fat burned ÷ (70% of Alpert); falls back to legacy display */}
+            {b.totalFatBurned != null && b.pointsDenominator != null ? (
+              <div className="p-4 rounded-xl bg-slate-50 ring-1 ring-slate-200 space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Alpert Score Math</p>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-bold text-foreground">{b.totalFatBurned.toLocaleString()} kcal fat burned</span>
+                  <span className="text-xs text-muted-foreground">÷ {b.pointsDenominator.toLocaleString()} kcal (70% Alpert) × 100</span>
+                  <span className="text-sm font-black text-foreground">= {entry.gain > 0 ? '+' : ''}{entry.gain} pts</span>
+                </div>
+                {(b.muscleKcal ?? 0) > 0 || (b.totalFatStored ?? 0) > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    less {(b.totalFatStored ?? 0).toLocaleString()} kcal stored
+                    {(b.muscleKcal ?? 0) > 0 ? ` and ${b.muscleKcal!.toLocaleString()} kcal muscle lost` : ''}
+                  </p>
+                ) : null}
+                <div className="h-1.5 bg-slate-200 rounded-full">
+                  {entry.gain > 0 && (
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, entry.gain)}%` }} />
+                  )}
+                </div>
+              </div>
+            ) : b.alpertNumber != null && b.deficit != null ? (
               <div className="p-4 rounded-xl bg-slate-50 ring-1 ring-slate-200 space-y-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Alpert Score Math</p>
                 <div className="flex items-baseline gap-2">

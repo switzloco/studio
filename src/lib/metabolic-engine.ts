@@ -22,8 +22,9 @@ export const NUM_SLOTS = Math.ceil((END_MIN - START_MIN) / INTERVAL_MIN) + 1; //
 
 const LIVER_MAX_KCAL               = 400;   // 100g glycogen × 4 kcal/g
 export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
-const MUSCLE_PENALTY_PER_10KCAL    = 2;     // score points lost per 10 kcal muscle burned
+export const MUSCLE_PENALTY_PER_10KCAL = 2; // score points lost per 10 kcal muscle burned
 const INSULIN_DECAY_RATE           = 0.125; // clears a max spike (1.0) in ~2 hours (8 slots)
+const ZONE2_FAT_BOOST              = 1.5;    // steady-state ≈ FatMax: fat faucet runs 1.5× resting Alpert
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
   breakfast: 7 * 60,
@@ -116,11 +117,19 @@ export function computeMetabolicScore(
   fatBurned: number,
   fatStored: number,
   muscleLost: number,
+  denominatorKcal: number = BASELINE_KCAL,
 ): number {
-  const fatBurnPts    = (fatBurned / BASELINE_KCAL) * 100;
-  const fatStorePts   = (fatStored / BASELINE_KCAL) * 100;
+  const D             = Math.max(1, denominatorKcal);
+  const fatBurnPts    = (fatBurned / D) * 100;
+  const fatStorePts   = (fatStored / D) * 100;
   const musclePenalty = (muscleLost / 10) * MUSCLE_PENALTY_PER_10KCAL;
   return Math.round(fatBurnPts - fatStorePts - musclePenalty);
+}
+
+/** Points denominator: 100 pts = burning ALPERT_SCORE_FRACTION of the Alpert ceiling in fat. */
+export const ALPERT_SCORE_FRACTION = 0.70;
+export function pointsDenominator(alpertNumber: number): number {
+  return Math.max(1, ALPERT_SCORE_FRACTION * alpertNumber);
 }
 
 export function runMetabolicSimulation(params: MetabolicEngineParams): MetabolicResult {
@@ -156,6 +165,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   const liverAlcoholDrain  = new Array<number>(NUM_SLOTS).fill(0);
   const exerciseBurnPerSlot = new Array<number>(NUM_SLOTS).fill(0);
   const strengthSlots         = new Array<boolean>(NUM_SLOTS).fill(false);
+  const zone2Slots            = new Array<boolean>(NUM_SLOTS).fill(false);
 
   const activeFoods = foodLogs?.filter(f => !f.ignored) ?? [];
 
@@ -219,19 +229,21 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
           cal: ex.adjustedCalories || ex.estimatedCaloriesBurned || 0,
           dur: Math.max(15, ex.durationMin || 30),
           start: ex.performedAt ? parseHHMM(ex.performedAt) : 12 * 60,
-          isStrength: ex.category === 'strength'
+          isStrength: ex.category === 'strength',
+          isZone2: ex.activityTier === 'tier2_steady_state',
         };
       })
     : (fitbitActivities ?? []).map(act => {
-          const isStrength = act.activityName?.toLowerCase().includes('weight') || 
-                            act.activityName?.toLowerCase().includes('lift') || 
+          const isStrength = act.activityName?.toLowerCase().includes('weight') ||
+                            act.activityName?.toLowerCase().includes('lift') ||
                             act.activityTier === 'tier3_anaerobic';
           if (isStrength) strengthTrainingActive = true;
           return {
             cal: Math.round(act.calories * (TIER_DISCOUNT[act.activityTier] ?? 0.80)),
             dur: Math.max(15, act.durationMin),
             start: parseHHMM(act.startTime),
-            isStrength
+            isStrength,
+            isZone2: act.activityTier === 'tier2_steady_state',
           };
       });
 
@@ -246,6 +258,9 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       if ((ex as any).isStrength || activeLogs.find(l => l.name === (ex as any).name)?.category === 'strength') {
         strengthSlots[s] = true;
       }
+      // Zone 2 (steady-state) elevates fat oxidation toward FatMax — flag the slot
+      // so the fat faucet runs above the resting Alpert ceiling here.
+      if ((ex as any).isZone2) zone2Slots[s] = true;
     }
     totalExerciseCal += ex.cal;
   }
@@ -306,7 +321,8 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     const gutContribution = Math.min(absorptionThisSlot, burnThisSlot);
     let remaining         = burnThisSlot - gutContribution;
 
-    const fatFaucetPerSlot = (alpertNumber / 24 / 4) * fatOxEfficiency;
+    const zone2Boost = zone2Slots[s] ? ZONE2_FAT_BOOST : 1.0;
+    const fatFaucetPerSlot = (alpertNumber / 24 / 4) * fatOxEfficiency * zone2Boost;
     const fatContribution  = Math.min(remaining, fatFaucetPerSlot);
     remaining -= fatContribution;
 
@@ -365,6 +381,6 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     totalOmega3Mg,
     totalAnabolicPotential: Number(cumulativeAnabolicPotential.toFixed(2)),
     muscleGlycogenMaxKcal: muscleMax,
-    score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost),
+    score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost, pointsDenominator(alpertNumber)),
   };
 }

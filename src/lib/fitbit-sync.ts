@@ -430,6 +430,9 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
           foodLogs,
           exerciseLogs,
           fitbitActivities: snapshot.activities,
+          // Preserve the consecutive-alcohol flag resolved at score time so a
+          // re-sync doesn't silently drop the -25 penalty.
+          alcoholYesterday: entry.breakdown?.alcoholYesterday,
         });
 
         const newScore = newResult.score;
@@ -451,7 +454,6 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
               proteinG: totalProteinG,
               proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
               fastingHours: entry.breakdown?.fastingHours ?? 0,
-              alcoholDrinks: totalAlcoholDrinks,
               sleepHours: snapshot.sleepHours ?? entry.breakdown?.sleepHours ?? 7,
               ...newResult.breakdown,
             }

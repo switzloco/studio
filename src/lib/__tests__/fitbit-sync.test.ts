@@ -249,22 +249,24 @@ describe('syncFitbitSnapshot score recalculation', () => {
     // So arguments are: (firestore, 'user-123', updates)
     const updatePayload = mockCalls[0][2] as any;
     
-    // Difference: newScore (147) - oldScore (228) = -81
-    // New visceralFatPoints = 258 - 81 = 177
-    expect(updatePayload.visceralFatPoints).toBe(177);
-    
+    // Difference: newScore (28) - oldScore (228) = -200
+    // New visceralFatPoints = 258 - 200 = 58
+    // (Alpert-normalized v2: 654 kcal fat burned ÷ 813 (70% of 1162 Alpert) × 100,
+    //  less 412 kcal stored — a far cry from the old deficit/10 = 228.)
+    expect(updatePayload.visceralFatPoints).toBe(58);
+
     // Verify history entries:
     // entry 1: equity remains 10
-    // entry 2: gain=147, equity=10+147=157
-    // entry 3: gain=20, equity=157+20=177
+    // entry 2: gain=28, equity=10+28=38
+    // entry 3: gain=20, equity=38+20=58
     const newHistory = updatePayload.history;
     expect(newHistory[0].equity).toBe(10);
-    
-    expect(newHistory[1].gain).toBe(147);
-    expect(newHistory[1].equity).toBe(157);
+
+    expect(newHistory[1].gain).toBe(28);
+    expect(newHistory[1].equity).toBe(38);
     expect(newHistory[1].breakdown.caloriesOut).toBe(2970);
     expect(newHistory[1].breakdown.deficit).toBe(1470); // 2970 - 1500
-    
-    expect(newHistory[2].equity).toBe(177);
+
+    expect(newHistory[2].equity).toBe(58);
   });
 });
