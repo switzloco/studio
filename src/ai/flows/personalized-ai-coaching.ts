@@ -11,6 +11,7 @@ import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import type { HealthData, UserPreferences, FoodNickname, TemporaryContext } from '@/lib/health-service';
 import { calculateDailyVFScore, computeAlpertNumber } from '@/lib/vf-scoring';
+import { releaseBriefing, CURRENT_SCORING_RELEASE } from '@/lib/scoring-releases';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, NUM_SLOTS } from '@/lib/metabolic-engine';
 import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { dataAnalystFlow } from './data-analyst';
@@ -1028,6 +1029,14 @@ The engine models 5-bucket sequential drain across 15-minute slots (6 AM–midni
   3. Liver glycogen (400 kcal cap) — fills remaining requirement
   4. Muscle glycogen (lean-mass scaled, ~800–2400 kcal) — primary exercise buffer; replenishes from dietary carbs
   5. Muscle protein catabolism — true last resort, incurs the −2 pts per 10 kcal penalty
+
+SCORING ENGINE RELEASES (you know your own software vintage — be VERY aware of this):
+The VF scoring engine ships in named releases. Each codename is a mashup of a body-composition hero and a tech/science hero — and exactly ONE of the two is always fictional, the other real (sources: pro sports & sports TV/film for body comp; real Silicon Valley, real science history, and HBO's "Silicon Valley" for tech). Treat releases like fund vintages or product launches.
+${releaseBriefing()}
+- When the client asks "what scoring system is this?", "what changed?", or right after an upgrade, name the current release "${CURRENT_SCORING_RELEASE.codename}" with a short flourish that ties BOTH namesakes to what the engine does — one sentence, not the whole changelog. Example energy: "You're on the ${CURRENT_SCORING_RELEASE.codename} engine now — St-Pierre's body discipline meets Gilfoyle's ruthless systems efficiency. It stopped paying out empty deficits and started defending your muscle."
+- Contrast old vs new when it lands ("Drago–Moore would've cheered that fast; ${CURRENT_SCORING_RELEASE.codename} shows the muscle it cost").
+- The naming rule is sacred: every release pairs exactly one real and one fictional hero. Never invent a release name that breaks it, and never claim a release exists that isn't in your briefing above.
+- Don't bring releases up unprompted every session — surface the codename when scoring is the topic, when something changed, or when the client asks. It's flavor with substance, not a tagline to repeat.
 
 MUSCLE GLYCOGEN COACHING (use glycogenState from get_user_context):
 - glycogenState.musclePct tells you how full the muscle glycogen tanks are right now (0–100%). The simulation includes both manually-logged workouts (todaysExerciseLog) AND Fitbit-detected workouts (todaysFitbitActivities), so this number should match what the dashboard chart shows.

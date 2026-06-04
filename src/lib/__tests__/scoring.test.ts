@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { calculateDailyVFScore, DailyVFInput, computeAlpertNumber } from '../vf-scoring';
 import type { FoodLogEntry, ExerciseLogEntry } from '../food-exercise-types';
+import { SCORING_RELEASES, CURRENT_SCORING_RELEASE, hasOneFictionalHero } from '../scoring-releases';
 
 // ─── Mock Firebase so tests never touch a real database ───────────────────────
 vi.mock('firebase/firestore', () => ({
@@ -181,6 +182,25 @@ describe('VF v2 — Seed Oil Nudge', () => {
     const oily = calculateDailyVFScore(cleanDay({ seedOilMeals: 2 }));
     expect(oily.score).toBe(clean.score - 10);
     expect(oily.breakdown.seedOilPenalty).toBe(-10);
+  });
+});
+
+// ─── Scoring release registry — the "one fictional" twist is sacred ───────────
+describe('Scoring releases — codename invariant', () => {
+  it('every release pairs exactly one real and one fictional hero', () => {
+    for (const r of SCORING_RELEASES) {
+      expect(hasOneFictionalHero(r), `${r.codename} must have exactly one fictional hero`).toBe(true);
+    }
+  });
+
+  it('exposes a current release with a codename and version', () => {
+    expect(CURRENT_SCORING_RELEASE.codename).toBeTruthy();
+    expect(CURRENT_SCORING_RELEASE.version).toBeTruthy();
+  });
+
+  it('has unique codenames and ascending versions', () => {
+    const names = SCORING_RELEASES.map((r) => r.codename);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
 
