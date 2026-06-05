@@ -31,6 +31,7 @@ export interface VFBreakdown {
   muscleKcal?: number;
   alcoholPausePenalty?: number;       // points removed by the 3h-per-drink pause
   consecutiveAlcoholPenalty?: number; // 0 or -25
+  caloriesOutEstimated?: boolean;     // true when caloriesOut was BMR-estimated (no device data for that day)
   // Behavioral-rule context (resolved at score time; reused on Fitbit re-sync)
   alcoholYesterday?: boolean;
   // Legacy rule-based fields (kept for backward compat with old history entries)
