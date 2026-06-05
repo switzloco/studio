@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory } from '@/app/actions/fitbit';
+import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
 
 const ChatInterface = dynamic(() => import('@/components/chat-interface').then(m => ({ default: m.ChatInterface })), {
@@ -65,6 +66,7 @@ export default function Home() {
   const [showTutorial, setShowTutorial] = useState(false);
   const hasSyncedFitbit = useRef(false);
   const hasBackfilledFitbit = useRef(false);
+  const hasBackfilledScores = useRef(false);
 
   // Pull-to-refresh state (Today tab)
   const [pullDistance, setPullDistance] = useState(0);
@@ -137,6 +139,16 @@ export default function Home() {
     hasBackfilledFitbit.current = true;
     backfillFitbitHistory(user.uid).catch(e => console.error('[BackfillFitbit] Failed:', e));
   }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice, healthData?.fitbitByDate]);
+
+  // Auto-score backdated days into the equity history once per session.
+  // Runs regardless of device — it scores any day with logged food/exercise,
+  // using device calorie-burn where available and BMR estimates beyond it.
+  useEffect(() => {
+    if (!user || !healthData || hasBackfilledScores.current) return;
+    hasBackfilledScores.current = true;
+    const localDate = new Date().toLocaleDateString('en-CA');
+    backfillScoreHistory(user.uid, localDate, 90).catch(e => console.error('[BackfillScores] Failed:', e));
+  }, [user, healthData]);
 
   // Persist active tab across page reloads (prevents native PTR from resetting to 'chat').
   useEffect(() => {
