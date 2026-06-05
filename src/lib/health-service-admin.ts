@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials, WithingsCredentials } from './health-service';
-import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from './food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry, ChatMessage, ChatSession } from './food-exercise-types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -148,6 +148,34 @@ export const adminHealthService = {
   async deleteWithingsCredentials(db: Firestore, userId: string): Promise<void> {
     const docRef = db.doc(`users/${userId}/preferences/withings_tokens`);
     await docRef.delete();
+  },
+
+  // --- Daily Chat Transcript ---
+
+  /**
+   * Appends messages to the day's chat transcript (one doc per day, ID == date).
+   * Uses arrayUnion so concurrent turns can't clobber each other. Strips
+   * undefined fields — Firestore rejects them. Display/visibility only; this is
+   * never the AI's memory of record.
+   */
+  async appendChatMessages(db: Firestore, userId: string, date: string, messages: ChatMessage[]): Promise<void> {
+    const clean = messages
+      .filter(m => m && m.content)
+      .map(m => this.deepClean(m));
+    if (clean.length === 0) return;
+    const docRef = db.doc(`users/${userId}/chat_sessions/${date}`);
+    await docRef.set({
+      date,
+      messages: FieldValue.arrayUnion(...clean),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  },
+
+  /** Reads a single day's chat transcript, or null if none exists yet. */
+  async getChatSession(db: Firestore, userId: string, date: string): Promise<ChatSession | null> {
+    const docRef = db.doc(`users/${userId}/chat_sessions/${date}`);
+    const snap = await docRef.get();
+    return snap.exists ? (snap.data() as ChatSession) : null;
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>): Promise<void> {

@@ -63,6 +63,30 @@ export interface FastLogEntry {
   timestamp: FieldValue | Timestamp;
 }
 
+/**
+ * A single persisted chat message. The transcript is for human visibility and
+ * cheap day-to-day continuity — it is NOT the AI's source of truth (structured
+ * food/exercise logs are). Photos are deliberately stored as a marker only:
+ * base64 data URIs are megabytes each and would blow the 1MB Firestore doc
+ * limit and make re-sends expensive.
+ */
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+  hasImages?: boolean;   // true when the original message carried photos (base64 never stored)
+  ts?: number;           // epoch ms when the message was recorded (ordering / display)
+}
+
+/**
+ * One chat document per calendar day. Doc ID == `date` (YYYY-MM-DD), mirroring
+ * the date-keyed food/exercise/fast logs. The day is the conversation.
+ */
+export interface ChatSession {
+  date: string;          // "YYYY-MM-DD" — also the Firestore document ID
+  messages: ChatMessage[];
+  updatedAt?: FieldValue | Timestamp;
+}
+
 export interface UserProfile {
   heightCm?: number;
   weightKg?: number;

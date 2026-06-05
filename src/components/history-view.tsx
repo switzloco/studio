@@ -12,6 +12,7 @@ import { VFScoreChart } from './vf-score-chart';
 import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
 import { LedgerChat } from './ledger-chat';
+import { ChatHistoryLog } from './chat-history-log';
 
 type SortMode = 'latest' | 'calories';
 
@@ -494,6 +495,9 @@ export function HistoryView() {
           </div>
         )}
       </div>
+
+      {/* Daily Conversation Log — what was said with the CFO each day */}
+      <ChatHistoryLog />
 
       {/* Day Detail Sheet */}
       <VFDayDetail entry={selectedEntry} open={sheetOpen} onOpenChange={setSheetOpen} />

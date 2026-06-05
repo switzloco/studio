@@ -1,7 +1,46 @@
 import { NextResponse } from 'next/server';
 import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
-import { verifyAuthHeader } from '@/firebase/admin';
+import { verifyAuthHeader, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { adminHealthService } from '@/lib/health-service-admin';
+import type { ChatMessage } from '@/lib/food-exercise-types';
+
+/**
+ * Cap on how many prior messages we feed back into the model each turn. We
+ * STORE the full day's transcript for visibility, but only RESEND a sliding
+ * window — real memory lives in the structured food/exercise logs, so a short
+ * window keeps token cost flat regardless of how chatty the day gets.
+ */
+const MAX_SENT_HISTORY = 12;
+
+/**
+ * Persist a single turn to the day's transcript (fire-and-forget). Photos are
+ * recorded as a marker only — base64 is never stored. The `__init__` sentinel
+ * the client sends to trigger the greeting is not a real user message, so it is
+ * not stored; the greeting itself (model reply) is.
+ */
+async function persistChatTurn(
+  uid: string,
+  date: string,
+  userMessage: string,
+  hasPhotos: boolean,
+  modelText: string,
+): Promise<void> {
+  const now = Date.now();
+  const msgs: ChatMessage[] = [];
+  if (userMessage && userMessage !== '__init__') {
+    msgs.push({ role: 'user', content: userMessage, ...(hasPhotos ? { hasImages: true } : {}), ts: now });
+  }
+  if (modelText.trim()) {
+    msgs.push({ role: 'model', content: modelText, ts: now + 1 });
+  }
+  if (msgs.length === 0) return;
+  try {
+    await adminHealthService.appendChatMessages(getAdminFirestore(), uid, date, msgs);
+  } catch (err: any) {
+    console.error('[ChatRoute] Failed to persist transcript:', err?.message ?? String(err));
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -28,6 +67,11 @@ export async function POST(req: Request) {
       ? { ...currentHealth, dailyProteinG: 0, dailyCaloriesIn: 0, dailyCarbsG: 0 }
       : currentHealth;
 
+    // Only resend the most recent slice of the conversation to the model.
+    const trimmedHistory = Array.isArray(chatHistory)
+      ? chatHistory.slice(-MAX_SENT_HISTORY)
+      : chatHistory;
+
     const input: PersonalizedAICoachingInput = {
       userId: uid,
       userName,
@@ -35,7 +79,7 @@ export async function POST(req: Request) {
       currentDay,
       localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
-      chatHistory,
+      chatHistory: trimmedHistory,
       currentHealth: sanitizedHealth,
       photoDataUris,
       photoTimestamps,
@@ -86,11 +130,14 @@ export async function POST(req: Request) {
     }
 
     const encoder = new TextEncoder();
+    const hasPhotos = Array.isArray(photoDataUris) && photoDataUris.length > 0;
     const readableStream = new ReadableStream({
       async start(controller) {
+        let fullText = '';
         try {
           for await (const chunk of stream) {
             if (chunk.text) {
+              fullText += chunk.text;
               controller.enqueue(encoder.encode(chunk.text));
             }
           }
@@ -103,6 +150,9 @@ export async function POST(req: Request) {
           );
         } finally {
           controller.close();
+          // Persist the completed turn for daily visibility. Fire-and-forget —
+          // the response has already streamed, so this never blocks the user.
+          void persistChatTurn(uid, resolvedDate, message, hasPhotos, fullText);
         }
       },
     });

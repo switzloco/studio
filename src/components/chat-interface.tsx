@@ -12,7 +12,8 @@ import { useTranscription } from "@/hooks/use-transcription";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import type { ChatMessage } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences } from '@/lib/health-service';
 import {
   loadGIS,
@@ -119,22 +120,45 @@ export function ChatInterface() {
   useEffect(() => {
     // Wait until auth and Firestore data are both ready
     if (initDone || !user || healthLoading || prefsLoading || !prefs || !healthData) return;
-    if (!autoChatEnabled && !coachingRequested) return;
-    setInitDone(true);
+
+    let cancelled = false;
+    const now = new Date();
+    const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
 
     const runInit = async () => {
+      // 1. Restore today's stored transcript first — cheap read, no model call.
+      //    The day IS the conversation, so a reload picks up where it left off
+      //    and we skip the (paid) __init__ greeting entirely.
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid, 'chat_sessions', today));
+        if (cancelled) return;
+        const stored = (snap.exists() ? snap.data()?.messages : null) as ChatMessage[] | null | undefined;
+        if (stored && stored.length > 0) {
+          setMessages(stored.map(m => ({ role: m.role, content: m.content })));
+          setInitDone(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn('[ChatInit] transcript restore failed, falling back to greeting:', e);
+      }
+      if (cancelled) return;
+
+      // 2. No transcript for today — run the greeting (respecting the auto-chat gate).
+      if (!autoChatEnabled && !coachingRequested) return;
+      setInitDone(true);
+
       setIsLoading(true);
       try {
-        const now = new Date();
         const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
-        
+
         const idToken = await user.getIdToken();
         const payload = {
           message: '__init__',
           chatHistory: [],
           currentHealth: sanitizedHealth,
           userName: user.displayName || undefined,
-          localDate: now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
+          localDate: today,
           localTime: now.toLocaleTimeString('en-US'),
         };
 
@@ -177,7 +201,8 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested]);
+    return () => { cancelled = true; };
+  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested, db]);
 
   useEffect(() => {
     if (scrollRef.current) {
