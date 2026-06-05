@@ -600,7 +600,18 @@ const scoreDailyVFTool = ai.defineTool(
     // Consecutive-day alcohol flag resolved from yesterday's ledger.
     const alcoholYesterday = yesterdayFood.some((e) => ((e as any).alcoholDrinks || 0) > 0);
 
-    const caloriesOut = health?.dailyCaloriesOut || 2000;
+    // Source the calorie burn for THIS specific date — not the live rolling
+    // counter. Mirrors the dashboard: stored history breakdown → Fitbit-by-date
+    // snapshot → live counter. Using health.dailyCaloriesOut for a past date was
+    // pairing that day's food with TODAY's burn, producing a bogus near-zero
+    // deficit (the "-5 vs +56" mismatch).
+    const historyForDate = health?.history?.find((h) => h.isoDate === input.localDate);
+    const fitbitForDate = (health as any)?.fitbitByDate?.[input.localDate];
+    const caloriesOut =
+      historyForDate?.breakdown?.caloriesOut
+      || fitbitForDate?.caloriesOut
+      || health?.dailyCaloriesOut
+      || 2000;
     const currentEquity = health?.visceralFatPoints || 0;
     const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
 
@@ -620,31 +631,57 @@ const scoreDailyVFTool = ai.defineTool(
       alcoholYesterday,
     });
 
-    // Apply score to equity
-    const newEquity = currentEquity + result.score;
-    await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
-
-    // Record equity event with full breakdown for the day-detail view
+    // Build the equity event for this date.
     const [vf_y, vf_m, vf_d] = input.localDate.split('-').map(Number);
     const vfDisplayDate = new Date(vf_y, vf_m - 1, vf_d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    await healthService.recordEquityEvent(firestore, input.userId, {
-      date: vfDisplayDate,
-      isoDate: input.localDate,
-      gain: result.score,
-      status: result.score >= 0 ? 'Bullish' : 'Correction',
-      detail: result.summary,
-      equity: newEquity,
-      breakdown: {
-        caloriesIn: totalCaloriesIn,
-        caloriesOut: caloriesOut,
-        proteinG: totalProteinG,
-        proteinGoal,
-        fastingHours: input.fastingHours,
-        sleepHours: input.sleepHours,
-        alcoholYesterday,
-        ...result.breakdown,
-      },
-    });
+    const breakdown = {
+      caloriesIn: totalCaloriesIn,
+      caloriesOut,
+      proteinG: totalProteinG,
+      proteinGoal,
+      fastingHours: input.fastingHours,
+      sleepHours: input.sleepHours,
+      alcoholYesterday,
+      ...result.breakdown,
+    };
+
+    // Idempotent: if this date was already scored, REPLACE its entry and shift
+    // equity by the delta — never append a duplicate or double-count. The coach
+    // re-runs this tool whenever it explains a past day, so a naive add + append
+    // was corrupting the ledger.
+    const history = health?.history ? [...health.history] : [];
+    const existingIdx = history.findIndex((h) => (h.isoDate || '') === input.localDate);
+    let newEquity: number;
+    if (existingIdx !== -1) {
+      const delta = result.score - history[existingIdx].gain;
+      history[existingIdx] = {
+        ...history[existingIdx],
+        date: vfDisplayDate,
+        gain: result.score,
+        status: result.score >= 0 ? 'Bullish' : 'Correction',
+        detail: result.summary,
+        equity: history[existingIdx].equity + delta,
+        breakdown,
+      };
+      // Bump cumulative equity for this entry and every entry after it.
+      for (let i = existingIdx + 1; i < history.length; i++) {
+        history[i] = { ...history[i], equity: history[i].equity + delta };
+      }
+      newEquity = currentEquity + delta;
+      await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity, history });
+    } else {
+      newEquity = currentEquity + result.score;
+      await healthService.updateHealthData(firestore, input.userId, { visceralFatPoints: newEquity });
+      await healthService.recordEquityEvent(firestore, input.userId, {
+        date: vfDisplayDate,
+        isoDate: input.localDate,
+        gain: result.score,
+        status: result.score >= 0 ? 'Bullish' : 'Correction',
+        detail: result.summary,
+        equity: newEquity,
+        breakdown,
+      });
+    }
 
     return {
       score: result.score,
