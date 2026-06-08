@@ -13,6 +13,7 @@ import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
 import { LedgerChat } from './ledger-chat';
 import { ChatHistoryLog } from './chat-history-log';
+import { ProteinChart } from './protein-chart';
 
 type SortMode = 'latest' | 'calories';
 
@@ -495,6 +496,9 @@ export function HistoryView() {
           </div>
         )}
       </div>
+
+      {/* Protein Liquidity — 30-day intake vs. minimum target */}
+      <ProteinChart />
 
       {/* Daily Conversation Log — what was said with the CFO each day */}
       <ChatHistoryLog />
