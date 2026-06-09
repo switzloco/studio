@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Briefcase, Check, Link2, Share2, Users } from 'lucide-react';
@@ -27,6 +27,11 @@ function MacroStat({ label, value, unit }: { label: string; value: number; unit:
 
 export function ShareView({ share }: { share: ShareDTO }) {
   const [copied, setCopied] = useState(false);
+  // Resolve native-share support after mount to avoid a hydration mismatch.
+  const [canNativeShare, setCanNativeShare] = useState(false);
+  useEffect(() => {
+    setCanNativeShare(typeof navigator !== 'undefined' && 'share' in navigator);
+  }, []);
 
   const handleCopy = async () => {
     try {
@@ -39,7 +44,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
   };
 
   const handleNativeShare = async () => {
-    if (typeof navigator !== 'undefined' && navigator.share) {
+    if (canNativeShare) {
       try {
         await navigator.share({
           title: share.title,
@@ -54,7 +59,6 @@ export function ShareView({ share }: { share: ShareDTO }) {
     }
   };
 
-  const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
   const attribution = share.createdByName ? `${share.createdByName} shared this meal` : 'Shared with you';
 
   return (

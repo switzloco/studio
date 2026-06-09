@@ -14,6 +14,7 @@ import { VFDayDetail } from './vf-day-detail';
 import { LedgerChat } from './ledger-chat';
 import { ChatHistoryLog } from './chat-history-log';
 import { ProteinChart } from './protein-chart';
+import { ShareMealButton } from './share-meal-button';
 
 type SortMode = 'latest' | 'calories';
 
@@ -402,6 +403,9 @@ export function HistoryView() {
                               {entry.source && <span className="bg-muted/40 px-2 py-0.5 rounded-full">Source: {entry.source.replace('_', ' ')}</span>}
                               {(entry.alcoholDrinks ?? 0) > 0 && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{entry.alcoholDrinks} drink{entry.alcoholDrinks! > 1 ? 's' : ''}</span>}
                               {entry.hasSeedOils && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Seed oils</span>}
+                            </div>
+                            <div className="flex justify-end pt-1">
+                              <ShareMealButton foodLogIds={[entry.id]} mealName={entry.name} />
                             </div>
                           </div>
                         )}
