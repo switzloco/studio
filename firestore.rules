@@ -34,5 +34,15 @@ service cloud.firestore {
         allow get, list, create, update, delete: if isOwner(userId);
       }
     }
+
+    // Publicly shareable meal snapshots (link-as-bearer-token). The random
+    // doc ID is the unguessable token. A single doc is readable by anyone with
+    // the link until it is revoked; enumeration (list) is disabled. All writes
+    // go through trusted server actions on the Admin SDK, which bypass rules —
+    // so direct client writes are denied here.
+    match /shared_meals/{shareId} {
+      allow get: if resource.data.revoked != true;
+      allow list, create, update, delete: if false;
+    }
   }
 }

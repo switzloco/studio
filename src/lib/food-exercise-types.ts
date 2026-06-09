@@ -32,6 +32,41 @@ export interface FoodLogEntry {
   date: string; // "YYYY-MM-DD" for date-range queries
 }
 
+/**
+ * An immutable snapshot of a single food entry, embedded in a shared meal.
+ * Deliberately omits the source row's `id`/`timestamp`/`date`/`ignored` — a
+ * share is a stable copy, decoupled from the originating ledger entry (which
+ * may later be edited or soft-deleted).
+ */
+export type SharedMealItem = Omit<FoodLogEntry, 'id' | 'timestamp' | 'date' | 'ignored'>;
+
+/**
+ * A publicly shareable meal: a token-addressable snapshot of one or more
+ * food entries that anyone with the link can view and log to their own day.
+ * Lives at the ROOT `shared_meals/{id}` collection (not under `users/`) because
+ * it is read cross-user. The document ID doubles as the unguessable link token.
+ */
+export interface SharedMeal {
+  id: string;
+  createdBy: string;          // sharer UID
+  createdByName?: string;     // display name for attribution ("Nick shared…")
+  createdAt: FieldValue | Timestamp;
+  items: SharedMealItem[];    // immutable snapshot, 1..n entries
+  title: string;              // human label for the share
+  totals: {
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    fiberG: number;
+  };
+  visibility: 'link';         // v1: anyone with the link can view
+  logCount: number;           // how many people logged this (social proof)
+  viewCount: number;
+  revoked?: boolean;          // when true, the link no longer resolves
+  expiresAt?: FieldValue | Timestamp | null;
+}
+
 export interface ExerciseLogEntry {
   id?: string;
   name: string;
