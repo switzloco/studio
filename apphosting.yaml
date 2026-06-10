@@ -63,6 +63,13 @@ env:
       - BUILD
       - RUNTIME
 
+  # Dedicated USDA FoodData Central key for nutrition_lookup — avoids the
+  # shared DEMO_KEY 100 req/hr rate limit (the source of the 429s).
+  - variable: USDA_FOOD_API_KEY
+    secret: USDA_FOOD_API_KEY
+    availability:
+      - RUNTIME
+
   # --- Arize Phoenix observability (hackathon) ---
   # PHOENIX_ENABLED must be "true" or all Phoenix tracing/MCP code is a no-op.
   - variable: PHOENIX_ENABLED
