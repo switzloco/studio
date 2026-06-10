@@ -34,6 +34,13 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # Canonical branded domain for share links + OG/social metadata. Keeps the
+  # raw Firebase App Hosting domain (studio--…hosted.app) out of shared URLs.
+  - variable: NEXT_PUBLIC_SITE_URL
+    value: "https://thecfo.app"
+    availability:
+      - BUILD
+      - RUNTIME
   - variable: NEXT_PUBLIC_FITBIT_CLIENT_ID
     value: "23V3PJ"
     availability:

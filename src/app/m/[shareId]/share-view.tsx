@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { getAuth, signInAnonymously, linkWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { useUser } from '@/firebase';
 import { logSharedMeal } from '@/app/actions/share-meal';
+import { shareUrl } from '@/lib/site';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 export interface ShareDTO {
@@ -96,7 +97,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(shareUrl(share.id));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* clipboard blocked */ }
@@ -108,7 +109,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
         await navigator.share({
           title: share.title,
           text: `${share.createdByName ? `${share.createdByName} shared ` : ''}a meal: ${share.title}`,
-          url: window.location.href,
+          url: shareUrl(share.id),
         });
       } catch { /* user cancelled */ }
     } else {

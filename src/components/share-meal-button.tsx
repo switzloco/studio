@@ -5,6 +5,7 @@ import { Share2, Link2, Loader2, Check } from 'lucide-react';
 import { useUser } from '@/firebase';
 import { toast } from '@/hooks/use-toast';
 import { createMealShare } from '@/app/actions/share-meal';
+import { shareUrl } from '@/lib/site';
 
 /**
  * Shares one or more food-log entries as a public link. Creates the snapshot
@@ -43,7 +44,7 @@ export function ShareMealButton({
         return;
       }
 
-      const url = `${window.location.origin}/m/${res.shareId}`;
+      const url = shareUrl(res.shareId);
       const shareText = mealName ? `Check out this meal: ${mealName}` : 'Check out this meal';
 
       if (canNativeShare) {

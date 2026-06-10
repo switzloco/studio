@@ -6,6 +6,7 @@ import { Link2, Loader2, Share2, Trash2, Users } from 'lucide-react';
 import { useUser } from '@/firebase';
 import { toast } from '@/hooks/use-toast';
 import { getMyShares, revokeShare } from '@/app/actions/share-meal';
+import { shareUrl } from '@/lib/site';
 
 type ShareRow = {
   id: string;
@@ -34,7 +35,7 @@ export function MySharesSection() {
   useEffect(() => { load(); }, [load]);
 
   const handleCopy = async (shareId: string) => {
-    const url = `${window.location.origin}/m/${shareId}`;
+    const url = shareUrl(shareId);
     try {
       await navigator.clipboard.writeText(url);
       setCopied(shareId);

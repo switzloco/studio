@@ -7,6 +7,7 @@ import { ServiceWorkerRegister } from '@/components/sw-register';
 import { AddToHomePrompt } from '@/components/add-to-home-prompt';
 import Link from 'next/link';
 import pkg from '../../package.json';
+import { SITE_URL } from '@/lib/site';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -16,6 +17,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: 'the CFO | Chief Fitness Officer',
   description: 'Manage your body like a high-stakes financial portfolio.',
   manifest: '/manifest.json',
