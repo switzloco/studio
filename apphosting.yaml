@@ -63,6 +63,25 @@ env:
       - BUILD
       - RUNTIME
 
+  # --- Arize Phoenix observability (hackathon) ---
+  # PHOENIX_ENABLED must be "true" or all Phoenix tracing/MCP code is a no-op.
+  - variable: PHOENIX_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: PHOENIX_COLLECTOR_ENDPOINT
+    value: "https://app.phoenix.arize.com"
+    availability:
+      - RUNTIME
+  - variable: PHOENIX_PROJECT_NAME
+    value: "cfo-fitness"
+    availability:
+      - RUNTIME
+  - variable: PHOENIX_API_KEY
+    secret: PHOENIX_API_KEY
+    availability:
+      - RUNTIME
+
   - variable: CRON_SECRET
     secret: CRON_SECRET
     availability:

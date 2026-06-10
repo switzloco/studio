@@ -1,0 +1,16 @@
+{
+  "name": "CFO Fitness Agent",
+  "description": "A health-and-fitness coaching agent (\"the CFO\") that plans and executes multi-step coaching tasks: logging nutrition and workouts, scoring a daily visceral-fat metric, and auditing its own reasoning. Built with Gemini 3 and instrumented with Arize Phoenix for trace-level oversight.",
+  "version": "1.0.0",
+  "url": "/api/agent",
+  "provider": { "organization": "CFO Fitness" },
+  "capabilities": { "streaming": false, "toolUse": true, "stateful": true },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    { "id": "log_nutrition", "name": "Log nutrition", "description": "Parse a meal and log macros to the user ledger." },
+    { "id": "log_exercise", "name": "Log exercise", "description": "Log a workout with wearable-accuracy adjustment." },
+    { "id": "score_daily_vf", "name": "Score the day", "description": "Run the metabolic engine to produce the daily VF score." },
+    { "id": "inspect_reasoning_trace", "name": "Audit reasoning", "description": "Pull recorded Arize Phoenix traces and explain how a score was produced." }
+  ]
+}
