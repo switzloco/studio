@@ -62,3 +62,59 @@ export async function createMealShare(
     return { success: false, error: error?.message ?? 'Could not create share link.' };
   }
 }
+
+export type LogSharedMealResult =
+  | { success: true; logCount: number }
+  | { success: false; error: string };
+
+/**
+ * Copies the shared meal snapshot into the recipient's own food_log, recalculates
+ * their daily totals, and increments the share's logCount for social proof.
+ * Works for both authenticated users and anonymous users (who just signed in).
+ */
+export async function logSharedMeal(
+  userId: string,
+  shareId: string,
+  localDate: string,
+): Promise<LogSharedMealResult> {
+  try {
+    if (!userId) return { success: false, error: 'You must be signed in to log.' };
+
+    const db = getAdminFirestore();
+    const share = await healthService.getSharedMeal(db, shareId);
+    if (!share) return { success: false, error: 'Shared meal not found.' };
+    if (share.revoked) return { success: false, error: 'This share link has been revoked.' };
+
+    const expiresAt = share.expiresAt as { toMillis?: () => number } | null | undefined;
+    if (expiresAt?.toMillis && expiresAt.toMillis() < Date.now()) {
+      return { success: false, error: 'This share link has expired.' };
+    }
+
+    // Log each snapshot item as a new food_log entry under the recipient's account.
+    for (const item of share.items) {
+      await healthService.logFood(db, userId, { ...item, date: localDate });
+    }
+
+    // Recalculate daily totals — exact same pattern as the log_food Genkit tool.
+    const allTodayFood = await healthService.queryFoodLog(db, userId, localDate, 100);
+    await healthService.updateHealthData(db, userId, {
+      dailyProteinG: allTodayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
+      dailyCarbsG: allTodayFood.reduce((s, e) => s + (e.carbsG || 0), 0),
+      dailyCaloriesIn: allTodayFood.reduce((s, e) => s + (e.calories || 0), 0),
+      dailyPlantG: allTodayFood.reduce((s, e) => s + (e.plantMassG || 0), 0),
+      lastActiveDate: localDate,
+    });
+
+    // Increment social-proof counter — best effort, never fails the request.
+    const newLogCount = (share.logCount ?? 0) + 1;
+    await db
+      .doc(`shared_meals/${shareId}`)
+      .update({ logCount: newLogCount })
+      .catch(() => { /* non-fatal */ });
+
+    return { success: true, logCount: newLogCount };
+  } catch (error: any) {
+    console.error('[ShareMeal] logSharedMeal error:', error?.message ?? String(error));
+    return { success: false, error: error?.message ?? 'Could not log meal.' };
+  }
+}
