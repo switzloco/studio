@@ -1,14 +1,27 @@
+// Phoenix/OpenTelemetry instrumentation must be registered before Genkit so its
+// spans flow to the configured exporter. This import is a no-op when
+// PHOENIX_ENABLED !== 'true'. (Next.js also wires it via instrumentation.ts;
+// importing here covers the Genkit dev server / standalone flow runs.)
+import '@/ai/observability/phoenix';
+
 import {genkit} from 'genkit';
 import {googleAI} from '@genkit-ai/google-genai';
 
 /**
- * @fileOverview Genkit initialization for the Gemini 2.5 Flash engine.
+ * @fileOverview Genkit initialization for the Gemini 3 Flash engine.
  * Optimized for speed and complex analytical reasoning in fitness auditing.
+ *
+ * The model is env-overridable via CFO_MODEL so the engine can be swapped
+ * without a code change (defaults to Gemini 3 Flash).
  */
+
+// Gemini 3 Flash. The google-genai plugin registers this under the
+// `-preview` id; override via CFO_MODEL (e.g. a future GA `gemini-3-flash`).
+export const CFO_MODEL = process.env.CFO_MODEL ?? 'googleai/gemini-3-flash-preview';
 
 export const ai = genkit({
   plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
-  model: 'googleai/gemini-2.5-flash',
+  model: CFO_MODEL,
 });
 
 export const SAFETY_SETTINGS = [
