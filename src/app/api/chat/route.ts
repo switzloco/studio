@@ -99,8 +99,10 @@ export async function POST(req: Request) {
         });
         stream = result.stream;
       } catch (fallbackErr: any) {
-        console.error('[ChatRoute] Fallback model also failed:', fallbackErr?.message ?? String(fallbackErr));
-        
+        const primaryDetail = err?.message ?? String(err);
+        const fallbackDetail = fallbackErr?.message ?? String(fallbackErr);
+        console.error('[ChatRoute] Fallback model also failed:', fallbackDetail, fallbackErr?.stack ?? '');
+
         // Return a friendly system error message directly as a successful stream so it renders in the chat
         const encoder = new TextEncoder();
         const readableStream = new ReadableStream({
@@ -108,11 +110,12 @@ export async function POST(req: Request) {
             controller.enqueue(
               encoder.encode(
                 `⚠️ **System Interruption**\n\n` +
-                `Partner, the Gemini neural ledger is currently experiencing high demand or is temporarily unavailable (503 Service Unavailable).\n\n` +
+                `Partner, the Gemini neural ledger could not be reached.\n\n` +
                 `I have received your message: *"${message}"*.\n\n` +
-                `**Recommendation:**\n` +
-                `* Your logs/details are safe in this chat history, but I cannot process them or run calculations right now.\n` +
-                `* Please try again in a minute, or ask me to check the ledger again once the API recovers.`
+                `**Diagnostics:**\n` +
+                `* Primary model error: \`${primaryDetail}\`\n` +
+                `* Fallback model error: \`${fallbackDetail}\`\n\n` +
+                `Please try again in a minute.`
               )
             );
             controller.close();
@@ -142,10 +145,12 @@ export async function POST(req: Request) {
             }
           }
         } catch (err: any) {
-          console.error('[ChatRoute] Error during stream playback:', err?.message ?? String(err));
+          const detail = err?.message ?? String(err);
+          console.error('[ChatRoute] Error during stream playback:', detail, err?.stack ?? '');
           controller.enqueue(
             encoder.encode(
-              `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation. Please resend your message or try again.*`
+              `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation.*\n\n` +
+              `\`\`\`\n${detail}\n\`\`\``
             )
           );
         } finally {
