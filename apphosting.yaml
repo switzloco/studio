@@ -70,7 +70,7 @@ env:
     availability:
       - RUNTIME
   - variable: PHOENIX_COLLECTOR_ENDPOINT
-    value: "https://app.phoenix.arize.com"
+    value: "https://app.phoenix.arize.com/s/nicholas-switzer"
     availability:
       - RUNTIME
   - variable: PHOENIX_PROJECT_NAME

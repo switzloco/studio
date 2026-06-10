@@ -44,11 +44,15 @@ function setupPhoenix(): void {
     const url = base.endsWith('/v1/traces') ? base : `${base}/v1/traces`;
     const projectName = process.env.PHOENIX_PROJECT_NAME ?? 'cfo-fitness';
 
-    // Phoenix Cloud authenticates the OTLP endpoint with an `api_key` header.
-    // PHOENIX_CLIENT_HEADERS lets callers override/extend if their space needs
-    // a different scheme (e.g. `authorization=Bearer ...`).
+    // Phoenix auth differs by deployment: hosted Cloud spaces expect
+    // `authorization: Bearer <key>`, self-hosted/older builds use `api_key`.
+    // Send both — servers ignore the header they don't check. PHOENIX_CLIENT_HEADERS
+    // can still override/extend if a space needs something bespoke.
     const headers: Record<string, string> = {};
-    if (process.env.PHOENIX_API_KEY) headers['api_key'] = process.env.PHOENIX_API_KEY;
+    if (process.env.PHOENIX_API_KEY) {
+      headers['api_key'] = process.env.PHOENIX_API_KEY;
+      headers['authorization'] = `Bearer ${process.env.PHOENIX_API_KEY}`;
+    }
     if (process.env.PHOENIX_CLIENT_HEADERS) {
       for (const pair of process.env.PHOENIX_CLIENT_HEADERS.split(',')) {
         const idx = pair.indexOf('=');
