@@ -403,4 +403,25 @@ export const adminHealthService = {
       /* non-fatal */
     }
   },
+
+  /** Returns all non-expired shares created by the given user, newest first. */
+  async getSharesByUser(db: Firestore, userId: string): Promise<SharedMeal[]> {
+    const snap = await db
+      .collection('shared_meals')
+      .where('createdBy', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .get();
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }) as SharedMeal);
+  },
+
+  async revokeShare(db: Firestore, shareId: string, requestingUserId: string): Promise<boolean> {
+    const docRef = db.doc(`shared_meals/${shareId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return false;
+    const data = snap.data() as SharedMeal;
+    if (data.createdBy !== requestingUserId) return false;
+    await docRef.update({ revoked: true });
+    return true;
+  },
 };

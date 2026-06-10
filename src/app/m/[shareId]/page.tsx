@@ -50,8 +50,8 @@ export async function generateMetadata({
   return {
     title: `${title} | the CFO`,
     description: desc,
-    openGraph: { title, description: desc, type: 'website' },
-    twitter: { card: 'summary', title, description: desc },
+    openGraph: { title, description: desc, type: 'website', siteName: 'the CFO' },
+    twitter: { card: 'summary_large_image', title, description: desc },
   };
 }
 

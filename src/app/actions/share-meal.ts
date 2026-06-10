@@ -2,7 +2,7 @@
 
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
-import type { FoodLogEntry, SharedMealItem } from '@/lib/food-exercise-types';
+import type { FoodLogEntry, SharedMeal, SharedMealItem } from '@/lib/food-exercise-types';
 
 /**
  * Strips a ledger food entry down to an immutable share snapshot — drops the
@@ -116,5 +116,45 @@ export async function logSharedMeal(
   } catch (error: any) {
     console.error('[ShareMeal] logSharedMeal error:', error?.message ?? String(error));
     return { success: false, error: error?.message ?? 'Could not log meal.' };
+  }
+}
+
+export type GetMySharesResult =
+  | { success: true; shares: Pick<SharedMeal, 'id' | 'title' | 'totals' | 'logCount' | 'viewCount' | 'revoked' | 'createdAt'>[] }
+  | { success: false; error: string };
+
+export async function getMyShares(userId: string): Promise<GetMySharesResult> {
+  try {
+    if (!userId) return { success: false, error: 'Not signed in.' };
+    const db = getAdminFirestore();
+    const shares = await healthService.getSharesByUser(db, userId);
+    return {
+      success: true,
+      shares: shares.map(s => ({
+        id: s.id,
+        title: s.title,
+        totals: s.totals,
+        logCount: s.logCount,
+        viewCount: s.viewCount,
+        revoked: s.revoked,
+        createdAt: s.createdAt,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error?.message ?? 'Could not load shares.' };
+  }
+}
+
+export type RevokeShareResult = { success: boolean; error?: string };
+
+export async function revokeShare(userId: string, shareId: string): Promise<RevokeShareResult> {
+  try {
+    if (!userId) return { success: false, error: 'Not signed in.' };
+    const db = getAdminFirestore();
+    const ok = await healthService.revokeShare(db, shareId, userId);
+    if (!ok) return { success: false, error: 'Share not found or not yours.' };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error?.message ?? 'Could not revoke share.' };
   }
 }

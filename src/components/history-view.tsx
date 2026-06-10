@@ -15,6 +15,7 @@ import { LedgerChat } from './ledger-chat';
 import { ChatHistoryLog } from './chat-history-log';
 import { ProteinChart } from './protein-chart';
 import { ShareMealButton } from './share-meal-button';
+import { MySharesSection } from './my-shares-section';
 
 type SortMode = 'latest' | 'calories';
 
@@ -506,6 +507,9 @@ export function HistoryView() {
 
       {/* Daily Conversation Log — what was said with the CFO each day */}
       <ChatHistoryLog />
+
+      {/* Shared Links — manage active and revoked share links */}
+      <MySharesSection />
 
       {/* Day Detail Sheet */}
       <VFDayDetail entry={selectedEntry} open={sheetOpen} onOpenChange={setSheetOpen} />
