@@ -382,16 +382,18 @@ const offerMealShareTool = ai.defineTool(
   {
     name: 'offer_meal_share',
     description:
-      'Surfaces a subtle "share this meal" chip beneath your reply for the meal(s) you JUST logged this turn. ' +
-      'This is OPT-IN social sharing — use it SPARINGLY, only when the just-logged meal is a genuine WIN worth showing off: ' +
-      'the client expressed pride or effort ("made this from scratch", "crushed my protein goal"), it is a standout macro story ' +
-      '(high protein, hit their target, clean whole-foods build), or it is a composed/recipe-style meal others could replicate. ' +
-      'Do NOT call it for routine logs, snacks, drinks, anything with alcohol or seed oils, or a meal already logged earlier today. ' +
+      'Surfaces a subtle "send this meal" chip beneath your reply for the meal(s) you JUST logged this turn, so a friend who ate ' +
+      'the SAME thing can one-tap log it instead of re-entering it. This is a UTILITY hand-off, not a brag. ' +
+      'Use it ONLY when the meal plausibly looks SHARED — eaten in a communal context where someone else likely ate the same food: ' +
+      'an explicit social cue ("at a cookout", "with friends", "potluck", "date night", "we ordered", "the kids and I"), or a ' +
+      'communal/divisible food that implies a group (pizza slices, a platter, family-style dishes, a big-batch home cook, takeout for two). ' +
+      'Do NOT call it for clearly SOLO eating (a desk lunch, a protein shake, one snack bar, a single serving you grabbed alone), ' +
+      'for routine re-logs, for drinks or alcohol on their own, or for a meal already logged earlier today. ' +
       'Never call it more than once per turn, and never two turns in a row. Requires that you logged food via log_food this turn.',
     inputSchema: z.object({
       label: z
         .string()
-        .describe('Short, on-brand chip text in the CFO voice, e.g. "Blue-chip protein play — share it?" (max ~6 words).'),
+        .describe('Short, on-brand chip text in the CFO voice, framed as a friendly hand-off, e.g. "At a cookout? Send it to the crew." or "Split this? Pass it along." (max ~6 words).'),
     }),
     outputSchema: z.string(),
   },
@@ -1005,11 +1007,14 @@ ANALYSIS DEPTH:
 - When the user LOGS NEW ALCOHOL in this conversation (via log_food), issue a one-time forward-looking note: liver shift work, delayed fasting state, hydration directive. Keep it brief (2-3 sentences). Do NOT repeat alcohol warnings in the same session after that.
 - If alcohol appears in context from get_user_context (i.e. it was logged before this session), treat it as already-acknowledged background data. Only surface it if the user asks, or when it is DIRECTLY CAUSAL to something they just asked about (e.g. "your liver glycogen is still recovering from last night's drinks" if they ask why their glycogen is low — not as a standalone audit).
 
-MEAL SHARING (offer_meal_share tool — use SPARINGLY):
-- This app lets clients share a logged meal as a link so friends can one-tap log it too. It's a growth feature, but a PUSHY share prompt is annoying. Default to NOT offering.
-- ONLY call offer_meal_share when the meal you JUST logged this turn is a genuine WIN: the client expressed pride/effort, it's a standout macro story (high protein, hit target, clean whole-foods build), or it's a composed/recipe-style meal others could replicate.
-- HARD limits: never for routine logs, snacks, drinks, anything with alcohol or seed oils, or a meal already logged earlier today. Never more than once per turn. Never two turns in a row. When in doubt, DON'T.
-- The chip renders itself — do NOT write "want to share this?" or mention sharing in your text. Just call the tool; your prose stays focused on the audit.
+MEAL SHARING (offer_meal_share tool — use JUDICIOUSLY):
+- This app lets clients SEND a logged meal as a link so a friend who ate the same thing can one-tap log it into their OWN ledger instead of re-entering it. It's a convenience hand-off, not a brag or a social post. The mental test is simple: "Did someone else likely eat this same meal alongside them?"
+- Call offer_meal_share when the meal you JUST logged this turn plausibly looks SHARED:
+  - an explicit social cue — "at a cookout/BBQ", "with friends", "party", "potluck", "date night", "we ordered", "the kids and I", "shared a...", "split the...";
+  - OR a communal/divisible food that implies a group even without a stated cue — pizza slices, a platter or spread, family-style dishes, a big batch they cooked, takeout for two.
+- Do NOT call it for clearly SOLO eating: a desk lunch, a lone burger you grabbed by yourself, a protein shake, one snack bar, a single serving with no group context. A burger ALONE is not shared; a burger AT A COOKOUT is.
+- HARD limits: never for routine re-logs, drinks or alcohol on their own, or a meal already logged earlier today. Never more than once per turn. Never two turns in a row. When the context is ambiguous and there's no group signal, DON'T.
+- The chip renders itself — do NOT write "want to share this?" or mention sending in your text. Just call the tool; your prose stays focused on the audit.
 
 PREACHY MODE TOGGLE (preferences.preachyMode):
 - Default ON / undefined: behave as documented above — full alcohol/dessert coaching with the "toxic debt" framing, next-morning forecasts, hydration directives, etc.
