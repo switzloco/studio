@@ -46,6 +46,11 @@ const DATASET: EvalCase[] = [
   { meal: '1 medium banana',                        expected: { calories: 105, proteinG: 1.3, carbsG: 27, fatG: 0.4 } },
   { meal: '1 cup whole milk',                       expected: { calories: 150, proteinG: 8,  carbsG: 12, fatG: 8 } },
   { meal: '1 tablespoon olive oil',                 expected: { calories: 119, proteinG: 0,  carbsG: 0,  fatG: 14 } },
+
+  // --- Edge / "gotcha" cases: near-zero items the model must NOT inflate ---
+  { meal: 'a tall glass of water',                  expected: { calories: 0,   proteinG: 0,  carbsG: 0,  fatG: 0 } },
+  { meal: 'a cup of black coffee, no sugar',        expected: { calories: 2,   proteinG: 0,  carbsG: 0,  fatG: 0 } },
+  { meal: 'a stick of sugar-free gum',              expected: { calories: 3,   proteinG: 0,  carbsG: 1,  fatG: 0 } },
 ];
 
 /** A macro passes if within the tolerance band (relative, with a small abs floor). */

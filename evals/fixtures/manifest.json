@@ -1,0 +1,4 @@
+[
+  { "file": "burger.jpg", "label": "cheeseburger", "expectFood": true },
+  { "file": "shoe.jpg", "label": "running shoe (not food)", "expectFood": false }
+]

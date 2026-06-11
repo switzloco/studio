@@ -35,8 +35,48 @@ npx tsx evals/nutrition-accuracy.eval.ts
   `eval.nutrition_accuracy` span per meal, each carrying `input.expected`,
   `output.predicted`, `output.passed`, and the error percentages.
 
+The dataset also includes **edge cases** — near-zero items like water, black
+coffee, and sugar-free gum — to confirm the model doesn't *inflate* calories for
+things that have almost none.
+
 ### Demo line for judges
 
 > "We don't just ship the agent — we measure it. Here's our nutrition-accuracy
 > eval running through Arize Phoenix: X% calorie accuracy across the suite, and
 > every case is a span you can open to see exactly where the model was off."
+
+## Multimodal Food / Guardrail
+
+`evals/multimodal-food.eval.ts` tests the agent's **multimodal** judgment: shown
+an image, does it estimate macros for real food — and **refuse to invent macros
+for things that aren't food** (a shoe, a cat, a car)? The non-food cases are the
+guardrail story: proof the agent doesn't hallucinate calories.
+
+### Add your own images
+
+1. Drop image files (jpg/png/webp) into `evals/fixtures/`.
+2. (Optional) label them in `evals/fixtures/manifest.json` so they're scored:
+   ```json
+   [
+     { "file": "burger.jpg", "label": "cheeseburger",       "expectFood": true  },
+     { "file": "shoe.jpg",   "label": "running shoe",       "expectFood": false }
+   ]
+   ```
+3. Any image **not** in the manifest is still run "exploratory" — the model's
+   verdict prints to the console (great for throwing in a funny pic to see what
+   the CFO says about it).
+
+### Run it
+
+```bash
+npx tsx evals/multimodal-food.eval.ts
+```
+
+Each image becomes an `eval.multimodal_food` span in Phoenix with the model's
+`isFood` verdict, macros, and pass/fail.
+
+### Demo line for judges
+
+> "It's multimodal — and it knows its lane. We showed it a photo of a sneaker;
+> it didn't invent 400 calories, it said 'that's a shoe.' Here's the guardrail,
+> traced in Arize."
