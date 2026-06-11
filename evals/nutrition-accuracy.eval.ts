@@ -20,10 +20,7 @@
  * Tip: point PHOENIX_PROJECT_NAME at a separate project (e.g. cfo-fitness-evals)
  * so eval runs don't mix with live user traces.
  */
-import { config } from 'dotenv';
-config({ path: '.env.local' });
-config();
-
+import './load-env'; // MUST be first — loads .env.local before genkit/Phoenix init
 import { ai } from '@/ai/genkit';
 import { flushPhoenixTraces } from '@/ai/observability/phoenix';
 import { recordReasoningSpan } from '@/ai/observability/span';

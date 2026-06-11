@@ -21,10 +21,7 @@
  * Run it (same env as the nutrition eval):
  *   npx tsx evals/multimodal-food.eval.ts
  */
-import { config } from 'dotenv';
-config({ path: '.env.local' });
-config();
-
+import './load-env'; // MUST be first — loads .env.local before genkit/Phoenix init
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { ai } from '@/ai/genkit';
