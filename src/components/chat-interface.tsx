@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
@@ -335,17 +335,23 @@ export function ChatInterface() {
     }
   };
 
-  const handleSend = async () => {
+  // Canned prompt fired by the "Explain this" button — asks the CFO to replay
+  // its reasoning for the latest answer (routes through inspect_reasoning_trace).
+  const EXPLAIN_PROMPT =
+    "Show me your reasoning — walk me through exactly how you got that answer, the inputs and calculations behind any numbers, and flag anything that looks off.";
+
+  const handleSend = async (overrideText?: string) => {
     const hasPhotos = selectedPhotos.length > 0;
-    if (!user || (!input.trim() && !hasPhotos) || isLoading) return;
+    const typedText = (overrideText ?? input).trim();
+    if (!user || (!typedText && !hasPhotos) || isLoading) return;
     setInitDone(true); // prevent init effect from firing after a manual send
 
-    const userMessage = input.trim();
+    const userMessage = typedText;
     const photos = selectedPhotos;
     const now = new Date();
     const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
 
-    setInput('');
+    if (overrideText === undefined) setInput('');
     setSelectedPhotos([]);
     setMessages(prev => [...prev, {
       role: 'user',
@@ -558,7 +564,7 @@ export function ChatInterface() {
         </Button>
         <Button
           size="icon" className="rounded-full shrink-0 w-10 h-10"
-          onClick={handleSend}
+          onClick={() => handleSend()}
           disabled={isLoading || isPickerOpen || (!input.trim() && selectedPhotos.length === 0)}
           title="Send"
         >
@@ -643,6 +649,21 @@ export function ChatInterface() {
                     foodLogIds={m.shareOffer.foodLogIds}
                     label={m.shareOffer.label}
                   />
+                </div>
+              )}
+              {/* Transparency: tap to have the CFO replay its own reasoning for the
+                  latest answer — pulls the trace back via the Arize Phoenix MCP tool. */}
+              {m.role === 'model' && i === messages.length - 1 && i > 0 && m.content.trim().length > 0 && !isLoading && (
+                <div className="mt-1.5 px-1">
+                  <Button
+                    variant="ghost" size="sm"
+                    className="rounded-full text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-primary hover:bg-primary/10 h-7 px-3"
+                    onClick={() => handleSend(EXPLAIN_PROMPT)}
+                    title="Have the CFO show its work"
+                  >
+                    <Search className="w-3 h-3 mr-1.5" />
+                    Explain this
+                  </Button>
                 </div>
               )}
             </div>
