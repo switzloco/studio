@@ -24,6 +24,9 @@
 // pull this module in. We only want one tracer provider.
 const GLOBAL_FLAG = '__cfo_phoenix_registered__';
 
+// Kept so short-lived processes can force-flush spans before exiting.
+let activeProvider: { forceFlush?: () => Promise<void> } | null = null;
+
 function setupPhoenix(): void {
   if (process.env.PHOENIX_ENABLED !== 'true') return;
 
@@ -69,6 +72,7 @@ function setupPhoenix(): void {
       spanProcessors: [new BatchSpanProcessor(exporter)],
     });
     provider.register();
+    activeProvider = provider;
 
     // eslint-disable-next-line no-console
     console.log(`[phoenix] tracing enabled → ${url} (project: ${projectName})`);
@@ -77,6 +81,20 @@ function setupPhoenix(): void {
     g[GLOBAL_FLAG] = false;
     // eslint-disable-next-line no-console
     console.error('[phoenix] failed to initialize tracing — continuing without it:', err);
+  }
+}
+
+/**
+ * Force-export any buffered spans. Useful for short-lived processes (e.g. the
+ * eval harness) that would otherwise exit before the BatchSpanProcessor flushes.
+ */
+export async function flushPhoenixTraces(): Promise<void> {
+  if (activeProvider && typeof activeProvider.forceFlush === 'function') {
+    try {
+      await activeProvider.forceFlush();
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
