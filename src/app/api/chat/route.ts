@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
+import { runWithShareOffer, getShareOffer } from '@/ai/flows/share-offer-context';
 import { verifyAuthHeader, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { adminHealthService } from '@/lib/health-service-admin';
 import type { ChatMessage } from '@/lib/food-exercise-types';
+import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
 
 /**
  * Cap on how many prior messages we feed back into the model each turn. We
@@ -86,79 +88,67 @@ export async function POST(req: Request) {
       photoDates,
     };
 
-    let stream;
-    try {
-      const result = await cfoChatPrompt.stream(input, { maxTurns: 15 });
-      stream = result.stream;
-    } catch (err: any) {
-      console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
+    // Creates the model stream with a fallback model. Kept inside the ALS scope
+    // (see below) so any tool calls that fire during generation can record a
+    // share offer for this turn.
+    const openStream = async () => {
       try {
+        const result = await cfoChatPrompt.stream(input, { maxTurns: 15 });
+        return result.stream;
+      } catch (err: any) {
+        console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
         const result = await cfoChatPrompt.stream(input, {
           model: 'googleai/gemini-2.0-flash',
           maxTurns: 15,
         });
-        stream = result.stream;
-      } catch (fallbackErr: any) {
-        const primaryDetail = err?.message ?? String(err);
-        const fallbackDetail = fallbackErr?.message ?? String(fallbackErr);
-        console.error('[ChatRoute] Fallback model also failed:', fallbackDetail, fallbackErr?.stack ?? '');
-
-        // Return a friendly system error message directly as a successful stream so it renders in the chat
-        const encoder = new TextEncoder();
-        const readableStream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode(
-                `⚠️ **System Interruption**\n\n` +
-                `Partner, the Gemini neural ledger could not be reached.\n\n` +
-                `I have received your message: *"${message}"*.\n\n` +
-                `**Diagnostics:**\n` +
-                `* Primary model error: \`${primaryDetail}\`\n` +
-                `* Fallback model error: \`${fallbackDetail}\`\n\n` +
-                `Please try again in a minute.`
-              )
-            );
-            controller.close();
-          },
-        });
-
-        return new NextResponse(readableStream, {
-          headers: {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-          },
-        });
+        return result.stream;
       }
-    }
+    };
 
     const encoder = new TextEncoder();
     const hasPhotos = Array.isArray(photoDataUris) && photoDataUris.length > 0;
     const readableStream = new ReadableStream({
       async start(controller) {
-        let fullText = '';
-        try {
-          for await (const chunk of stream) {
-            if (chunk.text) {
-              fullText += chunk.text;
-              controller.enqueue(encoder.encode(chunk.text));
+        // One share-offer scope per chat turn — tools called during streaming
+        // write into it; we read it back once the text finishes.
+        await runWithShareOffer(async () => {
+          let fullText = '';
+          try {
+            const stream = await openStream();
+            for await (const chunk of stream) {
+              if (chunk.text) {
+                fullText += chunk.text;
+                controller.enqueue(encoder.encode(chunk.text));
+              }
             }
+
+            // The agent may have surfaced a "share this meal" chip via the
+            // offer_meal_share tool. Append it AFTER the text as a sentinel the
+            // client parses and strips — never persisted to the transcript.
+            const offer = getShareOffer();
+            if (offer) {
+              controller.enqueue(encoder.encode(`${SHARE_OFFER_SENTINEL}${JSON.stringify(offer)}`));
+            }
+          } catch (err: any) {
+            const detail = err?.message ?? String(err);
+            console.error('[ChatRoute] Stream failed:', detail, err?.stack ?? '');
+            // Mid-generation failures and total model failures both land here —
+            // render a friendly message inline so the chat never hangs.
+            controller.enqueue(
+              encoder.encode(
+                fullText
+                  ? `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation.*\n\n\`\`\`\n${detail}\n\`\`\``
+                  : `⚠️ **System Interruption**\n\nPartner, the Gemini neural ledger could not be reached.\n\n` +
+                    `I have received your message: *"${message}"*.\n\n**Diagnostics:** \`${detail}\`\n\nPlease try again in a minute.`
+              )
+            );
+          } finally {
+            controller.close();
+            // Persist the completed turn for daily visibility. Fire-and-forget —
+            // the response has already streamed, so this never blocks the user.
+            void persistChatTurn(uid, resolvedDate, message, hasPhotos, fullText);
           }
-        } catch (err: any) {
-          const detail = err?.message ?? String(err);
-          console.error('[ChatRoute] Error during stream playback:', detail, err?.stack ?? '');
-          controller.enqueue(
-            encoder.encode(
-              `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation.*\n\n` +
-              `\`\`\`\n${detail}\n\`\`\``
-            )
-          );
-        } finally {
-          controller.close();
-          // Persist the completed turn for daily visibility. Fire-and-forget —
-          // the response has already streamed, so this never blocks the user.
-          void persistChatTurn(uid, resolvedDate, message, hasPhotos, fullText);
-        }
+        });
       },
     });
 

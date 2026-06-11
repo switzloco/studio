@@ -15,6 +15,8 @@ import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences } from '@/lib/health-service';
+import { SHARE_OFFER_SENTINEL, type ChatShareOffer } from '@/lib/share-offer';
+import { ShareMealButton } from '@/components/share-meal-button';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -30,6 +32,26 @@ interface Message {
   role: 'user' | 'model';
   content: string;
   images?: string[];
+  shareOffer?: ChatShareOffer;
+}
+
+/**
+ * Splits a raw chat stream into the visible text and any trailing share-offer
+ * payload. The sentinel + JSON always arrive at the very end, so during
+ * streaming we show only the text before it.
+ */
+function parseShareOffer(raw: string): { text: string; offer?: ChatShareOffer } {
+  const idx = raw.indexOf(SHARE_OFFER_SENTINEL);
+  if (idx === -1) return { text: raw };
+  const text = raw.slice(0, idx);
+  const json = raw.slice(idx + SHARE_OFFER_SENTINEL.length);
+  try {
+    const offer = JSON.parse(json) as ChatShareOffer;
+    if (offer?.foodLogIds?.length) return { text, offer };
+  } catch {
+    /* incomplete/garbled payload — just drop it and show the text */
+  }
+  return { text };
 }
 
 interface SelectedPhoto {
@@ -384,13 +406,25 @@ export function ChatInterface() {
         const { value, done } = await reader.read();
         if (done) break;
         streamText += decoder.decode(value, { stream: true });
-        
+
+        // Render only the visible text while streaming; the share-offer sentinel
+        // (if any) is at the tail and gets stripped here.
+        const { text } = parseShareOffer(streamText);
         setMessages(prev => {
           const updated = [...prev];
-          updated[updated.length - 1].content = streamText;
+          updated[updated.length - 1].content = text;
           return updated;
         });
       }
+
+      // After the stream closes, attach any agent-surfaced share offer.
+      const { text, offer } = parseShareOffer(streamText);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1].content = text;
+        if (offer) updated[updated.length - 1].shareOffer = offer;
+        return updated;
+      });
     } catch (e: any) {
       console.error('[ChatSend] Error:', e);
       setMessages(prev => [...prev, {
@@ -603,6 +637,14 @@ export function ChatInterface() {
                   m.content
                 )}
               </div>
+              {m.role === 'model' && m.shareOffer && (
+                <div className="mt-1.5 px-1">
+                  <ShareMealButton
+                    foodLogIds={m.shareOffer.foodLogIds}
+                    label={m.shareOffer.label}
+                  />
+                </div>
+              )}
             </div>
           ))}
           {isLoading && (
