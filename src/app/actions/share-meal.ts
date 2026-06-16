@@ -145,6 +145,42 @@ export async function getMyShares(userId: string): Promise<GetMySharesResult> {
   }
 }
 
+export type LogEditedMealResult = { success: boolean; error?: string };
+
+/**
+ * Logs a caller-supplied list of (possibly edited) meal items directly into
+ * the recipient's food log, bypassing the Firestore share snapshot.
+ * Used when the viewer edits portions before logging via the share page.
+ */
+export async function logEditedMeal(
+  userId: string,
+  items: SharedMealItem[],
+  localDate: string,
+): Promise<LogEditedMealResult> {
+  try {
+    if (!userId) return { success: false, error: 'You must be signed in to log.' };
+    const db = getAdminFirestore();
+
+    for (const item of items) {
+      await healthService.logFood(db, userId, { ...item, date: localDate });
+    }
+
+    const allTodayFood = await healthService.queryFoodLog(db, userId, localDate, 100);
+    await healthService.updateHealthData(db, userId, {
+      dailyProteinG: allTodayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
+      dailyCarbsG:   allTodayFood.reduce((s, e) => s + (e.carbsG || 0), 0),
+      dailyCaloriesIn: allTodayFood.reduce((s, e) => s + (e.calories || 0), 0),
+      dailyPlantG:   allTodayFood.reduce((s, e) => s + (e.plantMassG || 0), 0),
+      lastActiveDate: localDate,
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('[ShareMeal] logEditedMeal error:', error?.message ?? String(error));
+    return { success: false, error: error?.message ?? 'Could not log meal.' };
+  }
+}
+
 export type RevokeShareResult = { success: boolean; error?: string };
 
 export async function revokeShare(userId: string, shareId: string): Promise<RevokeShareResult> {
