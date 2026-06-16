@@ -133,7 +133,7 @@ export default async function OgImage({
 
         {/* Footer tagline */}
         <span style={{ color: '#334155', fontSize: 18, fontWeight: 600 }}>
-          Track your nutrition like a portfolio · thecfo.app
+          Track your nutrition like a portfolio · CFO Fitness
         </span>
       </div>
     ),
