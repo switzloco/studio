@@ -15,9 +15,9 @@ import {googleAI} from '@genkit-ai/google-genai';
  * without a code change (defaults to Gemini 3 Flash).
  */
 
-// Gemini 3 Flash (GA). Override via CFO_MODEL — e.g. a preview variant like
-// googleai/gemini-3-flash-preview.
-export const CFO_MODEL = process.env.CFO_MODEL ?? 'googleai/gemini-3.5-flash';
+// Gemini 2.5 Flash — multimodal, fast, supported by @genkit-ai/google-genai 1.36.
+// Override via CFO_MODEL (e.g. 'googleai/gemini-3-flash-preview' for Gemini 3 preview).
+export const CFO_MODEL = process.env.CFO_MODEL ?? 'googleai/gemini-2.5-flash';
 
 export const ai = genkit({
   plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
