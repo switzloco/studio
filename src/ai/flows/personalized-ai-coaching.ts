@@ -28,8 +28,8 @@ const PersonalizedAICoachingInputSchema = z.object({
   localTime: z.string().describe('The current local time string from the client.'),
   /** Legacy single-photo field — kept for backward compat; prefer photoDataUris. */
   photoDataUri: z.string().optional(),
-  /** Multiple photos — base64 data URIs. */
-  photoDataUris: z.array(z.string()).optional(),
+  /** Multiple photos — objects with base64 data URI and MIME type. */
+  photoDataUris: z.array(z.object({ url: z.string(), contentType: z.string() })).optional(),
   /** Parallel array: EXIF-derived HH:MM (24h) time for each photo; empty string = unknown. */
   photoTimestamps: z.array(z.string()).optional(),
   /** Parallel array: EXIF-derived YYYY-MM-DD for each photo; empty string = same as localDate. */
@@ -1284,7 +1284,7 @@ LIVE HEALTH SNAPSHOT:
 {{#if photoDataUris}}
 [The user has attached {{photoDataUris.length}} photo(s). You CAN and MUST analyze ALL of them — food portions, ingredients, meal composition, body composition, exercise form, progress, etc. EXIF timestamps are prepended in the message text so you know when each was taken — use them as consumedAt when logging food. Never claim you cannot see images.]
 {{#each photoDataUris}}
-{{media url=this}}
+{{media url=this.url contentType=this.contentType}}
 {{/each}}
 {{else if photoDataUri}}
 [The user has attached a photo — you CAN see it. Describe and analyze it — food portions, body composition, exercise form, etc. Never claim you cannot see images.]

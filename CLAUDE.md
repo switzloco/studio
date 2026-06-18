@@ -22,7 +22,7 @@ Test framework: Vitest. Run with `npm run test` / `npm run test:watch` / `npm ru
 ### Stack
 - **Next.js 15** with App Router and Turbopack, **React 19**, **TypeScript**
 - **Firebase**: Firestore (database) + Auth (Google OAuth + Anonymous)
-- **Genkit 1.x** with **Gemini 3 Flash** (`googleai/gemini-3-flash-preview`, env-overridable via `CFO_MODEL`) for AI coaching
+- **Genkit 1.x** with **Gemini 2.5 Flash** (`googleai/gemini-2.5-flash`, env-overridable via `CFO_MODEL`) for AI coaching
 - **Arize Phoenix** (optional, env-gated) for LLM-reasoning observability + MCP-based trace introspection
 - **Shadcn/UI** + **Tailwind CSS** for styling
 
@@ -73,7 +73,7 @@ Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; 
 - `NEXT_PUBLIC_FITBIT_CLIENT_ID` — Fitbit OAuth (optional, has mock fallback)
 - `SERPER_API_KEY` — Serper.dev key for `web_search` tool (optional; tool throws a clear error if missing)
 - `USDA_FOOD_API_KEY` — USDA FoodData Central key for `nutrition_lookup` (optional; falls back to `DEMO_KEY` at 100 req/hr)
-- `CFO_MODEL` — Override the coaching model (default `googleai/gemini-3-flash-preview`)
+- `CFO_MODEL` — Override the coaching model (default `googleai/gemini-2.5-flash`)
 - `PHOENIX_ENABLED` — Set `true` to enable Arize Phoenix tracing + MCP trace introspection (default off)
 - `PHOENIX_COLLECTOR_ENDPOINT` — Phoenix OTLP base URL (default `https://app.phoenix.arize.com`; self-hosted `http://localhost:6006`)
 - `PHOENIX_API_KEY` — Phoenix Cloud API key (required when `PHOENIX_ENABLED=true`)

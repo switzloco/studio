@@ -4,6 +4,11 @@
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
 import { initializeFirebase } from '@/firebase/sdk';
 
+function extractContentType(dataUri: string): string {
+  const match = dataUri.match(/^data:([^;]+);/);
+  return match?.[1] ?? 'image/jpeg';
+}
+
 /**
  * @fileOverview Server Action for sending chat messages to the CFO AI Coach.
  */
@@ -55,7 +60,9 @@ export async function sendChatMessage(
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
       chatHistory,
       currentHealth: sanitizedHealth,
-      photoDataUris: resolvedPhotoUris.length > 0 ? resolvedPhotoUris : undefined,
+      photoDataUris: resolvedPhotoUris.length > 0
+        ? resolvedPhotoUris.map(uri => ({ url: uri, contentType: extractContentType(uri) }))
+        : undefined,
       photoTimestamps: photoTimestamps?.length ? photoTimestamps : undefined,
       photoDates: photoDates?.length ? photoDates : undefined,
     });
