@@ -15,6 +15,11 @@ import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
  */
 const MAX_SENT_HISTORY = 12;
 
+function extractContentType(dataUri: string): string {
+  const match = dataUri.match(/^data:([^;]+);/);
+  return match?.[1] ?? 'image/jpeg';
+}
+
 /**
  * Persist a single turn to the day's transcript (fire-and-forget). Photos are
  * recorded as a marker only — base64 is never stored. The `__init__` sentinel
@@ -83,7 +88,9 @@ export async function POST(req: Request) {
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
       chatHistory: trimmedHistory,
       currentHealth: sanitizedHealth,
-      photoDataUris,
+      photoDataUris: Array.isArray(photoDataUris)
+        ? photoDataUris.map((uri: string) => ({ url: uri, contentType: extractContentType(uri) }))
+        : undefined,
       photoTimestamps,
       photoDates,
     };
