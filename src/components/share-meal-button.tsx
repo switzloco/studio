@@ -6,6 +6,7 @@ import { useUser } from '@/firebase';
 import { toast } from '@/hooks/use-toast';
 import { createMealShare } from '@/app/actions/share-meal';
 import { shareUrl } from '@/lib/site';
+import { shareMealText } from '@/lib/share-text';
 
 /**
  * Shares one or more food-log entries as a public link. Creates the snapshot
@@ -45,7 +46,7 @@ export function ShareMealButton({
       }
 
       const url = shareUrl(res.shareId);
-      const shareText = mealName ? `Check out this meal: ${mealName}` : 'Check out this meal';
+      const shareText = shareMealText({ mealName });
 
       if (canNativeShare) {
         try {

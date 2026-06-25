@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Briefcase, Check, Link2, Loader2, LogIn, Pencil, RotateCcw, Send, Share2, TrendingUp, Users,
+  Briefcase, Check, Link2, Loader2, LogIn, Pencil, RotateCcw, Send, Share2, Sparkles, TrendingUp, Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { getAuth, signInAnonymously, linkWithPopup, GoogleAuthProvider } from 'firebase/auth';
@@ -13,6 +13,8 @@ import { useUser } from '@/firebase';
 import { logSharedMeal, logEditedMeal } from '@/app/actions/share-meal';
 import { editSharedMeal } from '@/app/actions/edit-shared-meal';
 import { shareUrl } from '@/lib/site';
+import { shareMealText } from '@/lib/share-text';
+import { assessSharedMeal } from '@/app/actions/welcome-assessment';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 export interface ShareDTO {
@@ -63,6 +65,10 @@ export function ShareView({ share }: { share: ShareDTO }) {
   const [upgraded, setUpgraded] = useState(false);
   const [canNativeShare, setCanNativeShare] = useState(false);
 
+  // Welcome CFO assessment — a playful, low-pressure greeting generated once on open.
+  const [welcome, setWelcome] = useState<string | null>(null);
+  const [welcomeLoading, setWelcomeLoading] = useState(true);
+
   // Edit chat state
   const [editOpen, setEditOpen] = useState(false);
   const [editInput, setEditInput] = useState('');
@@ -78,6 +84,31 @@ export function ShareView({ share }: { share: ShareDTO }) {
   useEffect(() => {
     if (editOpen) editInputRef.current?.focus();
   }, [editOpen]);
+
+  // Generate the CFO welcome once, against the original (unedited) shared meal.
+  useEffect(() => {
+    let cancelled = false;
+    assessSharedMeal({
+      title: share.title,
+      createdByName: share.createdByName,
+      totals: share.totals,
+      items: share.items.map(i => ({
+        name: i.name,
+        calories: i.calories,
+        proteinG: i.proteinG,
+        carbsG: i.carbsG,
+        fatG: i.fatG,
+      })),
+    })
+      .then(res => {
+        if (cancelled) return;
+        if (res.success) setWelcome(res.assessment);
+      })
+      .finally(() => {
+        if (!cancelled) setWelcomeLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [share.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const displayItems = editedItems ?? share.items;
   const displayTotals = editedItems ? sumItems(editedItems) : share.totals;
@@ -165,7 +196,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
       try {
         await navigator.share({
           title: share.title,
-          text: `${share.createdByName ? `${share.createdByName} shared ` : ''}a meal: ${share.title}`,
+          text: shareMealText({ mealName: share.title, proteinG: displayTotals.proteinG }),
           url: shareUrl(share.id),
         });
       } catch { /* user cancelled */ }
@@ -249,6 +280,28 @@ export function ShareView({ share }: { share: ShareDTO }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Welcome CFO — playful, low-pressure read on the meal */}
+      {(welcomeLoading || welcome) && (
+        <div className="flex gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div className="flex flex-1 flex-col gap-1 rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              the CFO
+            </span>
+            {welcomeLoading ? (
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Sizing up this meal…
+              </span>
+            ) : (
+              <p className="text-sm leading-relaxed">{welcome}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit chat panel */}
       {editOpen && (
