@@ -395,6 +395,15 @@ export const adminHealthService = {
     return { ...snap.data(), id: snap.id } as SharedMeal;
   },
 
+  /** Caches the generated CFO welcome greeting on the share. Best-effort — never throws. */
+  async saveShareAssessment(db: Firestore, shareId: string, assessment: string): Promise<void> {
+    try {
+      await db.doc(`shared_meals/${shareId}`).update({ cfoAssessment: assessment });
+    } catch {
+      /* non-fatal — we'll just regenerate next view */
+    }
+  },
+
   /** Best-effort view counter bump — never throws (view tracking must not break the page). */
   async incrementShareViewCount(db: Firestore, shareId: string): Promise<void> {
     try {

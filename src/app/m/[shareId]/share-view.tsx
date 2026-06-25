@@ -25,6 +25,7 @@ export interface ShareDTO {
   items: SharedMealItem[];
   totals: { calories: number; proteinG: number; carbsG: number; fatG: number; fiberG: number };
   logCount: number;
+  assessment?: string; // cached CFO greeting, when already generated
 }
 
 type LogState = 'idle' | 'busy' | 'done' | 'error';
@@ -67,9 +68,10 @@ export function ShareView({ share }: { share: ShareDTO }) {
   const [upgraded, setUpgraded] = useState(false);
   const [canNativeShare, setCanNativeShare] = useState(false);
 
-  // Welcome CFO assessment — a playful, low-pressure greeting generated once on open.
-  const [welcome, setWelcome] = useState<string | null>(null);
-  const [welcomeLoading, setWelcomeLoading] = useState(true);
+  // Welcome CFO assessment — generated once, then cached on the share doc.
+  // If the cache is already populated we render it immediately (no call, no spinner).
+  const [welcome, setWelcome] = useState<string | null>(share.assessment ?? null);
+  const [welcomeLoading, setWelcomeLoading] = useState(!share.assessment);
 
   // Edit chat state
   const [editOpen, setEditOpen] = useState(false);
@@ -78,6 +80,18 @@ export function ShareView({ share }: { share: ShareDTO }) {
   const [editMessages, setEditMessages] = useState<EditMessage[]>([]);
   const [editedItems, setEditedItems] = useState<SharedMealItem[] | null>(null);
   const editInputRef = useRef<HTMLTextAreaElement>(null);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stop the post-log auto-redirect so a user who's mid-share isn't yanked away.
+  const cancelRedirect = () => {
+    if (redirectTimer.current) {
+      clearTimeout(redirectTimer.current);
+      redirectTimer.current = null;
+    }
+  };
+  const goToApp = () => { cancelRedirect(); router.push('/'); };
+
+  useEffect(() => () => cancelRedirect(), []);
 
   useEffect(() => {
     setCanNativeShare(typeof navigator !== 'undefined' && 'share' in navigator);
@@ -88,9 +102,12 @@ export function ShareView({ share }: { share: ShareDTO }) {
   }, [editOpen]);
 
   // Generate the CFO welcome once, against the original (unedited) shared meal.
+  // Skip entirely when the share already has a cached greeting.
   useEffect(() => {
+    if (share.assessment) return;
     let cancelled = false;
     assessSharedMeal({
+      shareId: share.id,
       title: share.title,
       createdByName: share.createdByName,
       totals: share.totals,
@@ -145,9 +162,10 @@ export function ShareView({ share }: { share: ShareDTO }) {
       if ('logCount' in res) setFinalLogCount(res.logCount);
       setLogState('done');
       // They opted in by logging — drop them into the real app, where the meal
-      // is already in their ledger and the CFO is waiting. Brief beat so the
-      // "Logged" confirmation registers before the route change.
-      setTimeout(() => router.push('/'), 1100);
+      // is already in their ledger and the CFO is waiting. We give them a few
+      // seconds first so the "pass it on" prompt has a chance to land; any
+      // interaction with it cancels the auto-redirect (see cancelRedirect).
+      redirectTimer.current = setTimeout(() => router.push('/'), 5000);
     } catch (err: any) {
       setLogError(err?.message ?? 'Something went wrong.');
       setLogState('error');
@@ -178,6 +196,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
     const auth = getAuth();
     const currentUser = auth.currentUser;
     if (!currentUser) return;
+    cancelRedirect();
     setUpgrading(true);
     try {
       await linkWithPopup(currentUser, new GoogleAuthProvider());
@@ -190,6 +209,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
   };
 
   const handleCopy = async () => {
+    cancelRedirect();
     try {
       await navigator.clipboard.writeText(shareUrl(share.id));
       setCopied(true);
@@ -198,6 +218,7 @@ export function ShareView({ share }: { share: ShareDTO }) {
   };
 
   const handleNativeShare = async () => {
+    cancelRedirect();
     if (canNativeShare) {
       try {
         await navigator.share({
@@ -358,10 +379,49 @@ export function ShareView({ share }: { share: ShareDTO }) {
       {/* Primary CTA — Log to my day */}
       <div className="flex flex-col gap-2">
         {logState === 'done' ? (
-          <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Logged — opening your CFO…
-          </div>
+          <>
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
+              <Check className="h-4 w-4" />
+              Logged to today&apos;s ledger
+            </div>
+
+            {/* Viral loop — make the person who just logged share it onward */}
+            <Card className="border-primary/15 bg-primary/[0.03]">
+              <CardContent className="flex flex-col gap-3 p-4">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-bold">Pass it on 🤝</p>
+                  <p className="text-xs text-muted-foreground">
+                    Know someone who&apos;d crush this? Challenge them to log it too.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={canNativeShare ? handleNativeShare : handleCopy}
+                  >
+                    {canNativeShare
+                      ? <><Share2 className="mr-2 h-4 w-4" />Challenge a friend</>
+                      : <><Link2 className="mr-2 h-4 w-4" />{copied ? 'Copied' : 'Copy link'}</>
+                    }
+                  </Button>
+                  {canNativeShare && (
+                    <Button variant="outline" className="shrink-0" onClick={handleCopy}>
+                      <Link2 className="mr-2 h-4 w-4" />
+                      {copied ? 'Copied' : 'Copy'}
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Button size="lg" variant="outline" className="w-full" onClick={goToApp}>
+              <TrendingUp className="mr-2 h-4 w-4" />
+              Open my CFO
+            </Button>
+            <p className="text-center text-[11px] text-muted-foreground">
+              Taking you to your dashboard…
+            </p>
+          </>
         ) : (
           <Button
             size="lg"
@@ -422,32 +482,26 @@ export function ShareView({ share }: { share: ShareDTO }) {
         </div>
       )}
 
-      {/* Share / copy row */}
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={canNativeShare ? handleNativeShare : handleCopy}
-        >
-          {canNativeShare
-            ? <><Share2 className="mr-2 h-4 w-4" />Share</>
-            : <><Link2 className="mr-2 h-4 w-4" />{copied ? 'Copied' : 'Copy link'}</>
-          }
-        </Button>
-        {canNativeShare && (
-          <Button variant="outline" className="flex-1" onClick={handleCopy}>
-            <Link2 className="mr-2 h-4 w-4" />
-            {copied ? 'Copied' : 'Copy link'}
+      {/* Share / copy row — hidden after logging, where the viral card takes over */}
+      {logState !== 'done' && (
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={canNativeShare ? handleNativeShare : handleCopy}
+          >
+            {canNativeShare
+              ? <><Share2 className="mr-2 h-4 w-4" />Share</>
+              : <><Link2 className="mr-2 h-4 w-4" />{copied ? 'Copied' : 'Copy link'}</>
+            }
           </Button>
-        )}
-      </div>
-
-      {logState === 'done' && (
-        <p className="text-center text-xs text-muted-foreground">
-          <Link href="/" className="font-medium text-primary hover:underline">
-            View in your CFO dashboard →
-          </Link>
-        </p>
+          {canNativeShare && (
+            <Button variant="outline" className="flex-1" onClick={handleCopy}>
+              <Link2 className="mr-2 h-4 w-4" />
+              {copied ? 'Copied' : 'Copy link'}
+            </Button>
+          )}
+        </div>
       )}
 
       <p className="text-center text-xs text-muted-foreground">

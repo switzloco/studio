@@ -2,6 +2,8 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { getAdminFirestore } from '@/firebase/admin';
+import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 const AssessmentSchema = z.object({
@@ -15,6 +17,8 @@ export type WelcomeAssessmentResult =
   | { success: false; error: string };
 
 interface MealSummary {
+  /** When provided, the generated greeting is cached on the share for future views. */
+  shareId?: string;
   title: string;
   createdByName?: string;
   totals: { calories: number; proteinG: number; carbsG: number; fatG: number; fiberG: number };
@@ -50,7 +54,15 @@ Return only the greeting text.`,
     });
 
     if (!output?.assessment) return { success: false, error: 'No response from AI.' };
-    return { success: true, assessment: output.assessment.trim() };
+
+    const assessment = output.assessment.trim();
+    // Cache on the share so subsequent visitors get it instantly and free —
+    // the meal snapshot is immutable, so the greeting never needs to change.
+    if (meal.shareId) {
+      await healthService.saveShareAssessment(getAdminFirestore(), meal.shareId, assessment);
+    }
+
+    return { success: true, assessment };
   } catch (err: any) {
     console.error('[WelcomeAssessment] error:', err?.message ?? String(err));
     return { success: false, error: err?.message ?? 'Could not generate assessment.' };

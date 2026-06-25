@@ -63,6 +63,7 @@ export interface SharedMeal {
   visibility: 'link';         // v1: anyone with the link can view
   logCount: number;           // how many people logged this (social proof)
   viewCount: number;
+  cfoAssessment?: string;     // cached CFO welcome greeting (immutable meal → generated once)
   revoked?: boolean;          // when true, the link no longer resolves
   expiresAt?: FieldValue | Timestamp | null;
 }

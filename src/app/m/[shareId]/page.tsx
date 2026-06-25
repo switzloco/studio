@@ -31,6 +31,7 @@ function toDTO(share: SharedMeal): ShareDTO {
     items: share.items ?? [],
     totals: share.totals ?? { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
     logCount: share.logCount ?? 0,
+    assessment: share.cfoAssessment,
   };
 }
 
