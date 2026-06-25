@@ -8,6 +8,7 @@ import {
   Briefcase, Check, Link2, Loader2, LogIn, Pencil, RotateCcw, Send, Share2, Sparkles, TrendingUp, Users,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { getAuth, signInAnonymously, linkWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { useUser } from '@/firebase';
 import { logSharedMeal, logEditedMeal } from '@/app/actions/share-meal';
@@ -57,6 +58,7 @@ function MacroStat({ label, value, unit }: { label: string; value: number; unit:
 
 export function ShareView({ share }: { share: ShareDTO }) {
   const { user } = useUser();
+  const router = useRouter();
   const [logState, setLogState] = useState<LogState>('idle');
   const [logError, setLogError] = useState('');
   const [finalLogCount, setFinalLogCount] = useState(share.logCount);
@@ -142,6 +144,10 @@ export function ShareView({ share }: { share: ShareDTO }) {
 
       if ('logCount' in res) setFinalLogCount(res.logCount);
       setLogState('done');
+      // They opted in by logging — drop them into the real app, where the meal
+      // is already in their ledger and the CFO is waiting. Brief beat so the
+      // "Logged" confirmation registers before the route change.
+      setTimeout(() => router.push('/'), 1100);
     } catch (err: any) {
       setLogError(err?.message ?? 'Something went wrong.');
       setLogState('error');
@@ -353,8 +359,8 @@ export function ShareView({ share }: { share: ShareDTO }) {
       <div className="flex flex-col gap-2">
         {logState === 'done' ? (
           <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
-            <Check className="h-4 w-4" />
-            Logged to today&apos;s ledger
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Logged — opening your CFO…
           </div>
         ) : (
           <Button
