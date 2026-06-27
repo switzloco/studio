@@ -88,8 +88,8 @@ Keep the entire Next.js app on Firebase App Hosting (Cloud Run). Capacitor ships
 
 ### Phase 0 — Pre-flight (½ day)
 
-- [ ] Pick a stable production URL and pin it (e.g. `app.cfofitness.com`). The `server.url` is baked into the binary on each release — changing it requires an App Store update.
-- [ ] Decide bundle IDs: `com.cfofitness.app` (iOS) and `com.cfofitness.app` (Android). Buy the matching domain if not owned.
+- [ ] **Domain: `cfofitness.app` (Porkbun) — DECIDED.** Point it at Firebase App Hosting before first binary. The `server.url` is baked into the binary on each release — changing it requires an App Store update.
+- [ ] Bundle IDs: `app.cfofitness` (iOS) and `app.cfofitness` (Android) — matches the domain convention.
 - [ ] Enroll in Apple Developer Program ($99/yr) and Google Play Developer ($25 one-time) **before** writing any code — Apple enrollment can take 1-7 days.
 - [ ] Audit `next.config.ts` for any `same-origin`-only cookies. Capacitor's WebView runs on `capacitor://localhost` (iOS) and `https://localhost` (Android) by default, but with `server.url` it runs on the real origin — confirm Firebase Auth domain restrictions allow it.
 
@@ -97,7 +97,7 @@ Keep the entire Next.js app on Firebase App Hosting (Cloud Run). Capacitor ships
 
 ```bash
 npm install @capacitor/core @capacitor/cli
-npx cap init "CFO Fitness" com.cfofitness.app --web-dir=public
+npx cap init "CFO Fitness" app.cfofitness --web-dir=public
 npm install @capacitor/ios @capacitor/android
 npx cap add ios
 npx cap add android
@@ -109,16 +109,14 @@ npx cap add android
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.cfofitness.app',
+  appId: 'app.cfofitness',
   appName: 'CFO Fitness',
   webDir: 'public',
   server: {
-    // Use the canonical prod URL. Today that's NEXT_PUBLIC_SITE_URL from
-    // apphosting.yaml: https://studio--studio-4236902803-1eba2.us-central1.hosted.app
-    // Strongly recommend mapping a custom domain (app.cfofitness.com) BEFORE
-    // shipping — server.url is baked into the binary and changing it later
-    // requires an App Store update.
-    url: 'https://app.cfofitness.com',
+    // Domain: cfofitness.app (Porkbun)
+    // Must be pointed at Firebase App Hosting BEFORE the first binary ships —
+    // server.url is baked in and changing it later requires a full App Store update.
+    url: 'https://cfofitness.app',
     cleartext: false,
     androidScheme: 'https',
   },
