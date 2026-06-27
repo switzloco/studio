@@ -36,7 +36,7 @@ env:
       - RUNTIME
   # Canonical base URL for share links + OG/social metadata.
   - variable: NEXT_PUBLIC_SITE_URL
-    value: "https://studio--studio-4236902803-1eba2.us-central1.hosted.app"
+    value: "https://cfofitness.app"
     availability:
       - BUILD
       - RUNTIME

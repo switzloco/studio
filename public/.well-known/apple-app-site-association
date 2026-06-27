@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["TEAMID.app.cfofitness"],
+        "components": [
+          { "/": "/m/*", "comment": "Meal share deep links" },
+          { "/": "/incoming-share*", "comment": "OS share sheet target" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.app.cfofitness"]
+  }
+}

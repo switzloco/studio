@@ -1,6 +1,12 @@
-/// <reference lib="webworker" />
+import { NextResponse } from 'next/server';
 
-const CACHE_NAME = 'cfo-v1';
+// Build ID injected at build time via NEXT_PUBLIC_BUILD_ID (set in next.config.ts).
+// Changing this value busts the service worker cache on every deploy.
+const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev';
+
+const SW_BODY = `/// <reference lib="webworker" />
+
+const CACHE_NAME = 'cfo-${BUILD_ID}';
 
 const PRECACHE_URLS = [
   '/',
@@ -9,7 +15,6 @@ const PRECACHE_URLS = [
   '/icons/icon-512x512.png',
 ];
 
-// Install — precache shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
@@ -17,7 +22,6 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate — clean old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -38,22 +42,19 @@ self.addEventListener('fetch', (event) => {
         const text = formData.get('text') || '';
         const sharedUrl = formData.get('url') || '';
         const params = new URLSearchParams({ title, text, url: sharedUrl });
-        return Response.redirect(`/incoming-share?${params.toString()}`, 303);
+        return Response.redirect('/incoming-share?' + params.toString(), 303);
       })()
     );
     return;
   }
 });
 
-// Fetch — network-first for navigation & API, cache-first for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET and cross-origin
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  // Navigation requests & API routes: network-first
   if (request.mode === 'navigate' || url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
@@ -67,7 +68,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets (JS, CSS, images, fonts): cache-first
   if (
     url.pathname.startsWith('/_next/') ||
     url.pathname.startsWith('/icons/') ||
@@ -89,7 +89,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else: network-first with cache fallback
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -100,3 +99,14 @@ self.addEventListener('fetch', (event) => {
       .catch(() => caches.match(request))
   );
 });
+`;
+
+export async function GET() {
+  return new NextResponse(SW_BODY, {
+    headers: {
+      'Content-Type': 'application/javascript',
+      'Service-Worker-Allowed': '/',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  });
+}
