@@ -4,6 +4,45 @@ CFO Fitness → iOS + Android via Capacitor, optimized for a solo developer who 
 
 ---
 
+## Review (2026-06-27) — Is Capacitor still the right call?
+
+**Yes — and the PWA problems you're seeing are the exact reason.** Reviewed against the latest `main` (meal-share viral loop, `/api/agent` endpoint, error boundaries, USDA key + Phoenix now wired into `apphosting.yaml`). Nothing on main changes the recommendation; a couple of things strengthen it.
+
+### Your actual problem
+
+The complaints are: *users are used to regular apps, want notifications, and the PWA is awkward — especially on iPhone.* Those aren't bugs you can patch. They're the structural ceiling of an iOS PWA:
+
+| PWA pain you're hitting | Why it can't be fixed in the PWA | Capacitor (hosted-hybrid) fix |
+|---|---|---|
+| "Feels awkward, not a real app" on iPhone | iOS has no install prompt API — install is a manual Safari-only "Share → Add to Home Screen" dance. You've already built an elaborate 3-step coaching card (`add-to-home-prompt.tsx`) to paper over this. That UI *is* the smell. | Real App Store install, real icon, real splash. Zero coaching needed. |
+| Notifications | iOS web push only works *after* a manual home-screen install, is flaky, and many of your users will never complete the install. No reliable re-engagement channel. | Native APNs/FCM via `@capacitor/push-notifications`. Works like every other app. This alone justifies the wrapper. |
+| Users randomly logged out / data gone | iOS evicts all PWA storage (IndexedDB, localStorage, the SW cache) after **7 days of non-use**. For a fitness app people check a few times a week, this silently wipes Firebase Auth sessions. | App-container storage is persistent. No 7-day eviction. |
+| Google sign-in glitches | Firebase Auth popup flow is blocked in iOS standalone display mode; the redirect flow drops results. | Native auth plugin (`@capacitor-firebase/authentication`) sidesteps the WebView entirely. |
+| Meal-share *receiving* doesn't work on iPhone | The `share_target` in `manifest.json` is Web Share Target — **Android/Chrome only**. iOS ignores it. | iOS native share extension delivers shares into the same `/incoming-share` flow. |
+
+### What changed on main that the plan must account for
+
+- **Viral meal-share loop** (`/m/[shareId]`, `opengraph-image.tsx`, `share-meal.ts`). This is web-first by design — shared links must open in a browser with OG previews. The hosted-hybrid model is *perfect* for this: links open the site for non-users (growth), and Universal Links / App Links route them into the app for users who have it. A fully-native rewrite would have fought this. **New deep-link requirement added to Phase 3 below.**
+- **`/api/agent` + `.well-known/agent.json` + server actions everywhere.** Reconfirms: static export is impossible. Hosted-hybrid is the only Capacitor shape that works.
+- **`USDA_FOOD_API_KEY` and Phoenix now set in `apphosting.yaml`.** The USDA 429 cost item in Part 4 is **done** — checklist updated. Phoenix is now `PHOENIX_ENABLED=true` in prod; note it adds per-request trace export latency/egress — fine for now, but it's a hackathon toggle, consider turning off post-submission to save a little.
+- **`minInstances: 1` / `maxInstances: 10` confirmed on main.** Keeping min at 1 per your call. Still recommend dropping max to 3 until ≥100 DAU.
+
+### Bottom line
+
+Don't rewrite native, and don't keep fighting the iOS PWA. **Wrap the existing hosted app in Capacitor**, with **push notifications and native auth as the two must-have plugins** (they're what your users are actually asking for). Keep the PWA alive for desktop/Android web and for the share-link landing pages — it costs nothing to leave it on.
+
+### Optional: interim PWA patches while you build the wrapper (≈half a day)
+
+If you want to reduce pain *this week* before the 5-7 day wrapper lands:
+
+1. **Bump the SW cache on deploy.** `CACHE_NAME = 'cfo-v1'` in `public/sw.js` is hardcoded and never changes, so the `activate` cleanup never runs and the precached `/` shell can go stale. Tie it to the build ID (you already expose `NEXT_PUBLIC_BUILD_ID`).
+2. **Warn iPhone users about the 7-day eviction** — a gentle "open the app weekly so you don't get logged out" note, or nudge them to install to home screen (which slightly delays eviction).
+3. **Verify Google sign-in uses redirect, not popup, in standalone mode** and that `getRedirectResult` runs on load. This is the single most common "PWA login is broken on iPhone" cause.
+
+These are stopgaps. They do not deliver notifications or the native feel — only the wrapper does.
+
+---
+
 ## Part 1 — Architecture decision
 
 ### The constraint
@@ -74,6 +113,11 @@ const config: CapacitorConfig = {
   appName: 'CFO Fitness',
   webDir: 'public',
   server: {
+    // Use the canonical prod URL. Today that's NEXT_PUBLIC_SITE_URL from
+    // apphosting.yaml: https://studio--studio-4236902803-1eba2.us-central1.hosted.app
+    // Strongly recommend mapping a custom domain (app.cfofitness.com) BEFORE
+    // shipping — server.url is baked into the binary and changing it later
+    // requires an App Store update.
     url: 'https://app.cfofitness.com',
     cleartext: false,
     androidScheme: 'https',
@@ -138,6 +182,12 @@ Fix:
 - Configure each provider's redirect URL to `https://app.cfofitness.com/api/auth/<provider>` (server completes the exchange, sets the cookie, redirects to `/`).
 - Add `intent-filter` for Android and `CFBundleURLSchemes` + Universal Links for iOS so the app catches the redirect.
 - Use `@capacitor/app` `appUrlOpen` listener to re-focus the WebView on the right path after the OS returns from the browser.
+
+**Also wire the meal-share deep links (added on main).** The viral loop lives at `/m/[shareId]` with OG images. For users who have the app installed, these links should open *in the app*, not the browser:
+
+- Register **Universal Links** (iOS, via an `apple-app-site-association` file served from the site root) and **App Links** (Android, via `assetlinks.json`) for the `/m/*` and `/incoming-share` paths.
+- Non-users still get the web page with the OG preview — that's the growth mechanic; don't break it.
+- In the WebView, the `appUrlOpen` handler routes an incoming `/m/<id>` to the in-app share view.
 
 ### Phase 4 — Native-only UI polish (1 day)
 
@@ -265,8 +315,9 @@ This is the section that will save the project. Going broke on Google Cloud is t
 #### Third-party APIs
 
 - [ ] Serper.dev: prepay $5, set per-user daily quota = 20 calls. Refuse beyond that.
-- [ ] USDA: `USDA_FOOD_API_KEY` set (not `DEMO_KEY`); 100 req/hr on DEMO_KEY will break.
+- [x] USDA: `USDA_FOOD_API_KEY` set (not `DEMO_KEY`) — **done**, now wired as a secret in `apphosting.yaml`. This was the source of the 429s.
 - [ ] Resend (email): free tier 3k/mo. Throttle weekly-summary cron to skip inactive users.
+- [ ] Phoenix: now `PHOENIX_ENABLED=true` in prod. Tracing exports every span to Arize over OTLP — small per-request latency + egress. Fine for the hackathon; consider flipping to `false` afterward if you don't need live trace introspection.
 
 #### Crons
 
