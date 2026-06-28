@@ -22,7 +22,8 @@ Test framework: Vitest. Run with `npm run test` / `npm run test:watch` / `npm ru
 ### Stack
 - **Next.js 15** with App Router and Turbopack, **React 19**, **TypeScript**
 - **Firebase**: Firestore (database) + Auth (Google OAuth + Anonymous)
-- **Genkit 1.28** with Gemini 2.0 Flash for AI coaching
+- **Genkit 1.x** with **Gemini 2.5 Flash** (`googleai/gemini-2.5-flash`, env-overridable via `CFO_MODEL`) for AI coaching
+- **Arize Phoenix** (optional, env-gated) for LLM-reasoning observability + MCP-based trace introspection
 - **Shadcn/UI** + **Tailwind CSS** for styling
 
 ### Key Data Flow
@@ -51,6 +52,12 @@ The Genkit flow defines 8 LLM-callable tools:
 
 **Data trust policy:** Only accept steps/HRV/sleep data when `isDeviceVerified=true` (Fitbit OAuth). Self-reported exercise, height, and weight are always accepted.
 
+### Observability — Arize Phoenix (`src/ai/observability/`)
+Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; leave off to disable).
+- `phoenix.ts` — registers a global OpenTelemetry tracer provider that exports Genkit's spans (prompt I/O, every tool call, sub-flows) to Phoenix over OTLP. Imported first in `genkit.ts` and via Next.js `src/instrumentation.ts` so it loads before Genkit. No-op + fail-safe when disabled.
+- `span.ts` — `recordReasoningSpan()` wraps deterministic logic (the VF scoring engine in `score_daily_vf`) in its own span so the inputs + scoring breakdown are inspectable next to the model's tool calls.
+- `phoenix-mcp.ts` — connects to the **Arize Phoenix MCP server** (`@arizeai/phoenix-mcp`) as a Genkit MCP client. Backs the `inspect_reasoning_trace` tool, which lets the CFO pull its own recorded traces back and explain/audit how a score was produced.
+
 ### Firebase Integration (`src/firebase/`)
 - `sdk.ts` — Firebase SDK initialization (safe for server actions)
 - `provider.tsx` — React Context with auth state
@@ -66,7 +73,12 @@ The Genkit flow defines 8 LLM-callable tools:
 - `NEXT_PUBLIC_FITBIT_CLIENT_ID` — Fitbit OAuth (optional, has mock fallback)
 - `SERPER_API_KEY` — Serper.dev key for `web_search` tool (optional; tool throws a clear error if missing)
 - `USDA_FOOD_API_KEY` — USDA FoodData Central key for `nutrition_lookup` (optional; falls back to `DEMO_KEY` at 100 req/hr)
-- Firebase config is hardcoded in `src/firebase/config.ts`
+- `CFO_MODEL` — Override the coaching model (default `googleai/gemini-2.5-flash`)
+- `PHOENIX_ENABLED` — Set `true` to enable Arize Phoenix tracing + MCP trace introspection (default off)
+- `PHOENIX_COLLECTOR_ENDPOINT` — Phoenix OTLP base URL (default `https://app.phoenix.arize.com`; self-hosted `http://localhost:6006`)
+- `PHOENIX_API_KEY` — Phoenix Cloud API key (required when `PHOENIX_ENABLED=true`)
+- `PHOENIX_PROJECT_NAME` / `PHOENIX_CLIENT_HEADERS` — optional Phoenix project name and extra OTLP headers
+- Firebase config is read from `NEXT_PUBLIC_FIREBASE_*` env vars in `src/firebase/config.ts`
 
 ### Build Notes
 - `next.config.ts` ignores TypeScript and ESLint errors during builds

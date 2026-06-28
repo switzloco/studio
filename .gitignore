@@ -47,3 +47,11 @@ firestore-debug.log
 
 # claude code agent worktrees
 .claude/
+
+# Capacitor native build artifacts (keep ios/ and android/ source, not derived)
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/build/
+android/.gradle/
+android/app/build/
+android/app/release.keystore

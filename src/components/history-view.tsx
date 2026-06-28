@@ -12,6 +12,10 @@ import { VFScoreChart } from './vf-score-chart';
 import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
 import { LedgerChat } from './ledger-chat';
+import { ChatHistoryLog } from './chat-history-log';
+import { ProteinChart } from './protein-chart';
+import { ShareMealButton } from './share-meal-button';
+import { MySharesSection } from './my-shares-section';
 
 type SortMode = 'latest' | 'calories';
 
@@ -401,6 +405,9 @@ export function HistoryView() {
                               {(entry.alcoholDrinks ?? 0) > 0 && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{entry.alcoholDrinks} drink{entry.alcoholDrinks! > 1 ? 's' : ''}</span>}
                               {entry.hasSeedOils && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Seed oils</span>}
                             </div>
+                            <div className="flex justify-end pt-1">
+                              <ShareMealButton foodLogIds={[entry.id]} mealName={entry.name} />
+                            </div>
                           </div>
                         )}
 
@@ -494,6 +501,15 @@ export function HistoryView() {
           </div>
         )}
       </div>
+
+      {/* Protein Liquidity — 30-day intake vs. minimum target */}
+      <ProteinChart />
+
+      {/* Daily Conversation Log — what was said with the CFO each day */}
+      <ChatHistoryLog />
+
+      {/* Shared Links — manage active and revoked share links */}
+      <MySharesSection />
 
       {/* Day Detail Sheet */}
       <VFDayDetail entry={selectedEntry} open={sheetOpen} onOpenChange={setSheetOpen} />

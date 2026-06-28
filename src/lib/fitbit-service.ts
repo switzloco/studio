@@ -364,7 +364,10 @@ export const fitbitService = {
     }
 
     const scope = 'activity heartrate sleep profile';
-    return `https://api.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=31536000&state=${state}`;
+    // The user-facing authorization page is served from www.fitbit.com. Hitting
+    // api.fitbit.com for the authorize step bounces the browser to a defunct
+    // /login/transferpage URL that 404s. (Token exchange still uses api.fitbit.com.)
+    return `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&expires_in=31536000&state=${state}`;
   },
 
   /**

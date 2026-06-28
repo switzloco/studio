@@ -7,13 +7,16 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
 import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import type { ChatMessage } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences } from '@/lib/health-service';
+import { SHARE_OFFER_SENTINEL, type ChatShareOffer } from '@/lib/share-offer';
+import { ShareMealButton } from '@/components/share-meal-button';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -29,6 +32,26 @@ interface Message {
   role: 'user' | 'model';
   content: string;
   images?: string[];
+  shareOffer?: ChatShareOffer;
+}
+
+/**
+ * Splits a raw chat stream into the visible text and any trailing share-offer
+ * payload. The sentinel + JSON always arrive at the very end, so during
+ * streaming we show only the text before it.
+ */
+function parseShareOffer(raw: string): { text: string; offer?: ChatShareOffer } {
+  const idx = raw.indexOf(SHARE_OFFER_SENTINEL);
+  if (idx === -1) return { text: raw };
+  const text = raw.slice(0, idx);
+  const json = raw.slice(idx + SHARE_OFFER_SENTINEL.length);
+  try {
+    const offer = JSON.parse(json) as ChatShareOffer;
+    if (offer?.foodLogIds?.length) return { text, offer };
+  } catch {
+    /* incomplete/garbled payload — just drop it and show the text */
+  }
+  return { text };
 }
 
 interface SelectedPhoto {
@@ -119,22 +142,45 @@ export function ChatInterface() {
   useEffect(() => {
     // Wait until auth and Firestore data are both ready
     if (initDone || !user || healthLoading || prefsLoading || !prefs || !healthData) return;
-    if (!autoChatEnabled && !coachingRequested) return;
-    setInitDone(true);
+
+    let cancelled = false;
+    const now = new Date();
+    const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
 
     const runInit = async () => {
+      // 1. Restore today's stored transcript first — cheap read, no model call.
+      //    The day IS the conversation, so a reload picks up where it left off
+      //    and we skip the (paid) __init__ greeting entirely.
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid, 'chat_sessions', today));
+        if (cancelled) return;
+        const stored = (snap.exists() ? snap.data()?.messages : null) as ChatMessage[] | null | undefined;
+        if (stored && stored.length > 0) {
+          setMessages(stored.map(m => ({ role: m.role, content: m.content })));
+          setInitDone(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn('[ChatInit] transcript restore failed, falling back to greeting:', e);
+      }
+      if (cancelled) return;
+
+      // 2. No transcript for today — run the greeting (respecting the auto-chat gate).
+      if (!autoChatEnabled && !coachingRequested) return;
+      setInitDone(true);
+
       setIsLoading(true);
       try {
-        const now = new Date();
         const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
-        
+
         const idToken = await user.getIdToken();
         const payload = {
           message: '__init__',
           chatHistory: [],
           currentHealth: sanitizedHealth,
           userName: user.displayName || undefined,
-          localDate: now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0'),
+          localDate: today,
           localTime: now.toLocaleTimeString('en-US'),
         };
 
@@ -177,7 +223,8 @@ export function ChatInterface() {
     };
 
     runInit();
-  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested]);
+    return () => { cancelled = true; };
+  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested, db]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -288,17 +335,23 @@ export function ChatInterface() {
     }
   };
 
-  const handleSend = async () => {
+  // Canned prompt fired by the "Explain this" button — asks the CFO to replay
+  // its reasoning for the latest answer (routes through inspect_reasoning_trace).
+  const EXPLAIN_PROMPT =
+    "Show me your reasoning — walk me through exactly how you got that answer, the inputs and calculations behind any numbers, and flag anything that looks off.";
+
+  const handleSend = async (overrideText?: string) => {
     const hasPhotos = selectedPhotos.length > 0;
-    if (!user || (!input.trim() && !hasPhotos) || isLoading) return;
+    const typedText = (overrideText ?? input).trim();
+    if (!user || (!typedText && !hasPhotos) || isLoading) return;
     setInitDone(true); // prevent init effect from firing after a manual send
 
-    const userMessage = input.trim();
+    const userMessage = typedText;
     const photos = selectedPhotos;
     const now = new Date();
     const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
 
-    setInput('');
+    if (overrideText === undefined) setInput('');
     setSelectedPhotos([]);
     setMessages(prev => [...prev, {
       role: 'user',
@@ -359,13 +412,25 @@ export function ChatInterface() {
         const { value, done } = await reader.read();
         if (done) break;
         streamText += decoder.decode(value, { stream: true });
-        
+
+        // Render only the visible text while streaming; the share-offer sentinel
+        // (if any) is at the tail and gets stripped here.
+        const { text } = parseShareOffer(streamText);
         setMessages(prev => {
           const updated = [...prev];
-          updated[updated.length - 1].content = streamText;
+          updated[updated.length - 1].content = text;
           return updated;
         });
       }
+
+      // After the stream closes, attach any agent-surfaced share offer.
+      const { text, offer } = parseShareOffer(streamText);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1].content = text;
+        if (offer) updated[updated.length - 1].shareOffer = offer;
+        return updated;
+      });
     } catch (e: any) {
       console.error('[ChatSend] Error:', e);
       setMessages(prev => [...prev, {
@@ -499,7 +564,7 @@ export function ChatInterface() {
         </Button>
         <Button
           size="icon" className="rounded-full shrink-0 w-10 h-10"
-          onClick={handleSend}
+          onClick={() => handleSend()}
           disabled={isLoading || isPickerOpen || (!input.trim() && selectedPhotos.length === 0)}
           title="Send"
         >
@@ -578,6 +643,29 @@ export function ChatInterface() {
                   m.content
                 )}
               </div>
+              {m.role === 'model' && m.shareOffer && (
+                <div className="mt-1.5 px-1">
+                  <ShareMealButton
+                    foodLogIds={m.shareOffer.foodLogIds}
+                    label={m.shareOffer.label}
+                  />
+                </div>
+              )}
+              {/* Transparency: tap to have the CFO replay its own reasoning for the
+                  latest answer — pulls the trace back via the Arize Phoenix MCP tool. */}
+              {m.role === 'model' && i === messages.length - 1 && i > 0 && m.content.trim().length > 0 && !isLoading && (
+                <div className="mt-1.5 px-1">
+                  <Button
+                    variant="ghost" size="sm"
+                    className="rounded-full text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-primary hover:bg-primary/10 h-7 px-3"
+                    onClick={() => handleSend(EXPLAIN_PROMPT)}
+                    title="Have the CFO show its work"
+                  >
+                    <Search className="w-3 h-3 mr-1.5" />
+                    Explain this
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           {isLoading && (

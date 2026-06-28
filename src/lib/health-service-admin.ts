@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials, WithingsCredentials } from './health-service';
-import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from './food-exercise-types';
+import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry, ChatMessage, ChatSession, SharedMeal, SharedMealItem } from './food-exercise-types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -148,6 +148,34 @@ export const adminHealthService = {
   async deleteWithingsCredentials(db: Firestore, userId: string): Promise<void> {
     const docRef = db.doc(`users/${userId}/preferences/withings_tokens`);
     await docRef.delete();
+  },
+
+  // --- Daily Chat Transcript ---
+
+  /**
+   * Appends messages to the day's chat transcript (one doc per day, ID == date).
+   * Uses arrayUnion so concurrent turns can't clobber each other. Strips
+   * undefined fields — Firestore rejects them. Display/visibility only; this is
+   * never the AI's memory of record.
+   */
+  async appendChatMessages(db: Firestore, userId: string, date: string, messages: ChatMessage[]): Promise<void> {
+    const clean = messages
+      .filter(m => m && m.content)
+      .map(m => this.deepClean(m));
+    if (clean.length === 0) return;
+    const docRef = db.doc(`users/${userId}/chat_sessions/${date}`);
+    await docRef.set({
+      date,
+      messages: FieldValue.arrayUnion(...clean),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  },
+
+  /** Reads a single day's chat transcript, or null if none exists yet. */
+  async getChatSession(db: Firestore, userId: string, date: string): Promise<ChatSession | null> {
+    const docRef = db.doc(`users/${userId}/chat_sessions/${date}`);
+    const snap = await docRef.get();
+    return snap.exists ? (snap.data() as ChatSession) : null;
   },
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>): Promise<void> {
@@ -307,5 +335,102 @@ export const adminHealthService = {
     if (!snap.exists) return null;
     await docRef.update({ ignored });
     return { ...snap.data(), id: snap.id, ignored } as FastLogEntry;
+  },
+
+  // --- Shared Meals (public link sharing) ---
+
+  /** Fetches specific food_log entries by ID for a user (preserves request order, skips missing). */
+  async getFoodEntriesByIds(db: Firestore, userId: string, ids: string[]): Promise<FoodLogEntry[]> {
+    const out: FoodLogEntry[] = [];
+    for (const id of ids) {
+      const snap = await db.doc(`users/${userId}/food_log/${id}`).get();
+      if (snap.exists) out.push({ ...snap.data(), id: snap.id } as FoodLogEntry);
+    }
+    return out;
+  },
+
+  /**
+   * Creates a public, token-addressable shared meal at root `shared_meals/{id}`.
+   * Computes totals from the snapshot items. The auto-generated doc ID is the
+   * unguessable link token. Returns the share ID.
+   */
+  async createMealShare(
+    db: Firestore,
+    params: { createdBy: string; createdByName?: string; items: SharedMealItem[]; title: string },
+  ): Promise<string> {
+    const totals = params.items.reduce(
+      (acc, it) => ({
+        calories: acc.calories + (it.calories || 0),
+        proteinG: acc.proteinG + (it.proteinG || 0),
+        carbsG: acc.carbsG + (it.carbsG || 0),
+        fatG: acc.fatG + (it.fatG || 0),
+        fiberG: acc.fiberG + (it.fiberG || 0),
+      }),
+      { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
+    );
+
+    const docRef = db.collection('shared_meals').doc();
+    const data = this.deepClean({
+      id: docRef.id,
+      createdBy: params.createdBy,
+      createdByName: params.createdByName,
+      items: params.items,
+      title: params.title,
+      totals,
+      visibility: 'link' as const,
+      logCount: 0,
+      viewCount: 0,
+      revoked: false,
+      expiresAt: null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await docRef.set(data);
+    return docRef.id;
+  },
+
+  /** Reads a shared meal by ID, or null if it doesn't exist. */
+  async getSharedMeal(db: Firestore, shareId: string): Promise<SharedMeal | null> {
+    const snap = await db.doc(`shared_meals/${shareId}`).get();
+    if (!snap.exists) return null;
+    return { ...snap.data(), id: snap.id } as SharedMeal;
+  },
+
+  /** Caches the generated CFO welcome greeting on the share. Best-effort — never throws. */
+  async saveShareAssessment(db: Firestore, shareId: string, assessment: string): Promise<void> {
+    try {
+      await db.doc(`shared_meals/${shareId}`).update({ cfoAssessment: assessment });
+    } catch {
+      /* non-fatal — we'll just regenerate next view */
+    }
+  },
+
+  /** Best-effort view counter bump — never throws (view tracking must not break the page). */
+  async incrementShareViewCount(db: Firestore, shareId: string): Promise<void> {
+    try {
+      await db.doc(`shared_meals/${shareId}`).update({ viewCount: FieldValue.increment(1) });
+    } catch {
+      /* non-fatal */
+    }
+  },
+
+  /** Returns all non-expired shares created by the given user, newest first. */
+  async getSharesByUser(db: Firestore, userId: string): Promise<SharedMeal[]> {
+    const snap = await db
+      .collection('shared_meals')
+      .where('createdBy', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .get();
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }) as SharedMeal);
+  },
+
+  async revokeShare(db: Firestore, shareId: string, requestingUserId: string): Promise<boolean> {
+    const docRef = db.doc(`shared_meals/${shareId}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return false;
+    const data = snap.data() as SharedMeal;
+    if (data.createdBy !== requestingUserId) return false;
+    await docRef.update({ revoked: true });
+    return true;
   },
 };
