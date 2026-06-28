@@ -24,9 +24,10 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync ios
 
-      - name: Install CocoaPods
+      - name: Resolve Swift Package dependencies
         working-directory: ios/App
-        run: pod install
+        # Capacitor 8 uses Swift Package Manager (no CocoaPods / no .xcworkspace).
+        run: xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App
 
       - name: Import signing certificate
         env:
@@ -55,7 +56,7 @@ jobs:
         working-directory: ios/App
         run: |
           xcodebuild archive \
-            -workspace App.xcworkspace \
+            -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
