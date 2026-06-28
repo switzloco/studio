@@ -13,8 +13,12 @@ const config: CapacitorConfig = {
   },
   ios: {
     contentInset: 'always',
-    // Required to enable cookies, localStorage, and service workers in WKWebView.
-    limitsNavigationsToAppBoundDomains: true,
+    // NOTE: app-bound domains is intentionally OFF. It would lock WebView
+    // navigation to a fixed domain list and break the in-WebView OAuth
+    // redirects (Fitbit/Oura/Withings/Google Health navigate to external
+    // domains). Revisit if/when auth moves to a native plugin or
+    // ASWebAuthenticationSession.
+    limitsNavigationsToAppBoundDomains: false,
     scrollEnabled: false,
   },
   android: {
