@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
 
 // Apple requires this served with application/json, no redirects, over HTTPS.
-// Fill in TEAMID after Apple Developer enrollment completes (10-char Team ID
-// from developer.apple.com/account → Membership).
+// Team ID N7DBYV74D4 (Nick Switzer) — from developer.apple.com/account → Membership.
 const AASA = {
   applinks: {
     apps: [],
     details: [
       {
-        appIDs: ['TEAMID.app.cfofitness'],
+        appIDs: ['N7DBYV74D4.app.cfofitness'],
         components: [
           { '/': '/m/*', comment: 'Meal share deep links' },
           { '/': '/incoming-share*', comment: 'OS share sheet target' },
@@ -17,7 +16,7 @@ const AASA = {
     ],
   },
   webcredentials: {
-    apps: ['TEAMID.app.cfofitness'],
+    apps: ['N7DBYV74D4.app.cfofitness'],
   },
 };
 
