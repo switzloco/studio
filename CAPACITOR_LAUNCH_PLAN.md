@@ -4,6 +4,16 @@ CFO Fitness → iOS + Android via Capacitor, optimized for a solo developer who 
 
 ---
 
+## ⚠️ Open item — native auth plugin (deferred)
+
+`@capacitor-firebase/authentication@8` pins `firebase@^12`, but the app runs `firebase@11.9.1`. That conflict broke the App Hosting `npm ci` deploy, so the plugin was **removed** for now (it's native-only and wasn't imported anywhere yet). Resolve when generating the native projects, by **either**:
+- Deliberately upgrading `firebase` 11 → 12 (a major bump — test Firestore/Auth thoroughly), **or**
+- Using a Google sign-in plugin that doesn't pin firebase 12 (e.g. `@codetrix-studio/capacitor-google-auth`).
+
+Do NOT fix this by setting `legacy-peer-deps=true` globally — it silences every future peer conflict.
+
+---
+
 ## Review (2026-06-27) — Is Capacitor still the right call?
 
 **Yes — and the PWA problems you're seeing are the exact reason.** Reviewed against the latest `main` (meal-share viral loop, `/api/agent` endpoint, error boundaries, USDA key + Phoenix now wired into `apphosting.yaml`). Nothing on main changes the recommendation; a couple of things strengthen it.
