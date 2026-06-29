@@ -50,12 +50,23 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Decode App Store Connect API key
+      - name: Prepare App Store Connect credentials
         env:
           ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ID_RAW: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID_RAW: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           set -euo pipefail
+          # Strip any stray whitespace/newlines that sneak into the secrets via
+          # copy-paste — an embedded space/tab/newline word-splits later args.
+          KEY_ID="$(printf '%s' "$ASC_KEY_ID_RAW" | tr -d '[:space:]')"
+          ISSUER_ID="$(printf '%s' "$ASC_ISSUER_ID_RAW" | tr -d '[:space:]')"
+          # Export cleaned values for all downstream steps.
+          {
+            echo "ASC_KEY_ID=$KEY_ID"
+            echo "ASC_ISSUER_ID=$ISSUER_ID"
+          } >> "$GITHUB_ENV"
+
           KEY_OUT="$RUNNER_TEMP/asc_key.p8"
           # The secret may hold EITHER a base64 blob of the .p8 OR the raw
           # PEM .p8 text itself. Handle both so setup mistakes don't break CI.
@@ -71,15 +82,12 @@ jobs:
           fi
           # xcodebuild auth (archive/export) reads $KEY_OUT directly; altool
           # (upload) looks for AuthKey_<id>.p8 in this well-known directory.
-          mkdir -p ~/.appstoreconnect/private_keys
-          cp "$KEY_OUT" ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$KEY_OUT" "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
           echo "ASC API key staged OK"
 
       - name: Build & archive
         working-directory: ios/App
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           # Automatic signing driven by the App Store Connect API key. Xcode
           # provisions the App target (creating/downloading a distribution
@@ -99,9 +107,6 @@ jobs:
 
       - name: Export IPA
         working-directory: ios/App
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           cat > ExportOptions.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -133,9 +138,6 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
       - name: Upload to TestFlight
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           xcrun altool --upload-app \
             --type ios \

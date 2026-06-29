@@ -41,7 +41,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          KS=android/app/release.keystore
+          # Decode to an ABSOLUTE path. AGP's injected store.file is resolved
+          # relative to the app module (android/app), so a relative path like
+          # 'app/release.keystore' wrongly becomes android/app/app/release.keystore.
+          KS="$RUNNER_TEMP/release.keystore"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KS" 2>/dev/null || true
           if [ ! -s "$KS" ]; then
             echo "::error::ANDROID_KEYSTORE_BASE64 is empty or not valid base64. Store the output of: base64 -i your-release.keystore"
@@ -53,6 +56,7 @@ jobs:
             echo "::error::Keystore could not be opened with ANDROID_STORE_PASSWORD / ANDROID_KEY_ALIAS. Verify those secrets and that ANDROID_KEYSTORE_BASE64 is the base64 of the correct .keystore."
             exit 1
           fi
+          echo "RELEASE_KEYSTORE=$KS" >> "$GITHUB_ENV"
           echo "Keystore validated OK"
 
       - name: Build release AAB
@@ -63,12 +67,26 @@ jobs:
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
           ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=app/release.keystore \
+            -Pandroid.injected.signing.store.file="$RELEASE_KEYSTORE" \
             -Pandroid.injected.signing.store.password="$ANDROID_STORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
 
+      # Always publish the signed AAB as a downloadable artifact. Google Play
+      # requires the FIRST upload of a brand-new app to be done manually in the
+      # Play Console, so grab this artifact for that initial upload.
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      # Push to the Play Store internal track. This only works once the app
+      # listing exists in the Play Console (and the account is out of review),
+      # so it is non-fatal for now — the build + artifact above still succeed.
       - name: Upload to Play Store (internal track)
+        continue-on-error: true
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
