@@ -4,10 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      # TEMPORARY: lets us trigger builds without tag pushes (tag pushes are
-      # blocked in this CI sandbox). Remove once a green build is confirmed.
-      - 'claude/capacitor-app-launch-plan-KQd0y'
   workflow_dispatch:
 
 jobs:
