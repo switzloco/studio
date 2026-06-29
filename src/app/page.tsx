@@ -162,6 +162,17 @@ export default function Home() {
     if (!tutorialSeen && user) {
       setShowTutorial(true);
     }
+
+    // Let the daily reminder card jump straight to the "Today" ledger tab.
+    const onNavigateTab = (e: Event) => {
+      const tab = (e as CustomEvent<string>).detail;
+      if (tab && ['chat', 'daily', 'history', 'assets', 'about'].includes(tab)) {
+        setActiveTab(tab);
+        sessionStorage.setItem('cfo_activeTab', tab);
+      }
+    };
+    window.addEventListener('cfo:navigate-tab', onNavigateTab);
+    return () => window.removeEventListener('cfo:navigate-tab', onNavigateTab);
   }, [user]);
 
   const handleTutorialComplete = () => {
