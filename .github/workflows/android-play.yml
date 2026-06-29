@@ -37,7 +37,23 @@ jobs:
       - name: Decode keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          KS=android/app/release.keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KS" 2>/dev/null || true
+          if [ ! -s "$KS" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is empty or not valid base64. Store the output of: base64 -i your-release.keystore"
+            exit 1
+          fi
+          # Fail fast with a clear message if the keystore/password/alias are
+          # wrong, instead of a cryptic gradle error during bundleRelease.
+          if ! keytool -list -keystore "$KS" -storepass "$ANDROID_STORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Keystore could not be opened with ANDROID_STORE_PASSWORD / ANDROID_KEY_ALIAS. Verify those secrets and that ANDROID_KEYSTORE_BASE64 is the base64 of the correct .keystore."
+            exit 1
+          fi
+          echo "Keystore validated OK"
 
       - name: Build release AAB
         working-directory: android
