@@ -46,36 +46,49 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           echo "$CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
           security import $RUNNER_TEMP/cert.p12 -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          # Allow codesign/xcodebuild to use the imported key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Install provisioning profile
+      - name: Decode App Store Connect API key
         env:
-          PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
         run: |
-          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
-          echo "$PROVISIONING_PROFILE_BASE64" | base64 --decode > $PP_PATH
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+          # xcodebuild auth (archive/export) reads this path.
+          echo "$ASC_API_KEY_BASE64" | base64 --decode > $RUNNER_TEMP/asc_key.p8
+          # altool (upload) looks for AuthKey_<id>.p8 in this well-known dir.
+          mkdir -p ~/.appstoreconnect/private_keys
+          cp $RUNNER_TEMP/asc_key.p8 ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
 
       - name: Build & archive
         working-directory: ios/App
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
+          # Automatic signing driven by the App Store Connect API key. Xcode
+          # provisions the App target (creating/downloading a distribution
+          # profile as needed) and leaves the SPM package targets — which do
+          # NOT support provisioning profiles — untouched.
           xcodebuild archive \
             -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             -allowProvisioningUpdates \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM=N7DBYV74D4 \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            -authenticationKeyPath $RUNNER_TEMP/asc_key.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=N7DBYV74D4
 
       - name: Export IPA
         working-directory: ios/App
         env:
-          IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          # Generate ExportOptions.plist with provisioning profile
           cat > ExportOptions.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,12 +99,7 @@ jobs:
             <key>teamID</key>
             <string>N7DBYV74D4</string>
             <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>app.cfofitness</key>
-              <string>$IOS_PROVISIONING_PROFILE_NAME</string>
-            </dict>
+            <string>automatic</string>
             <key>uploadBitcode</key>
             <false/>
             <key>uploadSymbols</key>
@@ -104,18 +112,19 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             -exportPath $RUNNER_TEMP/ipa \
-            -exportOptionsPlist ExportOptions.plist
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath $RUNNER_TEMP/asc_key.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
       - name: Upload to TestFlight
         env:
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          echo "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > $RUNNER_TEMP/asc_key.p8
           xcrun altool --upload-app \
             --type ios \
             --file "$RUNNER_TEMP/ipa/App.ipa" \
-            --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
-            --apiKeyPath "$RUNNER_TEMP/asc_key.p8"
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
