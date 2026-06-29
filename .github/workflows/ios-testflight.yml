@@ -18,6 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # App Store Connect now rejects builds made with the iOS 18.5 SDK; it
+      # requires the iOS 26 SDK (Xcode 26+). The runner defaults to an older
+      # Xcode, so pin the newest stable one before any xcodebuild step.
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show selected Xcode / SDK
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
