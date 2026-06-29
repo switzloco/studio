@@ -55,11 +55,25 @@ jobs:
           ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
         run: |
-          # xcodebuild auth (archive/export) reads this path.
-          echo "$ASC_API_KEY_BASE64" | base64 --decode > $RUNNER_TEMP/asc_key.p8
-          # altool (upload) looks for AuthKey_<id>.p8 in this well-known dir.
+          set -euo pipefail
+          KEY_OUT="$RUNNER_TEMP/asc_key.p8"
+          # The secret may hold EITHER a base64 blob of the .p8 OR the raw
+          # PEM .p8 text itself. Handle both so setup mistakes don't break CI.
+          if printf '%s' "$ASC_API_KEY_BASE64" | grep -q "BEGIN PRIVATE KEY"; then
+            printf '%s\n' "$ASC_API_KEY_BASE64" > "$KEY_OUT"
+          else
+            printf '%s' "$ASC_API_KEY_BASE64" | base64 --decode > "$KEY_OUT" 2>/dev/null || true
+          fi
+          # Validate without printing the key material.
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_OUT"; then
+            echo "::error::ASC_API_KEY_BASE64 did not decode to a valid .p8 (PEM) key. Store either the base64 of the AuthKey_XXX.p8 file, or paste the raw .p8 contents."
+            exit 1
+          fi
+          # xcodebuild auth (archive/export) reads $KEY_OUT directly; altool
+          # (upload) looks for AuthKey_<id>.p8 in this well-known directory.
           mkdir -p ~/.appstoreconnect/private_keys
-          cp $RUNNER_TEMP/asc_key.p8 ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          cp "$KEY_OUT" ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "ASC API key staged OK"
 
       - name: Build & archive
         working-directory: ios/App
