@@ -62,6 +62,8 @@ jobs:
             -archivePath $RUNNER_TEMP/App.xcarchive \
             -allowProvisioningUpdates \
             CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=N7DBYV74D4 \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}"
 
       - name: Export IPA
