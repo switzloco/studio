@@ -49,6 +49,28 @@ jobs:
           # Allow codesign/xcodebuild to use the imported key without an interactive prompt.
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
+          # Surface the imported identities so a wrong cert type (Development vs
+          # Distribution) is obvious in the log.
+          security find-identity -v -p codesigning $KEYCHAIN_PATH || true
+
+      - name: Install provisioning profile
+        env:
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          PP="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PP" 2>/dev/null || true
+          if [ ! -s "$PP" ]; then
+            echo "::error::IOS_PROVISIONING_PROFILE_BASE64 is empty or not valid base64. Store: base64 -i your_profile.mobileprovision"
+            exit 1
+          fi
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PP" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+          # Read the profile's name so we can pin it on the App target + export.
+          security cms -D -i "$PP" > "$RUNNER_TEMP/pp.plist"
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/pp.plist")"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "Installed provisioning profile: $PROFILE_NAME"
 
       - name: Prepare App Store Connect credentials
         env:
@@ -86,29 +108,38 @@ jobs:
           cp "$KEY_OUT" "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
           echo "ASC API key staged OK"
 
+      - name: Configure manual signing on the App target
+        run: |
+          set -euo pipefail
+          PBX=ios/App/App.xcodeproj/project.pbxproj
+          # App.xcodeproj contains ONLY the App target — the Capacitor SPM
+          # package targets live in separate projects — so editing signing here
+          # is safely scoped to the app and never touches the SPM targets that
+          # reject provisioning profiles. Automatic signing in headless CI keeps
+          # falling back to a *Development* profile (and tries to register the
+          # runner as a device); manual signing with the installed App Store
+          # profile is the reliable path.
+          /usr/bin/sed -i '' \
+            "s|CODE_SIGN_STYLE = Automatic;|CODE_SIGN_STYLE = Manual; DEVELOPMENT_TEAM = N7DBYV74D4; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE_SPECIFIER = \"${PROFILE_NAME}\";|g" \
+            "$PBX"
+          echo "App target signing settings:"
+          grep -n "PROVISIONING_PROFILE_SPECIFIER\|CODE_SIGN_IDENTITY\|CODE_SIGN_STYLE" "$PBX" || true
+
       - name: Build & archive
         working-directory: ios/App
         run: |
-          # Automatic signing driven by the App Store Connect API key. Xcode
-          # provisions the App target (creating/downloading a distribution
-          # profile as needed) and leaves the SPM package targets — which do
-          # NOT support provisioning profiles — untouched.
+          # Manual signing — the App target build settings (patched above) point
+          # at the installed App Store distribution profile.
           xcodebuild archive \
             -project App.xcodeproj \
             -scheme App \
             -configuration Release \
-            -archivePath $RUNNER_TEMP/App.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath $RUNNER_TEMP/asc_key.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=N7DBYV74D4
+            -archivePath $RUNNER_TEMP/App.xcarchive
 
       - name: Export IPA
         working-directory: ios/App
         run: |
-          cat > ExportOptions.plist << 'EOF'
+          cat > ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -118,7 +149,12 @@ jobs:
             <key>teamID</key>
             <string>N7DBYV74D4</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>app.cfofitness</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
             <key>uploadBitcode</key>
             <false/>
             <key>uploadSymbols</key>
@@ -131,11 +167,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             -exportPath $RUNNER_TEMP/ipa \
-            -exportOptionsPlist ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath $RUNNER_TEMP/asc_key.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            -exportOptionsPlist ExportOptions.plist
 
       - name: Upload to TestFlight
         run: |
