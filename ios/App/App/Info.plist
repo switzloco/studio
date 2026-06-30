@@ -53,5 +53,7 @@
 	<string>CFO Fitness lets you attach meal photos from your library so the coach can estimate macros.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>CFO Fitness can save meal photos to your library.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
