@@ -58,6 +58,9 @@ Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; 
 - `span.ts` — `recordReasoningSpan()` wraps deterministic logic (the VF scoring engine in `score_daily_vf`) in its own span so the inputs + scoring breakdown are inspectable next to the model's tool calls.
 - `phoenix-mcp.ts` — connects to the **Arize Phoenix MCP server** (`@arizeai/phoenix-mcp`) as a Genkit MCP client. Backs the `inspect_reasoning_trace` tool, which lets the CFO pull its own recorded traces back and explain/audit how a score was produced.
 
+### Messaging Channels (`src/lib/messaging/`, `src/app/api/webhooks/`)
+WhatsApp (Meta Cloud API) and Discord (Interactions endpoint) webhooks feed a channel-agnostic gateway (`gateway.ts`) that runs the same coaching flow, rate limits, and per-day transcript as the in-app chat. Account linking is chat-first: the in-app CFO mints a one-time code via the `create_channel_link_code` tool; the user sends `LINK <code>` from the channel. Links/codes/dedupe live in admin-only Firestore collections (`channel_links`, `channel_link_codes`, `channel_events`). Setup: `docs/MESSAGING_CHANNELS.md`.
+
 ### Firebase Integration (`src/firebase/`)
 - `sdk.ts` — Firebase SDK initialization (safe for server actions)
 - `provider.tsx` — React Context with auth state
@@ -78,6 +81,8 @@ Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; 
 - `PHOENIX_COLLECTOR_ENDPOINT` — Phoenix OTLP base URL (default `https://app.phoenix.arize.com`; self-hosted `http://localhost:6006`)
 - `PHOENIX_API_KEY` — Phoenix Cloud API key (required when `PHOENIX_ENABLED=true`)
 - `PHOENIX_PROJECT_NAME` / `PHOENIX_CLIENT_HEADERS` — optional Phoenix project name and extra OTLP headers
+- `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` / `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` — WhatsApp channel (optional; webhook returns 503 when unset)
+- `DISCORD_PUBLIC_KEY` — Discord interactions endpoint (optional; webhook returns 503 when unset)
 - Firebase config is read from `NEXT_PUBLIC_FIREBASE_*` env vars in `src/firebase/config.ts`
 
 ### Build Notes
