@@ -24,9 +24,17 @@ const LIMITS: Record<RateLimitBucket, BucketConfig> = {
     hour:   { max: 30,  windowMs: 60 * 60_000 },
     day:    { max: 100, windowMs: 24 * 60 * 60_000 },
   },
+  // Messages from a channel identity (phone number / Discord user) that isn't
+  // linked to a ledger yet — no uid to key the 'chat' bucket on, and this is
+  // the path a stranger uses to brute-force a LINK code, so it's kept tight.
+  channelLink: {
+    minute: { max: 5,  windowMs: 60_000 },
+    hour:   { max: 15, windowMs: 60 * 60_000 },
+    day:    { max: 30, windowMs: 24 * 60 * 60_000 },
+  },
 };
 
-export type RateLimitBucket = 'chat' | 'transcribe';
+export type RateLimitBucket = 'chat' | 'transcribe' | 'channelLink';
 export type RateLimitScope = 'minute' | 'hour' | 'day';
 
 export type RateLimitResult =

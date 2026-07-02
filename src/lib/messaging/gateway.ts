@@ -55,6 +55,19 @@ function notLinkedReply(channel: MessagingChannel): string {
 export async function handleInboundChannelMessage(msg: InboundChannelMessage): Promise<string> {
   const { channel, externalUserId } = msg;
   try {
+    // Resolve the link FIRST so we know whether this identity is already
+    // trusted. An unlinked identity is a stranger on the public WhatsApp
+    // number / Discord command — throttle it hard before touching link
+    // codes or Firestore any further, so LINK-code guessing and general
+    // spam to an unlinked identity can't run unbounded.
+    const existingLink = await getChannelLink(channel, externalUserId);
+    if (!existingLink) {
+      const preLinkLimit = await checkRateLimit(`${channel}:${externalUserId}`, 'channelLink');
+      if (!preLinkLimit.ok) {
+        return `Too many attempts. Try again in ${preLinkLimit.retryAfter}s.`;
+      }
+    }
+
     const command = parseChannelCommand(msg.text);
 
     if (command.kind === 'link') {
@@ -76,10 +89,9 @@ export async function handleInboundChannelMessage(msg: InboundChannelMessage): P
         : notLinkedReply(channel);
     }
 
-    const link = await getChannelLink(channel, externalUserId);
-    if (!link) return notLinkedReply(channel);
+    if (!existingLink) return notLinkedReply(channel);
 
-    return await runCoachingTurn(link, msg.text, msg.displayName);
+    return await runCoachingTurn(existingLink, msg.text, msg.displayName);
   } catch (error: unknown) {
     const detail = (error as Error)?.message ?? String(error);
     console.error(`[MessagingGateway] ${channel}:${externalUserId} failed:`, detail);
