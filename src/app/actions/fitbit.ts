@@ -2,7 +2,11 @@
 
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { syncFitbitData as _syncFitbitData, syncFitbitSnapshot as _syncFitbitSnapshot } from '@/lib/fitbit-sync';
+import {
+  syncFitbitData as _syncFitbitData,
+  syncFitbitSnapshot as _syncFitbitSnapshot,
+  refreshStalePastSnapshots as _refreshStalePastSnapshots,
+} from '@/lib/fitbit-sync';
 import { fitbitService } from '@/lib/fitbit-service';
 import type { SyncResult } from '@/lib/fitbit-sync';
 
@@ -15,6 +19,19 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
 /** Syncs a specific past date — snapshot only, never overwrites today's live metrics. */
 export async function syncFitbitSnapshot(userId: string, date: string, timezoneOffset?: number): Promise<SyncResult> {
   return _syncFitbitSnapshot(userId, date, timezoneOffset);
+}
+
+/**
+ * Re-pulls recent past days whose device snapshot is partial/missing and
+ * rewrites their (provisional) scores — the automatic equivalent of pressing
+ * "Sync Date" on each stale day.
+ */
+export async function refreshStalePastSnapshots(
+  userId: string,
+  localDate: string,
+  timezoneOffset?: number,
+): Promise<{ ok: boolean; refreshed: number }> {
+  return _refreshStalePastSnapshots(userId, localDate, timezoneOffset);
 }
 
 /**

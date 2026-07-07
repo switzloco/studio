@@ -685,6 +685,8 @@ export const fitbitService = {
             recoveryStatus: r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low',
             caloriesOut:  r.caloriesOut?.value,
             activities:   r.activities,
+            // Captured today; for i>0 (past days) this makes the snapshot final.
+            capturedOnDate: todayStr,
           };
           if (i === 0) latestResult = r;
         } catch (dayErr) {

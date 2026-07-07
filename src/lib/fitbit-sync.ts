@@ -219,9 +219,13 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
   }
 
   // Build the daily snapshot for historical lookups (steps/HRV visible on past days).
+  // `today` is the local date this snapshot represents AND the date it was captured
+  // on — this is a live same-day sync, so caloriesOut is inherently partial until
+  // the day is finalised on a later sync (see refreshStalePastSnapshots).
   const dailySnapshot: import('./health-service').FitbitDailySnapshot = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
+    capturedOnDate: today,
   };
   if (hrv > 0) {
     dailySnapshot.hrv = hrv;
@@ -371,10 +375,16 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   }
   if (!result.success) return { success: false, reason: 'api_failed' };
 
+  // Local date this snapshot is being captured on. When it is later than the
+  // date being synced, the snapshot represents a completed day → final.
+  const capturedLocal = new Date(Date.now() - ((finalOffset || 0) * 60000));
+  const capturedOnDate = capturedLocal.toISOString().split('T')[0];
+
   const hrv = result.hrv.value;
   const snapshot: import('./health-service').FitbitDailySnapshot = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
+    capturedOnDate,
   };
   if (hrv > 0) {
     snapshot.hrv = hrv;
@@ -486,4 +496,91 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   }
 
   return { success: true };
+}
+
+function addDaysIso(iso: string, delta: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Decide whether a scored past day's device snapshot needs a fresh pull.
+ *
+ * A snapshot is stale when its caloriesOut can't be trusted as the finalised
+ * full-day burn:
+ *   • missing entirely  → the score used a BMR estimate,
+ *   • no caloriesOut    → same, effectively estimated,
+ *   • capturedOnDate ≤ date → captured mid-day, so burn is partial,
+ *   • legacy (no capturedOnDate) → unknown; only refreshed for the most recent
+ *     `legacyWindowDays` days to self-heal recent partials without re-pulling
+ *     the entire history every session.
+ */
+function isSnapshotStale(
+  date: string,
+  snap: import('./health-service').FitbitDailySnapshot | undefined,
+  legacyCutoffDate: string,
+): boolean {
+  if (!snap) return true;
+  if (snap.caloriesOut == null) return true;
+  if (snap.capturedOnDate) return snap.capturedOnDate <= date;
+  // Legacy snapshot with no capture metadata — only refresh recent days.
+  return date >= legacyCutoffDate;
+}
+
+/**
+ * Auto-finalise recent past days whose device snapshot is partial or missing.
+ *
+ * Walks the last `windowDays` days, and for each day that already carries a
+ * score in history but whose snapshot isn't a trustworthy full-day burn,
+ * re-pulls it via {@link syncFitbitSnapshot} — which fetches the finalised
+ * caloriesOut AND rewrites that day's stored score (and cascades equity). This
+ * removes the need to press "Sync Date" by hand to correct a provisional score.
+ *
+ * Runs sequentially to avoid concurrent token-refresh races, and only touches
+ * days that have a history entry so it never calls Fitbit for days the user
+ * never logged.
+ */
+export async function refreshStalePastSnapshots(
+  userId: string,
+  localDate: string,
+  timezoneOffset?: number,
+  windowDays = 7,
+): Promise<{ ok: boolean; refreshed: number }> {
+  const firestore = getAdminFirestore();
+
+  const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
+  if (!creds) return { ok: false, refreshed: 0 };
+
+  const health = await adminHealthService.getHealthSummary(firestore, userId);
+  const history = health?.history ?? [];
+  if (history.length === 0) return { ok: true, refreshed: 0 };
+
+  const fitbitByDate = health?.fitbitByDate ?? {};
+  const legacyCutoffDate = addDaysIso(localDate, -3); // legacy snapshots: last 3 days only
+  const windowStart = addDaysIso(localDate, -windowDays);
+
+  // Scored past days (exclude today) that fall inside the window, newest first
+  // so the most-relevant recent days are corrected even if we hit an error.
+  const staleDates = history
+    .map((h) => h.isoDate)
+    .filter((d): d is string => !!d && d < localDate && d >= windowStart)
+    .filter((d) => isSnapshotStale(d, fitbitByDate[d], legacyCutoffDate))
+    .sort((a, b) => b.localeCompare(a));
+
+  if (staleDates.length === 0) return { ok: true, refreshed: 0 };
+
+  let refreshed = 0;
+  for (const date of staleDates) {
+    try {
+      const res = await syncFitbitSnapshot(userId, date, timezoneOffset);
+      if (res.success) refreshed++;
+    } catch (err) {
+      console.error(`[refreshStalePastSnapshots] Failed to refresh ${date}:`, err);
+    }
+  }
+
+  console.log(`[refreshStalePastSnapshots] Refreshed ${refreshed}/${staleDates.length} stale day(s) for ${userId}.`);
+  return { ok: true, refreshed };
 }

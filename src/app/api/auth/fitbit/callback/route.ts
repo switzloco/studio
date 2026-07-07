@@ -147,6 +147,7 @@ export async function GET(request: NextRequest) {
         const snapshot: import('@/lib/health-service').FitbitDailySnapshot = {
           steps: syncResult.steps.value,
           sleepHours: syncResult.sleep.value,
+          capturedOnDate: new Date().toISOString().split('T')[0],
         };
         if (syncResult.hrv.value > 0) {
           snapshot.hrv = syncResult.hrv.value;

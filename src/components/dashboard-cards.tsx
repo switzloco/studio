@@ -444,6 +444,15 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && (data && !data.isDeviceVerified);
 
+  // A stored past-day score is provisional when its calorie burn wasn't a
+  // finalised full-day device reading: either it was BMR-estimated (no device
+  // data), or the snapshot was captured mid-day (capturedOnDate is that same
+  // day, so caloriesOut is partial). Pressing "Sync Date" finalises it.
+  const pastScoreProvisional = !isViewingToday && !!data.isDeviceVerified && !!historyEntry && (
+    historyEntry.breakdown?.caloriesOutEstimated === true ||
+    (!!fitbitForDate?.capturedOnDate && fitbitForDate.capturedOnDate <= selectedDateStr)
+  );
+
   const handleConnectFitbit = async (provider: 'fitbit' | 'google' = 'fitbit') => {
     if (!user) return;
 
@@ -956,7 +965,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
               <div className="flex items-end gap-3 mb-4">
                 <div className="text-6xl font-black italic tracking-tighter">
                   {dailyAlpertScore !== null ? (
-                    <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending) && <span className="text-2xl opacity-60">*</span>}</>
+                    <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && <span className="text-2xl opacity-60">*</span>}</>
                   ) : '—'}
                 </div>
                 <div className="text-sm font-bold opacity-60 mb-2">pts</div>
@@ -971,11 +980,12 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 <span>Max burn: {alpertNumber.toLocaleString()} kcal</span>
               </div>
             </div>
-            {(scoreHasFoodPending || scoreHasDevicePending) && (
+            {(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && (
               <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2">
                 <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
-                  {scoreHasFoodPending && scoreHasDevicePending ? 'Pending food log + device sync' :
+                  {pastScoreProvisional ? 'Provisional — burn estimated. Press “Sync Date” to finalize.' :
+                   scoreHasFoodPending && scoreHasDevicePending ? 'Pending food log + device sync' :
                    scoreHasFoodPending ? 'Pending food log' : 'Pending device sync — burn estimated'}
                 </p>
               </div>

@@ -82,6 +82,15 @@ export interface FitbitDailySnapshot {
   caloriesOut?: number;
   /** Auto-detected workouts from Fitbit's activity log for this day. */
   activities?: FitbitActivity[];
+  /**
+   * Local date (YYYY-MM-DD) on which this snapshot was written. A snapshot for
+   * date D is FINAL only when capturedOnDate > D — i.e. it was pulled after the
+   * day was over, so caloriesOut reflects the complete 24h burn. When
+   * capturedOnDate <= D the snapshot was captured mid-day and its caloriesOut is
+   * partial, so the day's score is provisional until re-synced. Absent on
+   * legacy snapshots written before this field existed.
+   */
+  capturedOnDate?: string;
 }
 
 export interface HealthData {

@@ -21,7 +21,7 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData } from '@/lib/health-service';
-import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory } from '@/app/actions/fitbit';
+import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
 
@@ -147,7 +147,30 @@ export default function Home() {
     if (!user || !healthData || hasBackfilledScores.current) return;
     hasBackfilledScores.current = true;
     const localDate = new Date().toLocaleDateString('en-CA');
-    backfillScoreHistory(user.uid, localDate, 90).catch(e => console.error('[BackfillScores] Failed:', e));
+    const tz = new Date().getTimezoneOffset();
+    // For Fitbit/Google users, first finalise any recent past days whose snapshot
+    // was captured mid-day (partial burn) so the corrected device burn is written
+    // to history BEFORE the equity recompute reads it. Ordering matters here:
+    // backfillScoreHistory scores from the stored per-day snapshots, so a stale
+    // snapshot would otherwise re-freeze the low provisional score.
+    const isFitbitLike =
+      healthData.isDeviceVerified &&
+      healthData.connectedDevice !== 'oura' &&
+      healthData.connectedDevice !== 'withings';
+    (async () => {
+      if (isFitbitLike) {
+        try {
+          await refreshStalePastSnapshots(user.uid, localDate, tz);
+        } catch (e) {
+          console.error('[RefreshStaleSnapshots] Failed:', e);
+        }
+      }
+      try {
+        await backfillScoreHistory(user.uid, localDate, 90);
+      } catch (e) {
+        console.error('[BackfillScores] Failed:', e);
+      }
+    })();
   }, [user, healthData]);
 
   // Persist active tab across page reloads (prevents native PTR from resetting to 'chat').

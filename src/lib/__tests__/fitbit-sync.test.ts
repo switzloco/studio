@@ -111,6 +111,7 @@ describe('syncFitbitSnapshot score recalculation', () => {
         hrv: 45,
         recoveryStatus: 'medium',
         caloriesOut: 2700, // 3000 * 0.9
+        capturedOnDate: expect.any(String),
       }
     );
 
@@ -238,6 +239,7 @@ describe('syncFitbitSnapshot score recalculation', () => {
         hrv: 60,
         recoveryStatus: 'high',
         caloriesOut: 2970, // 3300 * 0.9
+        capturedOnDate: expect.any(String),
       }
     );
 
