@@ -67,6 +67,10 @@ export default function Home() {
   const hasSyncedFitbit = useRef(false);
   const hasBackfilledFitbit = useRef(false);
   const hasBackfilledScores = useRef(false);
+  // Guards for the foreground auto-sync: prevent overlapping syncs and avoid
+  // re-hitting the server action on every rapid focus/blur toggle.
+  const autoSyncInFlight = useRef(false);
+  const lastAutoSyncCheckAt = useRef(0);
 
   // Pull-to-refresh state (Today tab)
   const [pullDistance, setPullDistance] = useState(0);
@@ -95,37 +99,64 @@ export default function Home() {
     }
   }, [user, db]);
 
-  // Sync device data on load if the last sync was more than 6 hours ago
-  // (or if we've never synced). Runs once per session.
-  useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || hasSyncedFitbit.current) return;
-    
-    // Skip if it's Oura (they use different patterns/background tasks usually)
-    // Actually, let's just focus on Fitbit and Withings which we manage here.
+  // Silently syncs device data when the last sync is stale (>6h). Shared by the
+  // on-load effect and the app-foreground listener below, so simply reopening
+  // the app refreshes the data — the user no longer has to tap "Sync Now" daily.
+  // Oura and Google Health manage their own refresh paths and are skipped here.
+  const autoSyncIfStale = useCallback(async () => {
+    if (!user || !healthData?.isDeviceVerified) return;
     if (healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google') return;
-    hasSyncedFitbit.current = true;
-
-    (async () => {
-      try {
-        const lastSynced = await getFitbitLastSyncedAt(user.uid);
-        const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
-        if (stale) {
-          const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
-          
-          if (healthData?.connectedDevice === 'withings') {
-            await syncWithingsData(user.uid, localDate);
-          } else {
-            const result = await syncFitbitData(user.uid, localDate);
-            if (!result.success && result.reason === 'token_refresh_failed') {
-              console.warn('[AutoSync] Fitbit/Google Health token refresh failed silently.');
-            }
+    if (autoSyncInFlight.current) return;
+    // Client-side throttle so rapid focus/blur toggles don't re-hit the server
+    // action; the 6h staleness gate below is the real guard against syncing.
+    if (Date.now() - lastAutoSyncCheckAt.current < 60 * 1000) return;
+    lastAutoSyncCheckAt.current = Date.now();
+    autoSyncInFlight.current = true;
+    try {
+      const lastSynced = await getFitbitLastSyncedAt(user.uid);
+      const stale = !lastSynced || Date.now() - lastSynced >= SYNC_INTERVAL_MS;
+      if (stale) {
+        const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local TZ
+        if (healthData?.connectedDevice === 'withings') {
+          await syncWithingsData(user.uid, localDate);
+        } else {
+          const result = await syncFitbitData(user.uid, localDate);
+          if (!result.success && result.reason === 'token_refresh_failed') {
+            console.warn('[AutoSync] Fitbit/Google Health token refresh failed silently.');
           }
         }
-      } catch (e) {
-        console.error('[AutoSync] Failed:', e);
       }
-    })();
-  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice, toast]);
+    } catch (e) {
+      console.error('[AutoSync] Failed:', e);
+    } finally {
+      autoSyncInFlight.current = false;
+    }
+  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice]);
+
+  // Sync device data on first load if stale (or never synced). Once per session.
+  useEffect(() => {
+    if (hasSyncedFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified) return;
+    if (healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google') return;
+    hasSyncedFitbit.current = true;
+    autoSyncIfStale();
+  }, [user, healthData?.isDeviceVerified, healthData?.connectedDevice, autoSyncIfStale]);
+
+  // Re-sync when the app returns to the foreground (tab focus / PWA resume).
+  // The once-per-session on-load effect never re-fires for a PWA kept in memory,
+  // so without this the data silently goes stale and the user has to tap "Sync
+  // Now" every day. The staleness + throttle guards keep this near-free.
+  useEffect(() => {
+    const onForeground = () => {
+      if (document.visibilityState === 'visible') autoSyncIfStale();
+    };
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('focus', onForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('focus', onForeground);
+    };
+  }, [autoSyncIfStale]);
 
   // Backfill historical Fitbit snapshots once per session if yesterday is missing.
   // Silently fires in the background — no toast, no spinner.
