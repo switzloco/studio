@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { doc } from 'firebase/firestore';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { healthService, HealthData, CampaignBriefDoc } from '@/lib/health-service';
@@ -8,10 +8,13 @@ import { getDailyCampaignBrief } from '@/app/actions/campaign';
 import { defaultCharacterSheet, CharacterSheet } from '@/lib/campaign/types';
 import { LEVELS, getLevelDef } from '@/lib/campaign/roadmap';
 import { getItemDef } from '@/lib/campaign/items';
+import { REALM_LORE } from '@/lib/campaign/lore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import {
   Crown,
   Scroll,
@@ -23,7 +26,10 @@ import {
   Gem,
   BookOpen,
   Trophy,
+  Volume2,
+  Pause,
 } from 'lucide-react';
+import { getCampaignBriefAudio } from '@/app/actions/campaign-tts';
 
 const RELIC_GATES = Array.from(
   new Map(LEVELS.filter((l) => l.relic_gate).map((l) => [l.relic_gate!.relic_id, l.relic_gate!])).values(),
@@ -93,6 +99,47 @@ export function CampaignView() {
     healthService.getRecentCampaignBriefs(db, user.uid, 10).then(setRecentBriefs).catch(() => {});
   }, [user, db]);
 
+  // Narration: synthesized on click, cached per isoDate for the session so
+  // replaying (or reopening the card) doesn't re-bill Cloud Text-to-Speech.
+  const audioCacheRef = useRef<Record<string, string>>({});
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+
+  const handleToggleListen = async () => {
+    if (!user) return;
+    const audioEl = audioElRef.current;
+    if (audioEl && isPlaying) {
+      audioEl.pause();
+      setIsPlaying(false);
+      return;
+    }
+    if (audioEl && audioCacheRef.current[localDate]) {
+      audioEl.play();
+      setIsPlaying(true);
+      return;
+    }
+
+    setAudioError(null);
+    setIsSynthesizing(true);
+    try {
+      const res = await getCampaignBriefAudio(user.uid, localDate);
+      if (!res.success) {
+        setAudioError(res.error);
+        return;
+      }
+      audioCacheRef.current[localDate] = res.audioBase64;
+      const audio = new Audio(`data:audio/mp3;base64,${res.audioBase64}`);
+      audio.onended = () => setIsPlaying(false);
+      audioElRef.current = audio;
+      await audio.play();
+      setIsPlaying(true);
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
+
   if (!sheet) return <CampaignSkeleton />;
 
   const level = sheet.status === 'Leveling' ? getLevelDef(sheet.current_level) : null;
@@ -117,6 +164,30 @@ export function CampaignView() {
             {sheet.status === 'Legend' ? <Crown className="w-6 h-6 text-amber-400" /> : <Scroll className="w-6 h-6 text-amber-400" />}
           </div>
         </div>
+
+        {/* Realm Lore primer — static prologue, collapsed by default */}
+        <Card className="border border-amber-500/20 bg-black/30 backdrop-blur-sm">
+          <Accordion type="single" collapsible>
+            <AccordionItem value="lore" className="border-none">
+              <AccordionTrigger className="px-6 py-4 text-[11px] font-black uppercase text-amber-400/70 tracking-widest hover:no-underline">
+                <span className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4" />
+                  {REALM_LORE.title}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-6 space-y-4">
+                {REALM_LORE.sections.map((section) => (
+                  <div key={section.heading}>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-400/50 mb-1">{section.heading}</p>
+                    <p className="text-[13px] leading-relaxed text-amber-50/80" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                      {section.body}
+                    </p>
+                  </div>
+                ))}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </Card>
 
         {/* Hero card: level / reign status */}
         <Card className="border border-amber-500/30 bg-black/40 backdrop-blur-sm shadow-[0_0_40px_-12px_rgba(217,160,60,0.35)] overflow-hidden">
@@ -192,11 +263,31 @@ export function CampaignView() {
 
         {/* Daily Brief */}
         <Card className="border border-amber-500/20 bg-black/30 backdrop-blur-sm">
-          <CardHeader className="p-6 pb-3">
+          <CardHeader className="p-6 pb-3 flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[11px] font-black uppercase text-amber-400/70 flex items-center gap-2 tracking-widest">
               <Scroll className="w-4 h-4" />
               Today&apos;s Chronicle Entry
             </CardTitle>
+            {!briefLoading && !briefError && brief && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleToggleListen}
+                disabled={isSynthesizing}
+                className="h-7 px-2.5 text-amber-300 hover:text-amber-100 hover:bg-amber-500/10 gap-1.5"
+              >
+                {isSynthesizing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : isPlaying ? (
+                  <Pause className="w-3.5 h-3.5" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5" />
+                )}
+                <span className="text-[9px] font-black uppercase tracking-widest">
+                  {isSynthesizing ? 'Narrating...' : isPlaying ? 'Pause' : 'Listen'}
+                </span>
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="p-6 pt-0">
             {briefLoading ? (
@@ -207,9 +298,12 @@ export function CampaignView() {
             ) : briefError ? (
               <p className="text-sm text-red-300/80">{briefError}</p>
             ) : (
-              <p className="text-[15px] leading-relaxed text-amber-50/90 whitespace-pre-wrap" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>
-                {brief}
-              </p>
+              <>
+                <p className="text-[15px] leading-relaxed text-amber-50/90 whitespace-pre-wrap" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                  {brief}
+                </p>
+                {audioError && <p className="text-[11px] text-red-300/70 mt-3">{audioError}</p>}
+              </>
             )}
           </CardContent>
         </Card>
