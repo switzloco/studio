@@ -3,3 +3,4 @@ config();
 
 import '@/ai/flows/personalized-ai-coaching.ts';
 import '@/ai/flows/share-ingestion.ts';
+import '@/ai/flows/campaign-brief.ts';

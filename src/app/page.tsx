@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw, Settings } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw, Settings, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,7 +20,7 @@ import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWi
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
-import { healthService, HealthData } from '@/lib/health-service';
+import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
@@ -42,6 +42,10 @@ const PreferencesView = dynamic(() => import('@/components/preferences-view').th
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
 const AboutView = dynamic(() => import('@/components/about-view').then(m => ({ default: m.AboutView })), {
+  ssr: false,
+  loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
+});
+const CampaignView = dynamic(() => import('@/components/campaign-view').then(m => ({ default: m.CampaignView })), {
   ssr: false,
   loading: () => <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>,
 });
@@ -87,6 +91,10 @@ export default function Home() {
 
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
+
+  const prefsDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
+  const { data: prefsData } = useDoc<UserPreferences>(prefsDocRef);
+  const campaignModeEnabled = prefsData?.campaignModeEnabled ?? false;
 
   useEffect(() => {
     if (user && db) {
@@ -176,7 +184,7 @@ export default function Home() {
   // Persist active tab across page reloads (prevents native PTR from resetting to 'chat').
   useEffect(() => {
     const saved = sessionStorage.getItem('cfo_activeTab');
-    if (saved && ['chat', 'daily', 'history', 'assets', 'about'].includes(saved)) {
+    if (saved && ['chat', 'daily', 'history', 'campaign', 'assets', 'about'].includes(saved)) {
       setActiveTab(saved);
     }
 
@@ -196,6 +204,13 @@ export default function Home() {
     setActiveTab(tab);
     sessionStorage.setItem('cfo_activeTab', tab);
   }, []);
+
+  // If Campaign Mode gets disabled while its tab is open, fall back to Coach.
+  useEffect(() => {
+    if (activeTab === 'campaign' && !campaignModeEnabled) {
+      setActiveTab('chat');
+    }
+  }, [activeTab, campaignModeEnabled]);
 
   // Keep the ref in sync so PTR handlers always see the latest value.
   useEffect(() => { isPullRefreshingRef.current = isPullRefreshing; }, [isPullRefreshing]);
@@ -524,6 +539,11 @@ export default function Home() {
                 <HistoryView />
               </div>
             )}
+            {activeTab === 'campaign' && campaignModeEnabled && (
+              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+                <CampaignView />
+              </div>
+            )}
             {activeTab === 'assets' && (
               <div className="h-full w-full absolute inset-0 overflow-y-auto">
                 <PreferencesView />
@@ -536,7 +556,7 @@ export default function Home() {
             )}
           </div>
 
-          <TabsList className="grid grid-cols-5 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
+          <TabsList className={`grid ${campaignModeEnabled ? 'grid-cols-6' : 'grid-cols-5'} h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0`}>
             <TabsTrigger value="chat" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <MessageSquare className="w-5 h-5" />
               <span className="text-[9px] font-black uppercase tracking-widest">Coach</span>
@@ -549,6 +569,12 @@ export default function Home() {
               <History className="w-5 h-5" />
               <span className="text-[9px] font-black uppercase tracking-widest">Ledger</span>
             </TabsTrigger>
+            {campaignModeEnabled && (
+              <TabsTrigger value="campaign" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+                <Crown className="w-5 h-5" />
+                <span className="text-[9px] font-black uppercase tracking-widest">Campaign</span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
               <Settings className="w-5 h-5" />
               <span className="text-[9px] font-black uppercase tracking-widest">Settings</span>

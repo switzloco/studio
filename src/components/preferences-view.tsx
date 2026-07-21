@@ -499,6 +499,19 @@ export function PreferencesView() {
                   onCheckedChange={(checked) => setPrefs({ ...prefs, preachyMode: checked })}
                 />
               </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Campaign Mode <span className="text-muted-foreground/50">(experimental)</span></p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Adds a persistent RPG tab that turns your daily progress into a 20-level narrative campaign
+                  </p>
+                </div>
+                <Switch
+                  checked={prefs.campaignModeEnabled ?? false}
+                  onCheckedChange={(checked) => setPrefs({ ...prefs, campaignModeEnabled: checked })}
+                />
+              </div>
             </CardContent>
           </Card>
 

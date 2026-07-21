@@ -1,6 +1,8 @@
 
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, where, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp, deleteDoc } from 'firebase/firestore';
 import type { FoodLogEntry, ExerciseLogEntry, UserProfile } from './food-exercise-types';
+import type { CharacterSheet } from './campaign/types';
+import { defaultCharacterSheet } from './campaign/types';
 
 /**
  * @fileOverview Health service for managing fitness portfolio data in Firestore.
@@ -171,6 +173,15 @@ export interface UserPreferences {
    *  desserts. Default true (= classic CFO behavior). */
   preachyMode?: boolean;
   display?: DisplayPreferences;
+  /** Enables the experimental Campaign Mode tab. Default false. */
+  campaignModeEnabled?: boolean;
+}
+
+/** A cached, generated Daily Brief — one per calendar day, doc ID == isoDate. */
+export interface CampaignBriefDoc {
+  isoDate: string;
+  text: string;
+  generatedAt?: FieldValue | Timestamp;
 }
 
 export interface FitbitCredentials {
@@ -384,5 +395,36 @@ export const healthService = {
     return snapshot.docs
       .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
       .filter(e => !e.ignored);
-  }
+  },
+
+  // --- Campaign Mode (persistent RPG Character Sheet) ---
+
+  async getCampaignState(db: Firestore, userId: string): Promise<CharacterSheet> {
+    const docRef = doc(db, 'users', userId, 'campaign', 'state');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) return docSnap.data() as CharacterSheet;
+
+    const defaults = defaultCharacterSheet(new Date().toISOString().split('T')[0]);
+    await setDoc(docRef, defaults, { merge: true });
+    return defaults;
+  },
+
+  async updateCampaignState(db: Firestore, userId: string, updates: Partial<CharacterSheet>): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'campaign', 'state');
+    await setDoc(docRef, { ...updates, updatedAt: serverTimestamp() }, { merge: true });
+  },
+
+  async getCampaignBrief(db: Firestore, userId: string, isoDate: string): Promise<CampaignBriefDoc | null> {
+    const docRef = doc(db, 'users', userId, 'campaign_briefs', isoDate);
+    const snap = await getDoc(docRef);
+    return snap.exists() ? (snap.data() as CampaignBriefDoc) : null;
+  },
+
+  /** Recent Daily Briefs, newest first — powers the "story so far" scrollback. */
+  async getRecentCampaignBriefs(db: Firestore, userId: string, limitCount: number = 14): Promise<CampaignBriefDoc[]> {
+    const ref = collection(db, 'users', userId, 'campaign_briefs');
+    const q = query(ref, orderBy('isoDate', 'desc'), limit(limitCount));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => d.data() as CampaignBriefDoc);
+  },
 };

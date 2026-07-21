@@ -30,6 +30,12 @@ service cloud.firestore {
       match /chat_sessions/{chatId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
+      match /campaign/{docId} {
+        allow get, list, create, update, delete: if isOwner(userId);
+      }
+      match /campaign_briefs/{isoDate} {
+        allow get, list, create, update, delete: if isOwner(userId);
+      }
       match /shared_data/{entryId} {
         allow get, list, create, update, delete: if isOwner(userId);
       }
