@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { defaultCharacterSheet, CharacterSheet } from '../types';
-import { applyDailyProgress, getCatchupDates } from '../engine';
+import { applyDailyProgress, getCatchupDates, replayHistoryToSheet } from '../engine';
 import { getLevelDef } from '../roadmap';
 
 function apply(sheet: CharacterSheet, isoDate: string, rawScore: number, todayIso = isoDate, extra: Partial<{ weightKg: number; bodyFatPct: number }> = {}) {
@@ -157,3 +157,39 @@ describe('applyDailyProgress — Legend endgame', () => {
     expect(sheet.legend!.realm_stability).toBeGreaterThan(erodedStability);
   });
 });
+
+describe('replayHistoryToSheet — bulk catch-up', () => {
+  it('returns default sheet when given empty history', () => {
+    const { sheet, daysReplayed } = replayHistoryToSheet({ history: [], realTodayIso: '2026-06-01' });
+    expect(daysReplayed).toBe(0);
+    expect(sheet.current_level).toBe(1);
+    expect(sheet.lifetime_points).toBe(0);
+  });
+
+  it('skips entries missing isoDate', () => {
+    const history = [
+      { date: 'Jan 1', gain: 500 },
+      { isoDate: '2026-01-02', gain: 500 },
+    ];
+    const { daysReplayed, sheet } = replayHistoryToSheet({ history, realTodayIso: '2026-01-02' });
+    expect(daysReplayed).toBe(1);
+    expect(sheet.lifetime_points).toBe(500);
+  });
+
+  it('chronologically sorts and replays scores to advance levels', () => {
+    const history = [];
+    const startDate = new Date('2026-01-01T00:00:00Z');
+    for (let i = 0; i < 60; i++) {
+      const d = new Date(startDate.getTime() + i * 86400000);
+      const isoDate = d.toISOString().split('T')[0];
+      history.push({ isoDate, gain: 100 });
+    }
+
+    const { sheet, daysReplayed } = replayHistoryToSheet({ history, realTodayIso: '2026-03-01' });
+    expect(daysReplayed).toBe(60);
+    expect(sheet.lifetime_points).toBe(6000);
+    expect(sheet.current_level).toBeGreaterThan(1);
+    expect(sheet.chronicle.some((c) => c.kind === 'level_up')).toBe(true);
+  });
+});
+

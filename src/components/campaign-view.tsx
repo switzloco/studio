@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { doc } from 'firebase/firestore';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { healthService, HealthData, CampaignBriefDoc } from '@/lib/health-service';
-import { getDailyCampaignBrief } from '@/app/actions/campaign';
+import { getDailyCampaignBrief, backfillCampaignFromHistory } from '@/app/actions/campaign';
 import { defaultCharacterSheet, CharacterSheet } from '@/lib/campaign/types';
 import { LEVELS, getLevelDef } from '@/lib/campaign/roadmap';
 import { getItemDef } from '@/lib/campaign/items';
@@ -140,6 +140,25 @@ export function CampaignView() {
     }
   };
 
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+
+  const handleBackfill = async () => {
+    if (!user) return;
+    setBackfillLoading(true);
+    setBackfillError(null);
+    try {
+      const res = await backfillCampaignFromHistory(user.uid);
+      if (!res.success) {
+        setBackfillError(res.error);
+      }
+    } catch (err: any) {
+      setBackfillError(err?.message ?? 'Failed to catch up campaign');
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
+
   if (!sheet) return <CampaignSkeleton />;
 
   const level = sheet.status === 'Leveling' ? getLevelDef(sheet.current_level) : null;
@@ -148,6 +167,9 @@ export function CampaignView() {
 
   const weightLbs = healthData?.weightKg != null ? healthData.weightKg * 2.20462 : undefined;
   const bodyFatPct = healthData?.bodyFatPct;
+
+  const historyCount = healthData?.history?.length ?? 0;
+  const needsBackfill = sheet.status === 'Leveling' && (sheet.lifetime_points < 1000 || sheet.current_level === 1);
 
   return (
     <div className="min-h-full bg-gradient-to-b from-[#180f2e] via-[#130b24] to-[#0a0714] text-amber-50">
@@ -160,8 +182,23 @@ export function CampaignView() {
               {sheet.status === 'Legend' ? 'The Long Reign' : sheet.active_story_arc.title}
             </h2>
           </div>
-          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
-            {sheet.status === 'Legend' ? <Crown className="w-6 h-6 text-amber-400" /> : <Scroll className="w-6 h-6 text-amber-400" />}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleBackfill}
+              disabled={backfillLoading}
+              title="Replay historical scores to catch up your campaign level"
+              className="px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 rounded-xl text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50 shadow-md shadow-amber-500/10"
+            >
+              {backfillLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              <span>Catch Up History</span>
+            </button>
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+              {sheet.status === 'Legend' ? <Crown className="w-6 h-6 text-amber-400" /> : <Scroll className="w-6 h-6 text-amber-400" />}
+            </div>
           </div>
         </div>
 
@@ -188,6 +225,47 @@ export function CampaignView() {
             </AccordionItem>
           </Accordion>
         </Card>
+
+        {/* Catch-Up Banner */}
+        {needsBackfill && (
+          <Card className="bg-gradient-to-r from-amber-950/80 via-purple-950/80 to-slate-900/90 border-amber-500/50 shadow-xl overflow-hidden backdrop-blur-md">
+            <CardContent className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-amber-500/20 border border-amber-500/40 rounded-2xl shrink-0">
+                  <Trophy className="w-7 h-7 text-amber-300 animate-bounce" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-bold text-amber-200">Catch Up Your Campaign Progress!</h3>
+                  <p className="text-xs text-amber-100/70 leading-relaxed max-w-md">
+                    Replay your past recorded workouts, protein targets, and metabolic scores from your fitness history to claim your levels!
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleBackfill}
+                disabled={backfillLoading}
+                className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-500/20 transition-all transform active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+              >
+                {backfillLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Replaying History...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Claim My History</span>
+                  </>
+                )}
+              </button>
+            </CardContent>
+            {backfillError && (
+              <div className="bg-red-500/20 border-t border-red-500/30 px-6 py-2 text-xs text-red-300">
+                {backfillError}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Hero card: level / reign status */}
         <Card className="border border-amber-500/30 bg-black/40 backdrop-blur-sm shadow-[0_0_40px_-12px_rgba(217,160,60,0.35)] overflow-hidden">

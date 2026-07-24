@@ -26,6 +26,7 @@ import {
   CHRONICLE_CAP,
   LEGEND_TRAILING_WINDOW_DAYS,
   REIGN_EVENTS_CAP,
+  defaultCharacterSheet,
 } from './types';
 import { getLevelDef, MAX_LEVEL, LevelDef } from './roadmap';
 import { resolveItemEffect, grantItem, getItemDef } from './items';
@@ -93,7 +94,7 @@ function pruneLedger(sheet: CharacterSheet, todayIso: string) {
 function sumLedgerFrom(sheet: CharacterSheet, floorIso: string): number {
   return Object.entries(sheet.point_ledger)
     .filter(([iso]) => iso >= floorIso)
-    .reduce((sum, [, e]) => sum + e.adjustedScore, 0);
+    .reduce((sum, [, e]) => sum + Math.max(0, e.adjustedScore), 0);
 }
 
 // ── Legend maintenance ───────────────────────────────────────────────────────
@@ -158,7 +159,9 @@ export function applyDailyProgress(input: ApplyDailyProgressInput): ApplyDailyPr
   const lifetimeBefore = sheet.lifetime_points;
 
   const { adjustedScore, usedItemId, effectSummary } = resolveItemEffect(sheet, isoDate, rawScore);
-  sheet.lifetime_points += adjustedScore - previousAdjusted;
+  const xpGain = Math.max(0, adjustedScore);
+  const prevXpGain = Math.max(0, previousAdjusted);
+  sheet.lifetime_points += xpGain - prevXpGain;
   sheet.point_ledger[isoDate] = { isoDate, rawScore, adjustedScore, itemEffectApplied: usedItemId };
 
   if (usedItemId && effectSummary) {
@@ -320,3 +323,75 @@ export function buildBriefContext(sheet: CharacterSheet, isoDate: string): Brief
   }
   return ctx;
 }
+
+export interface HistoryEntryLike {
+  isoDate?: string;
+  date?: string;
+  gain: number;
+}
+
+export interface ReplayHistoryOptions {
+  history: HistoryEntryLike[];
+  weightKg?: number;
+  bodyFatPct?: number;
+  realTodayIso?: string;
+}
+
+function extractIsoDate(e: HistoryEntryLike): string | undefined {
+  if (typeof e.isoDate === 'string' && e.isoDate.trim().length > 0) {
+    return e.isoDate.trim();
+  }
+  if (typeof e.date === 'string') {
+    const trimmed = e.date.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+/**
+  * Replays a user's entire historical VF scoring record chronologically through
+  * the campaign engine. Idempotent and pure.
+  */
+export function replayHistoryToSheet(opts: ReplayHistoryOptions): { sheet: CharacterSheet; daysReplayed: number } {
+  const validEntries: { isoDate: string; gain: number }[] = [];
+
+  for (const e of opts.history) {
+    const iso = extractIsoDate(e);
+    if (iso) {
+      validEntries.push({ isoDate: iso, gain: e.gain });
+    }
+  }
+
+  validEntries.sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+
+  const realToday = opts.realTodayIso ?? new Date().toISOString().split('T')[0];
+
+  if (validEntries.length === 0) {
+    return { sheet: defaultCharacterSheet(realToday), daysReplayed: 0 };
+  }
+
+  const earliestIso = validEntries[0].isoDate;
+  let sheet = defaultCharacterSheet(earliestIso);
+
+  for (const entry of validEntries) {
+    const res = applyDailyProgress({
+      sheet,
+      isoDate: entry.isoDate,
+      rawScore: entry.gain,
+      todayIso: entry.isoDate,
+      weightKg: opts.weightKg,
+      bodyFatPct: opts.bodyFatPct,
+    });
+    sheet = res.sheet;
+  }
+
+  if (realToday > sheet.latest_processed_iso) {
+    sheet.latest_processed_iso = realToday;
+    sheet.days_in_current_level = Math.max(0, dayDiff(sheet.level_started_iso, realToday));
+  }
+
+  return { sheet, daysReplayed: validEntries.length };
+}
+
