@@ -1361,7 +1361,7 @@ New message from {{{userName}}}: {{{message}}}`,
 
 export async function personalizedAICoaching(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
   return runWithShareOffer(async () => {
-    const result = await cfoChatPrompt(input, { maxTurns: 15 });
+    const result = await cfoChatPrompt(input, { maxTurns: 8 });
     const shareOffer = getShareOffer();
     return { response: result.text ?? 'Something went wrong. Try again.', shareOffer };
   });
@@ -1439,6 +1439,6 @@ Query from {{{userName}}}: {{{message}}}`,
 });
 
 export async function ledgerAnalyst(input: PersonalizedAICoachingInput): Promise<PersonalizedAICoachingOutput> {
-  const result = await ledgerAnalystPrompt(input, { maxTurns: 10 });
+  const result = await ledgerAnalystPrompt(input, { maxTurns: 6 });
   return { response: result.text ?? 'Something went wrong. Try again.' };
 }

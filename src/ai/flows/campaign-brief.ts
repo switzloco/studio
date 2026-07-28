@@ -119,8 +119,13 @@ export const campaignBriefFlow = ai.defineFlow(
     try {
       const result = await ai.generate(generateConfig);
       return result.text;
-    } catch (err) {
-      console.warn('[campaignBriefFlow] Primary model failed, trying fallback model (gemini-2.0-flash):', (err as Error)?.message ?? String(err));
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? '').toLowerCase();
+      const status = err?.status || err?.statusCode;
+      if (status === 429 || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota')) {
+        throw err;
+      }
+      console.warn('[campaignBriefFlow] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
       const result = await ai.generate({ model: 'googleai/gemini-2.0-flash', ...generateConfig });
       return result.text;
     }

@@ -3,6 +3,7 @@
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
 import { initializeFirebase } from '@/firebase/sdk';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 function extractContentType(dataUri: string): string {
   const match = dataUri.match(/^data:([^;]+);/);
@@ -35,6 +36,11 @@ export async function sendChatMessage(
 ) {
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
+
+    const rateLimit = await checkRateLimit(userId, 'chat');
+    if (!rateLimit.ok) {
+      throw new Error(`Rate limit exceeded (${rateLimit.scope}). Please try again in ${rateLimit.retryAfter}s.`);
+    }
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
 

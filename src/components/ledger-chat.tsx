@@ -48,60 +48,17 @@ export function LedgerChat() {
     }
   }, [messages, isLoading]);
 
-  // Init greeting when panel first opens
+  // Set initial greeting when panel first opens (deterministic — no paid LLM call needed)
   useEffect(() => {
-    if (!isOpen || initDone || !user) return;
+    if (!isOpen || initDone) return;
     setInitDone(true);
-
-    const runInit = async () => {
-      setIsLoading(true);
-      try {
-        const localDate = new Date().toLocaleDateString('en-CA');
-        const idToken = await user.getIdToken();
-        const payload = {
-          message: '__init__',
-          chatHistory: [],
-          userName: user.displayName || undefined,
-          localDate,
-        };
-
-        const res = await fetch('/api/ledger-chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) throw new Error('Init failed');
-
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("Stream not available");
-
-        setMessages([{ role: 'model', content: '' }]);
-        setIsLoading(false);
-
-        const decoder = new TextDecoder();
-        let streamText = '';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          streamText += decoder.decode(value, { stream: true });
-          
-          setMessages(prev => {
-            const updated = [...prev];
-            updated[updated.length - 1].content = streamText;
-            return updated;
-          });
-        }
-      } catch {
-        setMessages([{ role: 'model', content: 'Ledger Analyst online. Ask me anything about your history.' }]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    runInit();
-  }, [isOpen, initDone, user]);
+    setMessages([
+      {
+        role: 'model',
+        content: 'Ledger Analyst online. Ask me anything about your history — weekly summaries, PR lookups, protein averages, streak analysis, or flag a bad entry.',
+      },
+    ]);
+  }, [isOpen, initDone]);
 
   const handleSend = async (text?: string) => {
     const messageText = (text ?? input).trim();

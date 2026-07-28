@@ -100,13 +100,18 @@ export async function POST(req: Request) {
     // share offer for this turn.
     const openStream = async () => {
       try {
-        const result = await cfoChatPrompt.stream(input, { maxTurns: 15 });
+        const result = await cfoChatPrompt.stream(input, { maxTurns: 8 });
         return result.stream;
       } catch (err: any) {
+        const msg = String(err?.message ?? err ?? '').toLowerCase();
+        const status = err?.status || err?.statusCode;
+        if (status === 429 || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota')) {
+          throw err;
+        }
         console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
         const result = await cfoChatPrompt.stream(input, {
           model: 'googleai/gemini-2.0-flash',
-          maxTurns: 15,
+          maxTurns: 8,
         });
         return result.stream;
       }

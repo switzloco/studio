@@ -108,6 +108,7 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
       tools: [fetchHistoricalDataTool, calculateStatsTool],
       config: {
         temperature: 0.2,
+        maxTurns: 5,
       }
     };
 
@@ -116,6 +117,11 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
         ...generateConfig
       });
     } catch (err: any) {
+      const msg = String(err?.message ?? err ?? '').toLowerCase();
+      const status = err?.status || err?.statusCode;
+      if (status === 429 || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota')) {
+        throw err;
+      }
       console.warn('[DataAnalystFlow] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
       result = await ai.generate({
         model: 'googleai/gemini-2.0-flash',
