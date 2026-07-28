@@ -1,5 +1,5 @@
 /**
- * @fileOverview Hourly Metabolic Partitioning Engine
+ * @fileOverview Hourly Metabolic Partitioning Engine (v3 — Effort Registers)
  *
  * Simulates 5-bucket sequential energy drain across 15-minute slots from 6 AM to midnight.
  *
@@ -8,7 +8,7 @@
  *   2. Fat Faucet         — rate-limited at alpertNumber/24/4 per slot; PAUSED while gut non-empty
  *   3. Liver Glycogen     — 400 kcal cap; replenishes from absorbed carbs
  *   4. Muscle Glycogen    — lean-mass-scaled cap; primary exercise buffer; replenishes from dietary carbs
- *   5. Muscle Protein     — true last resort; contributes to score penalty
+ *   5. Muscle Protein     — true last resort; contributes to score penalty (mitigated by anabolicSignal)
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -25,6 +25,17 @@ export const BASELINE_KCAL         = 1200;  // PSMF perfect-day denominator
 export const MUSCLE_PENALTY_PER_10KCAL = 2; // score points lost per 10 kcal muscle burned
 const INSULIN_DECAY_RATE           = 0.125; // clears a max spike (1.0) in ~2 hours (8 slots)
 const ZONE2_FAT_BOOST              = 1.5;    // steady-state ≈ FatMax: fat faucet runs 1.5× resting Alpert
+
+/**
+ * Glycogen credit fraction (30%): Glycogen drawn during exercise/deficit is genuine energy debt
+ * that is refilled later from food that would otherwise be stored as fat.
+ */
+export const GLYCOGEN_CREDIT_FRACTION = 0.30;
+
+/** Compute resting fat oxidation cap per 15-minute slot in kcal. */
+export function computeFaucetPerSlot(alpertNumber: number): number {
+  return alpertNumber / 24 / 4;
+}
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
   breakfast: 7 * 60,
@@ -322,7 +333,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     let remaining         = burnThisSlot - gutContribution;
 
     const zone2Boost = zone2Slots[s] ? ZONE2_FAT_BOOST : 1.0;
-    const fatFaucetPerSlot = (alpertNumber / 24 / 4) * fatOxEfficiency * zone2Boost;
+    const fatFaucetPerSlot = computeFaucetPerSlot(alpertNumber) * fatOxEfficiency * zone2Boost;
     const fatContribution  = Math.min(remaining, fatFaucetPerSlot);
     remaining -= fatContribution;
 
@@ -339,7 +350,8 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
-    const muscleContribution = Math.max(0, remaining);
+    // MPS signal (anabolicSignal) protects lean mass when protein/lifting are present
+    const muscleContribution = Math.max(0, remaining * (1 - 0.5 * anabolicSignal));
     const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
 
     cumulativeFatBurned     += fatContribution;

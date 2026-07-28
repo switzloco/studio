@@ -60,6 +60,20 @@ export const SCORING_RELEASES: ScoringRelease[] = [
       'Cardio no longer point-penalized — muscle loss shows up honestly instead',
     ],
   },
+  {
+    version: '3.0',
+    codename: 'Balboa–Hopper',
+    bodyComp: { name: 'Rocky Balboa', real: false, source: 'Rocky', note: 'the work in the gym has to count for something' },
+    tech:     { name: 'Grace Hopper', real: true, source: 'US Navy / COBOL', note: 'found the original bug — measure the system, do not trust the spec' },
+    tagline: 'Effort registers — glycogen debt is real work, and punishment is throttled like reward.',
+    shipped: [
+      'Glycogen depletion earns partial credit — training is no longer worth zero points',
+      'Per-slot fat-storage penalty capped at the fat-oxidation rate (symmetric reward/punishment)',
+      'Consecutive-day alcohol penalty made proportional instead of a flat -25',
+      'End-of-day alcohol pause loophole closed — late drinking no longer scores better',
+      'Campaign roadmap recalibrated against what the engine actually produces',
+    ],
+  },
 ];
 
 export const CURRENT_SCORING_RELEASE = SCORING_RELEASES[SCORING_RELEASES.length - 1];

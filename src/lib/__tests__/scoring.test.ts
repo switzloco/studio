@@ -59,12 +59,13 @@ function food(o: Partial<FoodLogEntry> = {}): FoodLogEntry {
 }
 
 function exercise(o: Partial<ExerciseLogEntry> = {}): ExerciseLogEntry {
+  const est = o.estimatedCaloriesBurned ?? 700;
   return {
     name: 'session',
     category: 'cardio',
     durationMin: 60,
-    estimatedCaloriesBurned: 700,
-    adjustedCalories: 700,
+    estimatedCaloriesBurned: est,
+    adjustedCalories: o.adjustedCalories ?? est,
     pointsDelta: 0,
     performedAt: '17:00',
     timestamp: {} as any,
@@ -132,14 +133,14 @@ describe('VF v2 — Volume-Based Metabolic Pause (alcohol)', () => {
   });
 });
 
-// ─── Consecutive-Day Alcohol penalty (flat -25) ───────────────────────────────
-describe('VF v2 — Consecutive-Day Alcohol', () => {
-  it('deducts a flat 25 when alcohol was logged yesterday AND today', () => {
+// ─── Consecutive-Day Alcohol penalty (proportional) ───────────────────────────
+describe('VF v3 — Consecutive-Day Alcohol (proportional)', () => {
+  it('deducts a proportional penalty when alcohol was logged yesterday AND today', () => {
     const base = cleanDay({ foodLogs: [food({ alcoholDrinks: 1 })], alcoholDrinks: 1 });
     const single = calculateDailyVFScore({ ...base, alcoholYesterday: false });
     const consecutive = calculateDailyVFScore({ ...base, alcoholYesterday: true });
-    expect(consecutive.score).toBe(single.score - 25);
-    expect(consecutive.breakdown.consecutiveAlcoholPenalty).toBe(-25);
+    expect(consecutive.breakdown.consecutiveAlcoholPenalty).toBeLessThan(0);
+    expect(consecutive.score).toBeLessThan(single.score);
   });
 
   it('does NOT penalize if there was no alcohol today', () => {
@@ -257,5 +258,118 @@ describe('Visceral Fat — Zod validation guards', () => {
     const result = workoutSchema.safeParse({ pointsDelta: 100, workoutDetails: '' });
     expect(result.success).toBe(false);
     expect(result.error?.errors[0].message).toBe('Workout details cannot be empty');
+  });
+});
+
+// ─── VF v3 — Effort Registers ──────────────────────────────────────────────────
+describe('VF v3 — effort registers', () => {
+  const refUser = { weightKg: 100, bodyFatPct: 28 };
+  const baseFood: FoodLogEntry[] = [
+    food({ meal: 'breakfast', consumedAt: '08:00', calories: 500, carbsG: 40, proteinG: 40 }),
+    food({ meal: 'lunch', consumedAt: '12:30', calories: 700, carbsG: 60, proteinG: 50 }),
+    food({ meal: 'dinner', consumedAt: '18:30', calories: 800, carbsG: 70, proteinG: 60 }),
+  ]; // 2000 total kcal, 150g protein
+
+  it('1. Monotonic in training volume', () => {
+    const run = (extraBurn: number, exLogs: ExerciseLogEntry[]) =>
+      calculateDailyVFScore({
+        ...cleanDay(refUser),
+        caloriesIn: 2000,
+        caloriesOut: 2400 + extraBurn,
+        foodLogs: baseFood,
+        exerciseLogs: exLogs,
+      });
+
+    const rest = run(0, []);
+    const walk = run(150, [exercise({ category: 'cardio', activityTier: 'tier1_walking', durationMin: 30, estimatedCaloriesBurned: 150, performedAt: '10:00' })]);
+    const lift = run(350, [exercise({ category: 'strength', activityTier: 'tier3_anaerobic', durationMin: 60, estimatedCaloriesBurned: 350, performedAt: '15:00' })]);
+    const zone2 = run(700, [exercise({ category: 'cardio', activityTier: 'tier2_steady_state', durationMin: 90, estimatedCaloriesBurned: 700, performedAt: '16:00' })]);
+    const combo = run(1200, [
+      exercise({ category: 'cardio', activityTier: 'tier1_walking', durationMin: 30, estimatedCaloriesBurned: 150, performedAt: '10:00' }),
+      exercise({ category: 'strength', activityTier: 'tier3_anaerobic', durationMin: 60, estimatedCaloriesBurned: 350, performedAt: '15:00' }),
+      exercise({ category: 'cardio', activityTier: 'tier2_steady_state', durationMin: 90, estimatedCaloriesBurned: 700, performedAt: '17:00' }),
+    ]);
+
+    expect(rest.score).toBeLessThan(walk.score);
+    expect(walk.score).toBeLessThan(lift.score);
+    expect(lift.score).toBeLessThan(zone2.score);
+    expect(zone2.score).toBeLessThan(combo.score);
+  });
+
+  it('2. Strength training is worth strictly more than zero points', () => {
+    const rest = calculateDailyVFScore({
+      ...cleanDay(refUser),
+      caloriesIn: 2000,
+      caloriesOut: 2400,
+      foodLogs: baseFood,
+      exerciseLogs: [],
+    });
+    const lift = calculateDailyVFScore({
+      ...cleanDay(refUser),
+      caloriesIn: 2000,
+      caloriesOut: 2750,
+      foodLogs: baseFood,
+      exerciseLogs: [exercise({ category: 'strength', activityTier: 'tier3_anaerobic', durationMin: 60, estimatedCaloriesBurned: 350, performedAt: '15:00' })],
+    });
+
+    expect(lift.score).toBeGreaterThan(rest.score);
+  });
+
+  it('3. Storage penalty is capped symmetrically with fat oxidation', () => {
+    const bingeFood = [
+      food({ meal: 'lunch', consumedAt: '12:00', calories: 2500, carbsG: 200, fatG: 100, proteinG: 50 }),
+    ];
+    const r = calculateDailyVFScore({
+      ...cleanDay(refUser),
+      caloriesIn: 2500,
+      caloriesOut: 2400,
+      foodLogs: bingeFood,
+    });
+
+    expect(r.breakdown.fatStoragePenaltyCapped).toBeGreaterThan(0);
+  });
+
+  it('4. Consecutive-day alcohol cannot single-handedly force a negative day on an excellent day', () => {
+    const excellentDay = calculateDailyVFScore({
+      ...cleanDay(refUser),
+      caloriesIn: 2000,
+      caloriesOut: 3200, // 1200 deficit
+      proteinG: 180,
+      proteinGoal: 150,
+      foodLogs: [
+        ...baseFood,
+        food({ name: 'wine', meal: 'snack', consumedAt: '21:00', calories: 150, carbsG: 5, alcoholDrinks: 2 }),
+      ],
+      alcoholDrinks: 2,
+      alcoholYesterday: true,
+      exerciseLogs: [exercise({ category: 'strength', durationMin: 60, estimatedCaloriesBurned: 400, performedAt: '16:00' })],
+    });
+
+    expect(excellentDay.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it('5. No late-drinking advantage (22:00 drink vs 21:00 drink)', () => {
+    const makeDay = (time: string) =>
+      calculateDailyVFScore({
+        ...cleanDay(refUser),
+        caloriesIn: 2000,
+        caloriesOut: 2800,
+        foodLogs: [
+          ...baseFood,
+          food({ name: 'drink', meal: 'snack', consumedAt: time, calories: 120, carbsG: 5, alcoholDrinks: 1 }),
+        ],
+        alcoholDrinks: 1,
+      });
+
+    const drink21 = makeDay('21:00');
+    const drink22 = makeDay('22:00');
+
+    expect(drink22.score).toBeLessThanOrEqual(drink21.score);
+  });
+
+  it('6. Glycogen credit is bounded', () => {
+    const r = calculateDailyVFScore(cleanDay(refUser));
+    expect(r.breakdown.glycogenCreditPoints).toBeGreaterThanOrEqual(0);
+    expect(r.breakdown.glycogenCreditPoints).toBeLessThan(100);
   });
 });

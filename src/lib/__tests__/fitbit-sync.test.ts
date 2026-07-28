@@ -255,20 +255,22 @@ describe('syncFitbitSnapshot score recalculation', () => {
     // New visceralFatPoints = 258 - 200 = 58
     // (Alpert-normalized v2: 654 kcal fat burned ÷ 813 (70% of 1162 Alpert) × 100,
     //  less 412 kcal stored — a far cry from the old deficit/10 = 228.)
-    expect(updatePayload.visceralFatPoints).toBe(58);
+    // Difference: newScore (109) - oldScore (228) = -119
+    // New visceralFatPoints = 258 - 119 = 139
+    expect(updatePayload.visceralFatPoints).toBe(139);
 
     // Verify history entries:
     // entry 1: equity remains 10
-    // entry 2: gain=28, equity=10+28=38
-    // entry 3: gain=20, equity=38+20=58
+    // entry 2: gain=109, equity=10+109=119
+    // entry 3: gain=20, equity=119+20=139
     const newHistory = updatePayload.history;
     expect(newHistory[0].equity).toBe(10);
 
-    expect(newHistory[1].gain).toBe(28);
-    expect(newHistory[1].equity).toBe(38);
+    expect(newHistory[1].gain).toBe(109);
+    expect(newHistory[1].equity).toBe(119);
     expect(newHistory[1].breakdown.caloriesOut).toBe(2970);
     expect(newHistory[1].breakdown.deficit).toBe(1470); // 2970 - 1500
 
-    expect(newHistory[2].equity).toBe(58);
+    expect(newHistory[2].equity).toBe(139);
   });
 });

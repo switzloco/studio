@@ -1,5 +1,5 @@
 /**
- * @fileOverview Visceral Fat daily scoring engine (v2 — Alpert-normalized).
+ * @fileOverview Visceral Fat daily scoring engine (v3 — Effort Registers).
  *
  * SCORING: Points are normalized to each user's fat-oxidation ceiling, so the
  * scale means the same thing for every user regardless of body size.
@@ -7,22 +7,18 @@
  *   Denominator  D = 0.70 × Alpert(weightKg, bodyFatPct)
  *   Score is UNCAPPED in both directions — no -200 floor, no +100 cap.
  *
- *   score = Σ_slot [ (fatBurned/D)×100 − (fatStored/D)×100 − (muscleLost/10)×2 ]
+ *   score = Σ_slot [ (fatBurned/D)×100 − (min(fatStored, faucet)/D)×100
+ *                   − (muscleLost/10)×2 + (glycogenDrawn/D)×100 × 0.30 ]
  *           + behavioral penalties
  *
- * The slot-level fat/storage/muscle figures come from the Hourly Metabolic
- * Partitioning Engine, so muscle catabolism is now PRICED INTO the score —
- * a deficit funded by muscle no longer scores like a deficit funded by fat.
- *
- * BEHAVIORAL PENALTIES (conditional):
- *   • Volume-Based Metabolic Pause — each alcoholic drink hard-caps the score
- *     at 0 for the following 3 hours (lipolysis suppressed by acetate clearance).
- *   • Consecutive-Day Alcohol — flat −25 if alcohol was logged yesterday AND today.
- *   • Seed Oil Nudge — −5 pts per seed-oil meal (systemic inflammation signal).
- *
- * NOTE: cardio is NOT point-penalized. A deficit funded by muscle already costs
- * points via the muscleLost term above, so there is no separate "junk cardio"
- * cap — the engine prices muscle loss honestly and the coach handles the rest.
+ * MECHANICS (v3.0):
+ *   • Glycogen Credit — 30% credit for glycogen drawn during training/deficit,
+ *     repaid from subsequent intake.
+ *   • Storage Cap Symmetry — per-slot fat storage penalty is capped at the fat oxidation
+ *     rate (alpertNumber / 24 / 4).
+ *   • Consecutive-Day Alcohol — 25% of positive score (floored at 5 pts) deduction.
+ *   • End-of-day Alcohol Pause — scaled penalty for late-night drinking to close the loophole.
+ *   • Seed Oil Nudge — −5 pts per seed-oil meal.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -31,6 +27,8 @@ import {
   runMetabolicSimulation,
   computeMuscleGlycogenMaxKcal,
   pointsDenominator,
+  computeFaucetPerSlot,
+  GLYCOGEN_CREDIT_FRACTION,
   MUSCLE_PENALTY_PER_10KCAL,
   NUM_SLOTS,
 } from './metabolic-engine';
@@ -39,7 +37,6 @@ import {
 const INTERVAL_MIN               = 15;
 const START_MIN                  = 6 * 60;           // engine simulates from 6:00 AM
 const ALC_PAUSE_SLOTS            = (3 * 60) / INTERVAL_MIN; // 3-hour pause = 12 slots
-const CONSECUTIVE_ALCOHOL_PENALTY = 25;              // flat points, consecutive-day drinking
 const SEED_OIL_PENALTY_PER_MEAL  = 5;                // flat points per seed-oil meal
 
 const MEAL_DEFAULT_MIN: Record<string, number> = {
@@ -94,6 +91,9 @@ export interface DailyVFResult {
     deficit: number;
     totalFatBurned: number;
     totalFatStored: number;
+    totalGlycogenDrawn: number;
+    glycogenCreditPoints: number;
+    fatStoragePenaltyCapped: number;
     muscleKcal: number;
     baseScore: number;             // engine score before behavioral penalties
     // Behavioral rule assessments
@@ -101,7 +101,7 @@ export interface DailyVFResult {
     fastingActive: boolean;
     alcoholDrinks: number;
     alcoholPausePenalty: number;   // points removed by the 3h-per-drink pause (≤ 0)
-    consecutiveAlcoholPenalty: number; // 0 or -25
+    consecutiveAlcoholPenalty: number; // proportional penalty when alcohol logged consecutive days
     seedOilMeals: number;
     seedOilPenalty: number;
   };
@@ -131,12 +131,6 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const D = pointsDenominator(alpertNumber);   // 100 pts = burn 70% of Alpert in fat
   const deficit = caloriesOut - caloriesIn;
 
-  // Cardio is NOT point-penalized. A deficit funded by muscle already costs points
-  // via the muscleLost term in the slot loop below, so glycogen-depleting anaerobic
-  // play shows up honestly through muscle catabolism — no separate cardio cap. The
-  // "tension deficit" pattern (lots of anaerobic play, no lifting) is handled as a
-  // coaching nudge in the CFO prompt, not as a scoring penalty.
-
   // ── Run the metabolic simulation for per-slot fat/storage/muscle figures ─────
   const sim = runMetabolicSimulation({
     caloriesOut,
@@ -153,36 +147,77 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   });
 
   // ── Volume-Based Metabolic Pause mask ───────────────────────────────────────
-  // Each drink hard-caps the score at 0 for the next 3 hours. Overlapping windows
-  // from multiple drinks simply union together.
+  // Each drink hard-caps the score at 0 for the next 3 hours.
+  // Drinks near midnight scale their pause weight to prevent late-drinking loophole.
   const paused = new Array<boolean>(NUM_SLOTS).fill(false);
+  const pauseWeight = new Array<number>(NUM_SLOTS).fill(1.0);
   const activeFoods = (foodLogs ?? []).filter((f) => !f.ignored);
   for (const f of activeFoods) {
     const drinks = f.alcoholDrinks ?? 0;
     if (drinks <= 0) continue;
     const s0 = slotOfFood(f);
-    for (let s = s0; s < Math.min(s0 + ALC_PAUSE_SLOTS, NUM_SLOTS); s++) paused[s] = true;
+    const slotsInSim = Math.min(ALC_PAUSE_SLOTS, NUM_SLOTS - s0);
+    const scale = slotsInSim > 0 ? (ALC_PAUSE_SLOTS / slotsInSim) : 1.0;
+    for (let s = s0; s < Math.min(s0 + ALC_PAUSE_SLOTS, NUM_SLOTS); s++) {
+      paused[s] = true;
+      pauseWeight[s] = Math.max(pauseWeight[s], scale);
+    }
   }
 
   // ── Score the day slot-by-slot ──────────────────────────────────────────────
+  const faucetPerSlot = computeFaucetPerSlot(alpertNumber);
   let baseScore = 0;    // engine score, Alpert-normalized, no behavioral penalties
   let pausedScore = 0;  // same, but positive accrual zeroed during alcohol pause
+  let totalStorageExcusedKcal = 0;
+  let totalGlycogenCreditPts = 0;
+
   for (const slot of sim.slots) {
+    const storedThisSlot = Math.min(slot.fatStoredThisSlot, faucetPerSlot);
+    totalStorageExcusedKcal += Math.max(0, slot.fatStoredThisSlot - storedThisSlot);
+
+    const glycogenDrawnThisSlot = slot.liverContribution + slot.muscleGlycogenContribution;
+    const glycogenCreditPts = ((glycogenDrawnThisSlot / D) * 100) * GLYCOGEN_CREDIT_FRACTION;
+    totalGlycogenCreditPts += glycogenCreditPts;
+
     const net =
       (slot.fatContribution / D) * 100 -
-      (slot.fatStoredThisSlot / D) * 100 -
-      (slot.muscleContribution / 10) * MUSCLE_PENALTY_PER_10KCAL;
+      (storedThisSlot / D) * 100 -
+      (slot.muscleContribution / 10) * MUSCLE_PENALTY_PER_10KCAL +
+      glycogenCreditPts;
+
     baseScore += net;
-    pausedScore += paused[slot.slot] ? Math.min(net, 0) : net;
+    pausedScore += paused[slot.slot] ? Math.min(net * pauseWeight[slot.slot], 0) : net;
   }
-  const alcoholPausePenalty = pausedScore - baseScore; // ≤ 0
+  let alcoholPausePenalty = pausedScore - baseScore; // ≤ 0
+  if (alcoholPausePenalty < 0 && activeFoods.some((f) => (f.alcoholDrinks ?? 0) > 0)) {
+    let latestDrinkSlot = -1;
+    for (const f of activeFoods) {
+      if ((f.alcoholDrinks ?? 0) > 0) {
+        latestDrinkSlot = Math.max(latestDrinkSlot, slotOfFood(f));
+      }
+    }
+    if (latestDrinkSlot >= 0) {
+      const slotsInSim = Math.min(ALC_PAUSE_SLOTS, NUM_SLOTS - latestDrinkSlot);
+      if (slotsInSim > 0 && slotsInSim < ALC_PAUSE_SLOTS) {
+        alcoholPausePenalty *= (ALC_PAUSE_SLOTS / slotsInSim);
+      }
+    }
+  }
 
-  let score = pausedScore;
+  let score = baseScore + alcoholPausePenalty;
 
-  // ── Consecutive-Day Alcohol penalty (flat) ──────────────────────────────────
+  // ── Net Caloric Surplus Penalty ─────────────────────────────────────────────
+  // When caloriesIn > caloriesOut, net surplus calories cannot be masked by capped storage
+  const netSurplus = Math.max(0, caloriesIn - caloriesOut);
+  const netSurplusPenalty = (netSurplus / D) * 100;
+  score -= netSurplusPenalty;
+
+  // ── Proportional Consecutive-Day Alcohol penalty ────────────────────────────
   const alcoholToday = alcoholDrinks > 0 || activeFoods.some((f) => (f.alcoholDrinks ?? 0) > 0);
   const consecutiveAlcoholPenalty =
-    alcoholToday && alcoholYesterday ? -CONSECUTIVE_ALCOHOL_PENALTY : 0;
+    alcoholToday && alcoholYesterday
+      ? -Math.max(5, Math.round(0.25 * Math.max(0, pausedScore)))
+      : 0;
   score += consecutiveAlcoholPenalty;
 
   // ── Seed Oil Nudge (flat) ───────────────────────────────────────────────────
@@ -195,14 +230,16 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   // ── Coaching context ────────────────────────────────────────────────────────
   const proteinMet = proteinG >= proteinGoal;
   const fastingActive = fastingHours >= 16;
+  const glycogenCreditPoints = Math.round(totalGlycogenCreditPts);
+  const fatStoragePenaltyCapped = Math.round(totalStorageExcusedKcal);
 
   const parts: string[] = [
-    `fat burned ${sim.totalFatBurned} kcal, stored ${sim.totalFatStored} kcal, muscle lost ${sim.totalMuscleLost} kcal → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
+    `fat burned ${sim.totalFatBurned} kcal, stored ${sim.totalFatStored} kcal (excused ${fatStoragePenaltyCapped} kcal excess), glycogen debt credit +${glycogenCreditPoints} pts, muscle lost ${sim.totalMuscleLost} kcal → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
   ];
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
   if (alcoholPausePenalty < 0) parts.push(`alcohol pause ${Math.round(alcoholPausePenalty)} pts`);
-  if (consecutiveAlcoholPenalty < 0) parts.push(`consecutive-day drinking -25`);
+  if (consecutiveAlcoholPenalty < 0) parts.push(`consecutive-day drinking ${consecutiveAlcoholPenalty} pts`);
   if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s)`);
 
   return {
@@ -213,6 +250,9 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       deficit,
       totalFatBurned: sim.totalFatBurned,
       totalFatStored: sim.totalFatStored,
+      totalGlycogenDrawn: sim.totalGlycogenDrawn,
+      glycogenCreditPoints,
+      fatStoragePenaltyCapped,
       muscleKcal: sim.totalMuscleLost,
       baseScore: Math.round(baseScore),
       proteinMet,
