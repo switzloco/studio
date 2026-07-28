@@ -58,7 +58,8 @@ export async function sendChatMessage(
       currentDay,
       localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
-      chatHistory,
+      // Keep only recent chat history (last 10 turns) to optimize LLM input token usage
+      chatHistory: chatHistory?.slice(-10),
       currentHealth: sanitizedHealth,
       photoDataUris: resolvedPhotoUris.length > 0
         ? resolvedPhotoUris.map(uri => ({ url: uri, contentType: extractContentType(uri) }))

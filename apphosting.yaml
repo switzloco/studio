@@ -125,7 +125,7 @@ runConfig:
   # minInstances: Minimum number of instances kept warm at all times.
   # Cost implication: Each warm instance incurs idle Cloud Run charges (~$0.00002/vCPU-second).
   # Set to 0 for lowest cost (cold starts on low traffic); set to 1+ to eliminate cold starts.
-  minInstances: 1
+  minInstances: 0
 
   # maxInstances: Hard ceiling on horizontal scaling under load.
   # Cost implication: Cloud Run bills per request and per instance-hour.
