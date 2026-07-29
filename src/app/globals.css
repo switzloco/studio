@@ -60,12 +60,15 @@
   }
 }
 
+/* `overflow-wrap: anywhere` keeps long unbreakable tokens (URLs from web_search,
+   code spans) inside the bubble instead of letting them widen the message
+   column and push every bubble off the right edge of the screen. */
 .chat-bubble-user {
-  @apply bg-primary text-primary-foreground rounded-2xl rounded-tr-none px-4 py-2 max-w-[85%] self-end shadow-sm;
+  @apply bg-primary text-primary-foreground rounded-2xl rounded-tr-none px-4 py-2 max-w-[85%] min-w-0 self-end shadow-sm [overflow-wrap:anywhere];
 }
 
 .chat-bubble-ai {
-  @apply bg-card text-card-foreground border rounded-2xl rounded-tl-none px-4 py-2 max-w-[85%] self-start shadow-sm;
+  @apply bg-card text-card-foreground border rounded-2xl rounded-tl-none px-4 py-2 max-w-[85%] min-w-0 self-start shadow-sm [overflow-wrap:anywhere];
 }
 
 .glass-morphism {

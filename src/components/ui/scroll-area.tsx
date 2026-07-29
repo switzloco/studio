@@ -14,7 +14,17 @@ const ScrollArea = React.forwardRef<
     className={cn("relative overflow-hidden", className)}
     {...props}
   >
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+    {/*
+      Radix wraps the viewport's children in a `display: table; min-width: 100%`
+      div so it can measure content width. Shrink-to-fit sizing means one wide
+      or unbreakable child (a long URL, a code span) grows that table past the
+      viewport — and every percentage width inside it, like the chat bubbles'
+      `max-w-[85%]`, then resolves against the oversized table and spills out
+      under the Root's `overflow-hidden`. Forcing `block` pins the wrapper to
+      the viewport width so percentages stay honest. We only scroll vertically,
+      so the horizontal measurement the table enabled isn't needed.
+    */}
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block">
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />
