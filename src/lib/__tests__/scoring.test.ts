@@ -115,38 +115,108 @@ describe('VF v2 — muscle catabolism priced into the score', () => {
   });
 });
 
-// ─── Volume-Based Metabolic Pause ─────────────────────────────────────────────
-describe('VF v2 — Volume-Based Metabolic Pause (alcohol)', () => {
-  it('applies a pause penalty when an evening drink interrupts fat-burning slots', () => {
-    // Gut is empty by ~21:00 (dinner at 17:30), so the fat faucet is running —
-    // the 3h pause after the drink zeroes those positive slots.
-    const dayFoods = (drinks: number): FoodLogEntry[] => [
-      food({ meal: 'breakfast', consumedAt: '07:00', calories: 500, carbsG: 40 }),
-      food({ meal: 'dinner', consumedAt: '17:30', calories: 600, carbsG: 50 }),
-      food({ name: 'drinks', meal: 'snack', consumedAt: '21:00', calories: 120, carbsG: 8, proteinG: 0, fatG: 0, alcoholDrinks: drinks }),
-    ];
+// ─── Alcohol: counterfactual clearance-hour debit (v3.1) ──────────────────────
+describe('VF v3.1 — Alcohol clearance debit', () => {
+  const dayFoods = (drinks: number, at = '21:00'): FoodLogEntry[] => [
+    food({ meal: 'breakfast', consumedAt: '07:00', calories: 500, carbsG: 40 }),
+    food({ meal: 'dinner', consumedAt: '17:30', calories: 600, carbsG: 50 }),
+    food({ name: 'drinks', meal: 'snack', consumedAt: at, calories: 120, carbsG: 8, proteinG: 0, fatG: 0, alcoholDrinks: drinks }),
+  ];
+
+  it('charges a penalty for drinking and none for staying sober', () => {
     const sober = calculateDailyVFScore(cleanDay({ foodLogs: dayFoods(0) }));
     const drinking = calculateDailyVFScore(cleanDay({ foodLogs: dayFoods(2) }));
-    expect(sober.breakdown.alcoholPausePenalty).toBe(0);
-    expect(drinking.breakdown.alcoholPausePenalty).toBeLessThan(0);
-    expect(drinking.score).toBeLessThanOrEqual(sober.score);
+    expect(sober.breakdown.alcoholAcutePenalty).toBe(0);
+    expect(drinking.breakdown.alcoholAcutePenalty).toBeLessThan(0);
+    expect(drinking.score).toBeLessThan(sober.score);
+  });
+
+  // The v2/v3 bug: the pause mask only zeroed POSITIVE accrual, so drinking right
+  // after a meal — when slots are already negative — cost exactly nothing.
+  it('REGRESSION: drinking straight after a big meal is not free', () => {
+    const meal = food({ meal: 'dinner', consumedAt: '18:30', calories: 1250, proteinG: 150, carbsG: 50, fatG: 50, fiberG: 5 });
+    const withDrinks = calculateDailyVFScore(cleanDay({
+      caloriesIn: 2750, caloriesOut: 2004, alcoholDrinks: 10,
+      foodLogs: [meal, food({ name: 'beer', meal: 'snack', consumedAt: '20:00', calories: 1500, carbsG: 130, proteinG: 0, fatG: 0, alcoholDrinks: 10 })],
+    }));
+    const sameCaloriesNoAlcohol = calculateDailyVFScore(cleanDay({
+      caloriesIn: 2750, caloriesOut: 2004, alcoholDrinks: 0,
+      foodLogs: [meal, food({ name: 'soda', meal: 'snack', consumedAt: '20:00', calories: 1500, carbsG: 130, proteinG: 0, fatG: 0 })],
+    }));
+    expect(withDrinks.breakdown.alcoholAcutePenalty).toBeLessThan(0);
+    expect(withDrinks.score).toBeLessThan(sameCaloriesNoAlcohol.score);
+  });
+
+  // The v2/v3 bug: `paused[]` was a boolean, so drink COUNT was never read.
+  it('REGRESSION: penalty scales with drink count', () => {
+    const at = (n: number) => calculateDailyVFScore(cleanDay({ foodLogs: dayFoods(n), alcoholDrinks: n }));
+    const one = at(1).breakdown.alcoholAcutePenalty;
+    const five = at(5).breakdown.alcoholAcutePenalty;
+    const ten = at(10).breakdown.alcoholAcutePenalty;
+    expect(five).toBeLessThan(one);
+    expect(ten).toBeLessThan(five);
+  });
+
+  it('does not depend on how drinks were batched into log entries', () => {
+    const common = [food({ meal: 'dinner', consumedAt: '17:30', calories: 600, carbsG: 50 })];
+    const bulk = calculateDailyVFScore(cleanDay({
+      alcoholDrinks: 4,
+      foodLogs: [...common, food({ name: 'beers', meal: 'snack', consumedAt: '20:00', calories: 400, carbsG: 32, proteinG: 0, fatG: 0, alcoholDrinks: 4 })],
+    }));
+    const split = calculateDailyVFScore(cleanDay({
+      alcoholDrinks: 4,
+      foodLogs: [...common, ...[0, 1, 2, 3].map((i) =>
+        food({ name: `beer ${i}`, meal: 'snack', consumedAt: `2${i}:00`.slice(-5), calories: 100, carbsG: 8, proteinG: 0, fatG: 0, alcoholDrinks: 1 }))],
+    }));
+    expect(bulk.breakdown.alcoholAcutePenalty).toBe(split.breakdown.alcoholAcutePenalty);
+  });
+
+  it('falls back to the daily drink total when no per-entry logs carry alcohol', () => {
+    const noLogs = calculateDailyVFScore(cleanDay({ alcoholDrinks: 6, foodLogs: undefined }));
+    expect(noLogs.breakdown.alcoholAcutePenalty).toBeLessThan(0);
+  });
+
+  it('clears faster for a larger body (hepatic capacity scales with BSA)', () => {
+    const forBody = (heightCm: number, weightKg: number) =>
+      calculateDailyVFScore(cleanDay({ foodLogs: dayFoods(6), alcoholDrinks: 6, heightCm, weightKg, bodyFatPct: 25 }))
+        .breakdown.alcoholHoursPerDrink;
+    expect(forBody(185, 100)).toBeLessThan(forBody(160, 55));
+  });
+
+  it('does not discount clearance for leanness at the same height and weight', () => {
+    const forBf = (bodyFatPct: number) =>
+      calculateDailyVFScore(cleanDay({ foodLogs: dayFoods(6), alcoholDrinks: 6, heightCm: 180, weightKg: 100, bodyFatPct }))
+        .breakdown.alcoholHoursPerDrink;
+    expect(forBf(15)).toBe(forBf(30));
   });
 });
 
-// ─── Consecutive-Day Alcohol penalty (proportional) ───────────────────────────
-describe('VF v3 — Consecutive-Day Alcohol (proportional)', () => {
-  it('deducts a proportional penalty when alcohol was logged yesterday AND today', () => {
-    const base = cleanDay({ foodLogs: [food({ alcoholDrinks: 1 })], alcoholDrinks: 1 });
-    const single = calculateDailyVFScore({ ...base, alcoholYesterday: false });
-    const consecutive = calculateDailyVFScore({ ...base, alcoholYesterday: true });
-    expect(consecutive.breakdown.consecutiveAlcoholPenalty).toBeLessThan(0);
-    expect(consecutive.score).toBeLessThan(single.score);
+// ─── Overnight carryover replaces the consecutive-day penalty ─────────────────
+describe('VF v3.1 — Overnight alcohol carryover', () => {
+  const heavyNight = (drinks: number): FoodLogEntry[] => [
+    food({ name: 'beers', meal: 'snack', consumedAt: '20:00', calories: drinks * 150, carbsG: drinks * 13, proteinG: 0, fatG: 0, alcoholDrinks: drinks }),
+  ];
+
+  it('spills clearance into tomorrow when the session runs long', () => {
+    const short = calculateDailyVFScore(cleanDay({ foodLogs: heavyNight(2), alcoholDrinks: 2 }));
+    const long = calculateDailyVFScore(cleanDay({ foodLogs: heavyNight(10), alcoholDrinks: 10 }));
+    expect(short.breakdown.alcoholCarryoverHours).toBe(0);
+    expect(long.breakdown.alcoholCarryoverHours).toBeGreaterThan(0);
   });
 
-  it('does NOT penalize if there was no alcohol today', () => {
-    const base = cleanDay({ foodLogs: [food({ alcoholDrinks: 0 })], alcoholDrinks: 0 });
-    const yesterdayOnly = calculateDailyVFScore({ ...base, alcoholYesterday: true });
-    expect(yesterdayOnly.breakdown.consecutiveAlcoholPenalty).toBe(0);
+  it("debits today for yesterday's spillover", () => {
+    const base = cleanDay({ foodLogs: [food({ meal: 'lunch', consumedAt: '12:00' })] });
+    const clean = calculateDailyVFScore({ ...base, yesterdayFoodLogs: [] });
+    const hungover = calculateDailyVFScore({ ...base, yesterdayFoodLogs: heavyNight(12) });
+    expect(clean.breakdown.alcoholCarryoverPenalty).toBe(0);
+    expect(hungover.breakdown.alcoholCarryoverPenalty).toBeLessThan(0);
+    expect(hungover.score).toBeLessThan(clean.score);
+  });
+
+  it('honours an explicit carryover override (Fitbit re-sync path)', () => {
+    const base = cleanDay({ foodLogs: [food({ meal: 'lunch', consumedAt: '12:00' })] });
+    const resynced = calculateDailyVFScore({ ...base, alcoholCarryoverPenalty: -30 });
+    expect(resynced.breakdown.alcoholCarryoverPenalty).toBe(-30);
   });
 });
 
@@ -348,23 +418,41 @@ describe('VF v3 — effort registers', () => {
     expect(excellentDay.score).toBeGreaterThanOrEqual(0);
   });
 
-  it('5. No late-drinking advantage (22:00 drink vs 21:00 drink)', () => {
-    const makeDay = (time: string) =>
+  // v3.1: a late session no longer escapes its penalty by running off the end of
+  // the simulated day — the clearance hours past midnight are charged to tomorrow.
+  // So the invariant is conservation across the two days, not same-day ordering.
+  it('5. No late-drinking advantage — cost is deferred, never avoided', () => {
+    const drinkAt = (time: string) =>
+      food({ name: 'drinks', meal: 'snack', consumedAt: time, calories: 720, carbsG: 30, proteinG: 0, fatG: 0, alcoholDrinks: 6 });
+
+    const nightOf = (time: string) =>
       calculateDailyVFScore({
         ...cleanDay(refUser),
         caloriesIn: 2000,
         caloriesOut: 2800,
-        foodLogs: [
-          ...baseFood,
-          food({ name: 'drink', meal: 'snack', consumedAt: time, calories: 120, carbsG: 5, alcoholDrinks: 1 }),
-        ],
-        alcoholDrinks: 1,
+        foodLogs: [...baseFood, drinkAt(time)],
+        alcoholDrinks: 6,
       });
 
-    const drink21 = makeDay('21:00');
-    const drink22 = makeDay('22:00');
+    const morningAfter = (time: string) =>
+      calculateDailyVFScore({
+        ...cleanDay(refUser),
+        foodLogs: baseFood,
+        yesterdayFoodLogs: [drinkAt(time)],
+      });
 
-    expect(drink22.score).toBeLessThanOrEqual(drink21.score);
+    const totalCharge = (time: string) =>
+      nightOf(time).breakdown.alcoholAcutePenalty + morningAfter(time).breakdown.alcoholCarryoverPenalty;
+
+    const early = totalCharge('19:00');
+    const late = totalCharge('23:30');
+
+    expect(late).toBeLessThan(0);
+    // Same dose, same body → same total charge regardless of when it started.
+    expect(Math.abs(late - early)).toBeLessThanOrEqual(2); // rounding on both halves
+    // And the late night genuinely pushes cost onto the next morning.
+    expect(morningAfter('23:30').breakdown.alcoholCarryoverPenalty)
+      .toBeLessThan(morningAfter('19:00').breakdown.alcoholCarryoverPenalty);
   });
 
   it('6. Glycogen credit is bounded', () => {

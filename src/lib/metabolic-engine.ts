@@ -84,6 +84,8 @@ export interface MetabolicEngineParams {
   hasCreatine?: boolean;
   weightKg?: number;
   bodyFatPct?: number;
+  heightCm?: number;   // with age, sets hepatic alcohol clearance rate
+  age?: number;
   muscleGlycogenMaxKcal?: number;
 }
 
@@ -141,6 +143,72 @@ export function computeMetabolicScore(
 export const ALPERT_SCORE_FRACTION = 0.70;
 export function pointsDenominator(alpertNumber: number): number {
   return Math.max(1, ALPERT_SCORE_FRACTION * alpertNumber);
+}
+
+// ── Alcohol physiology (v3.1) ─────────────────────────────────────────────────
+/**
+ * Ethanol oxidation runs through ADH:
+ *     ethanol --ADH--> acetaldehyde --ALDH--> acetate,  +2 NADH
+ * The NADH is what matters here. β-oxidation needs NAD+ as its electron acceptor,
+ * so a hepatic NADH flood stalls fat burning for want of a cofactor; the same redox
+ * shift inhibits the TCA cycle and pushes acetyl-CoA toward lipogenesis. One
+ * mechanism produces both halves of what we score: fat burning stops AND fat
+ * storage is promoted.
+ *
+ * Two consequences drive the shape of the model:
+ *   DURATION saturates nothing — elimination is ZERO-ORDER (ADH is saturated above
+ *     ~0.02 g/dL), so the liver clears a near-constant grams/hour and clearance TIME
+ *     is linear in dose. Ten drinks take ten times as long, not ten times as hard.
+ *   DEPTH saturates immediately — because ADH is already at its ceiling, NADH output
+ *     (and therefore the redox block) is maximal and constant above trivial doses.
+ *
+ * So: cost = hours(linear in drinks) × depth(saturating) × price(constant).
+ */
+export const ALCOHOL_SUPPRESSION_DMAX = 0.75; // max fraction of fat oxidation suppressed
+export const ALCOHOL_SUPPRESSION_K    = 1.0;  // drinks at which depth reaches DMAX/2
+export const HEPATIC_AGE_ONSET        = 40;   // liver volume begins declining ~40
+export const HEPATIC_AGE_DECLINE      = 0.005; // fractional loss per year past onset
+
+/**
+ * Price of one hour of fully-suppressed fat oxidation, in points.
+ * (alpert/24) / (ALPERT_SCORE_FRACTION × alpert) × 100 — the Alpert number CANCELS,
+ * so this is identical for every body and needs no per-user tuning. All body-scaling
+ * enters through clearance duration below.
+ */
+export const PTS_PER_SUPPRESSED_HOUR = 100 / (24 * ALPERT_SCORE_FRACTION); // 5.952
+
+/** Mosteller body surface area (m²) — the standard clinical predictor of liver volume. */
+export function bodySurfaceArea(heightCm?: number, weightKg?: number): number {
+  return Math.sqrt(((heightCm ?? 175) * (weightKg ?? 80)) / 3600);
+}
+
+/** Anchor: 68 kg / 170 cm at HEPATIC_AGE_ONSET clears one standard drink per hour. */
+export const ANCHOR_BSA_M2 = bodySurfaceArea(170, 68); // ≈ 1.79 m²
+
+/** Liver volume (and hepatic blood flow) decline with age; floor keeps it sane. */
+export function hepaticAgeFactor(age?: number): number {
+  const a = age ?? HEPATIC_AGE_ONSET;
+  return Math.max(0.65, 1 - Math.max(0, a - HEPATIC_AGE_ONSET) * HEPATIC_AGE_DECLINE);
+}
+
+/**
+ * Hours to clear one standard drink.
+ *
+ * Time to clear a fixed dose is set by HEPATIC CAPACITY (absolute g/hr), not body
+ * water — body water sets peak BAC, not how long N drinks take. Liver volume tracks
+ * body surface area, so BSA is the scalar, not lean mass: your liver does not grow
+ * because you cut body fat, and scaling on lean mass handed lean users an unearned
+ * clearance discount.
+ */
+export function clearanceHoursPerDrink(heightCm?: number, weightKg?: number, age?: number): number {
+  const capacity = bodySurfaceArea(heightCm, weightKg) * hepaticAgeFactor(age);
+  return ANCHOR_BSA_M2 / Math.max(0.1, capacity);
+}
+
+/** Saturating suppression depth (0..DMAX) as a function of total drinks. */
+export function alcoholSuppressionDepth(drinks: number): number {
+  if (drinks <= 0) return 0;
+  return ALCOHOL_SUPPRESSION_DMAX * (drinks / (drinks + ALCOHOL_SUPPRESSION_K));
 }
 
 export function runMetabolicSimulation(params: MetabolicEngineParams): MetabolicResult {
@@ -208,8 +276,15 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       const drinks = food.alcoholDrinks || 0;
       if (drinks > 0) {
         const totalDrain = drinks * 30;
-        for (let s = eatSlot; s < Math.min(eatSlot + 4, NUM_SLOTS); s++) {
-          liverAlcoholDrain[s] += totalDrain / 4;
+        // Zero-order clearance: the window scales with DOSE, not just magnitude.
+        // Ten drinks occupy the liver for ~ten hours, not the one hour a fixed
+        // 4-slot window used to assume.
+        const clearSlots = Math.max(
+          4,
+          Math.round(drinks * clearanceHoursPerDrink(params.heightCm, params.weightKg, params.age) * 4),
+        );
+        for (let s = eatSlot; s < Math.min(eatSlot + clearSlots, NUM_SLOTS); s++) {
+          liverAlcoholDrain[s] += totalDrain / clearSlots;
         }
       }
     }

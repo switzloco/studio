@@ -74,6 +74,20 @@ export const SCORING_RELEASES: ScoringRelease[] = [
       'Campaign roadmap recalibrated against what the engine actually produces',
     ],
   },
+  {
+    version: '3.1',
+    codename: 'Bull–Lovelace',
+    bodyComp: { name: 'Frank Bullitt', real: false, source: 'Bullitt (1968)', note: 'unhurried, exacting, and completely unmoved by the story everyone else is telling' },
+    tech:     { name: 'Ada Lovelace',  real: true,  source: 'Analytical Engine notes', note: 'wrote the first algorithm — and the first correct account of what a machine was actually computing' },
+    tagline: 'The alcohol rule finally charges for the drink instead of the moment.',
+    shipped: [
+      'Alcohol pause mask replaced by a counterfactual clearance-hour debit — drinking after a meal is no longer free',
+      'Drink COUNT now scales the penalty (the old boolean mask priced 1 and 20 drinks identically)',
+      'Zero-order clearance: volume sets duration, saturating depth set by ADH ceiling',
+      'Clearance rate scaled by body surface area + age (liver capacity), replacing lean mass',
+      'Overnight carryover charges spillover to the next morning, retiring the consecutive-day penalty',
+    ],
+  },
 ];
 
 export const CURRENT_SCORING_RELEASE = SCORING_RELEASES[SCORING_RELEASES.length - 1];
