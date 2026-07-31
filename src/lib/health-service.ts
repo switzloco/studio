@@ -33,11 +33,13 @@ export interface VFBreakdown {
   muscleKcal?: number;
   caloriesOutEstimated?: boolean;     // true when caloriesOut was BMR-estimated (no device data for that day)
   // ── Alcohol, v3.1 (counterfactual clearance-hour debit) ──
-  alcoholAcutePenalty?: number;       // ≤ 0; today's suppressed clearance-hours
-  alcoholCarryoverPenalty?: number;   // ≤ 0; inherited from yesterday's spillover
-  alcoholCarryoverHours?: number;     // clearance hours spilling into tomorrow
-  alcoholSuppressionHours?: number;   // total clearance time from today's drinks
+  alcoholAcutePenalty?: number;       // ≤ 0; the whole session, charged to its own day
+  alcoholSuppressionHours?: number;   // total clearance time the session bought
+  alcoholHoursPastMidnight?: number;  // informational for coaching; carries no points
   alcoholHoursPerDrink?: number;      // per-body clearance scalar used
+  // Written by v3.1.0 only (overnight deferral), never by later releases:
+  alcoholCarryoverPenalty?: number;
+  alcoholCarryoverHours?: number;
   // Behavioral-rule context (resolved at score time; reused on Fitbit re-sync)
   alcoholYesterday?: boolean;
   // ── Legacy alcohol fields (pre-v3.1 history entries still render from these) ──

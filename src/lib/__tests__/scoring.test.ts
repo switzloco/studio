@@ -191,32 +191,45 @@ describe('VF v3.1 — Alcohol clearance debit', () => {
   });
 });
 
-// ─── Overnight carryover replaces the consecutive-day penalty ─────────────────
-describe('VF v3.1 — Overnight alcohol carryover', () => {
-  const heavyNight = (drinks: number): FoodLogEntry[] => [
-    food({ name: 'beers', meal: 'snack', consumedAt: '20:00', calories: drinks * 150, carbsG: drinks * 13, proteinG: 0, fatG: 0, alcoholDrinks: drinks }),
-  ];
+// ─── The whole session is charged to the day it was drunk ─────────────────────
+describe('VF v3.1 — no late-drinking escape', () => {
+  const nightOf = (drinks: number, at: string) =>
+    calculateDailyVFScore(cleanDay({
+      alcoholDrinks: drinks,
+      foodLogs: [
+        food({ meal: 'dinner', consumedAt: '18:00', calories: 700, proteinG: 55, carbsG: 50, fatG: 25 }),
+        food({ name: 'drinks', meal: 'snack', consumedAt: at, calories: drinks * 150, carbsG: drinks * 13, proteinG: 0, fatG: 0, alcoholDrinks: drinks }),
+      ],
+    }));
 
-  it('spills clearance into tomorrow when the session runs long', () => {
-    const short = calculateDailyVFScore(cleanDay({ foodLogs: heavyNight(2), alcoholDrinks: 2 }));
-    const long = calculateDailyVFScore(cleanDay({ foodLogs: heavyNight(10), alcoholDrinks: 10 }));
-    expect(short.breakdown.alcoholCarryoverHours).toBe(0);
-    expect(long.breakdown.alcoholCarryoverHours).toBeGreaterThan(0);
+  // v3.1.0 deferred the post-midnight remainder to the next day, so 7.5 drinks at
+  // 23:15 charged only ~12% of their cost on the drinking day and scored BETTER
+  // than the same drinks at 18:00 — reopening the loophole v3.0 had closed.
+  it('REGRESSION: the same dose costs the same regardless of when it started', () => {
+    const charges = ['18:00', '20:00', '22:00', '23:15', '23:50']
+      .map((t) => nightOf(7.5, t).breakdown.alcoholAcutePenalty);
+    expect(new Set(charges).size).toBe(1);
+    expect(charges[0]).toBeLessThan(0);
   });
 
-  it("debits today for yesterday's spillover", () => {
-    const base = cleanDay({ foodLogs: [food({ meal: 'lunch', consumedAt: '12:00' })] });
-    const clean = calculateDailyVFScore({ ...base, yesterdayFoodLogs: [] });
-    const hungover = calculateDailyVFScore({ ...base, yesterdayFoodLogs: heavyNight(12) });
-    expect(clean.breakdown.alcoholCarryoverPenalty).toBe(0);
-    expect(hungover.breakdown.alcoholCarryoverPenalty).toBeLessThan(0);
-    expect(hungover.score).toBeLessThan(clean.score);
+  it('REGRESSION: a near-midnight session is not cheaper than an early one', () => {
+    expect(nightOf(7.5, '23:50').breakdown.alcoholAcutePenalty)
+      .toBe(nightOf(7.5, '18:00').breakdown.alcoholAcutePenalty);
   });
 
-  it('honours an explicit carryover override (Fitbit re-sync path)', () => {
-    const base = cleanDay({ foodLogs: [food({ meal: 'lunch', consumedAt: '12:00' })] });
-    const resynced = calculateDailyVFScore({ ...base, alcoholCarryoverPenalty: -30 });
-    expect(resynced.breakdown.alcoholCarryoverPenalty).toBe(-30);
+  it('reports overnight clearance for coaching without charging it twice', () => {
+    const late = nightOf(7.5, '23:15');
+    const early = nightOf(7.5, '12:00');
+    expect(late.breakdown.alcoholHoursPastMidnight).toBeGreaterThan(0);
+    expect(early.breakdown.alcoholHoursPastMidnight).toBe(0);
+    expect(late.breakdown.alcoholAcutePenalty).toBe(early.breakdown.alcoholAcutePenalty);
+  });
+
+  it('charges the full clearance window, not just the part before midnight', () => {
+    const late = nightOf(6, '23:00');
+    const hours = late.breakdown.alcoholSuppressionHours;
+    // suppressionHours must reflect all 6 drinks, not the ~1h left in the day
+    expect(hours).toBeGreaterThan(6);
   });
 });
 
@@ -418,41 +431,27 @@ describe('VF v3 — effort registers', () => {
     expect(excellentDay.score).toBeGreaterThanOrEqual(0);
   });
 
-  // v3.1: a late session no longer escapes its penalty by running off the end of
-  // the simulated day — the clearance hours past midnight are charged to tomorrow.
-  // So the invariant is conservation across the two days, not same-day ordering.
-  it('5. No late-drinking advantage — cost is deferred, never avoided', () => {
-    const drinkAt = (time: string) =>
-      food({ name: 'drinks', meal: 'snack', consumedAt: time, calories: 720, carbsG: 30, proteinG: 0, fatG: 0, alcoholDrinks: 6 });
-
+  // The property the client actually sees: one number, on the day they drank.
+  // Deliberately NOT a two-day conservation check — v3.1.0 satisfied that while
+  // still letting a 23:15 session score better than an 18:00 one.
+  it('5. No late-drinking advantage on the day the drinking happened', () => {
     const nightOf = (time: string) =>
       calculateDailyVFScore({
         ...cleanDay(refUser),
         caloriesIn: 2000,
         caloriesOut: 2800,
-        foodLogs: [...baseFood, drinkAt(time)],
+        foodLogs: [
+          ...baseFood,
+          food({ name: 'drinks', meal: 'snack', consumedAt: time, calories: 720, carbsG: 30, proteinG: 0, fatG: 0, alcoholDrinks: 6 }),
+        ],
         alcoholDrinks: 6,
       });
 
-    const morningAfter = (time: string) =>
-      calculateDailyVFScore({
-        ...cleanDay(refUser),
-        foodLogs: baseFood,
-        yesterdayFoodLogs: [drinkAt(time)],
-      });
-
-    const totalCharge = (time: string) =>
-      nightOf(time).breakdown.alcoholAcutePenalty + morningAfter(time).breakdown.alcoholCarryoverPenalty;
-
-    const early = totalCharge('19:00');
-    const late = totalCharge('23:30');
+    const early = nightOf('19:00').breakdown.alcoholAcutePenalty;
+    const late = nightOf('23:30').breakdown.alcoholAcutePenalty;
 
     expect(late).toBeLessThan(0);
-    // Same dose, same body → same total charge regardless of when it started.
-    expect(Math.abs(late - early)).toBeLessThanOrEqual(2); // rounding on both halves
-    // And the late night genuinely pushes cost onto the next morning.
-    expect(morningAfter('23:30').breakdown.alcoholCarryoverPenalty)
-      .toBeLessThan(morningAfter('19:00').breakdown.alcoholCarryoverPenalty);
+    expect(late).toBe(early);
   });
 
   it('6. Glycogen credit is bounded', () => {

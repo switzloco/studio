@@ -87,8 +87,6 @@ export function buildScoreHistory(input: BuildScoreHistoryInput): BuildScoreHist
       weightKg: input.weightKg, bodyFatPct: input.bodyFatPct,
       heightCm: input.heightCm, age: input.age,
       foodLogs: food, exerciseLogs: exercise, alcoholYesterday,
-      // Alcohol clearance that ran past midnight is debited against this day.
-      yesterdayFoodLogs: prevFood,
     });
 
     const [y, m, d] = date.split('-').map(Number);

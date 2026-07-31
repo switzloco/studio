@@ -9,7 +9,7 @@
  *
  *   score = Σ_slot [ (fatBurned/D)×100 − (min(fatStored, faucet)/D)×100
  *                   − (muscleLost/10)×2 + (glycogenDrawn/D)×100 × 0.30 ]
- *           − netSurplusPenalty − alcoholAcute − alcoholCarryover − seedOil
+ *           − netSurplusPenalty − alcoholPenalty − seedOil
  *
  * MECHANICS (v3.0):
  *   • Glycogen Credit — 30% credit for glycogen drawn during training/deficit.
@@ -26,13 +26,12 @@
  *   identically. Any multiplicative, supply-side mechanism has the same blind spot;
  *   you cannot scale down a zero.
  *
- *   v3.1 debits the counterfactual directly instead: each standard drink costs one
- *   clearance-hour of the UNIMPEDED fat-oxidation ceiling, whatever that hour was
- *   actually doing. Volume scales linearly, timing can no longer shield it, and the
- *   penalty survives being logged as one bulk entry. Clearance running past midnight
- *   carries into tomorrow, which replaces the v3 consecutive-day penalty (that one
- *   scaled off the day's own positive score, so the worse the bender the cheaper it
- *   got). See metabolic-engine.ts for the ADH/NADH derivation of the curve shape.
+ *   v3.1 debits the counterfactual directly instead: each standard drink costs its
+ *   clearance-hours of the UNIMPEDED fat-oxidation ceiling, whatever those hours were
+ *   actually doing. Volume scales it, timing cannot shield it, and the penalty
+ *   survives being logged as one bulk entry. The v3 consecutive-day penalty is gone
+ *   too — it scaled off the day's own positive score, so the worse the bender the
+ *   cheaper it got. See metabolic-engine.ts for the ADH/NADH derivation of the shape.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -81,25 +80,32 @@ function slotOfFood(food: FoodLogEntry): number {
   return Math.max(0, Math.min(NUM_SLOTS - 1, Math.round((minuteOfFood(food) - START_MIN) / INTERVAL_MIN)));
 }
 
-/** Resolved acute alcohol load for one day. All penalty figures are ≤ 0. */
+/** Resolved acute alcohol load for one day. Penalty figures are ≤ 0. */
 export interface AlcoholLoad {
   drinks: number;
   hoursPerDrink: number;      // clearance scalar for this body
-  suppressionHours: number;   // total clearance time; may run past midnight
+  suppressionHours: number;   // total clearance time the session bought
   depth: number;              // 0..DMAX fraction of fat oxidation suppressed
-  hoursToday: number;         // clearance hours falling inside this calendar day
-  carryoverHours: number;     // clearance hours spilling into TOMORROW
-  todayPenalty: number;       // points debited today
-  carryoverPenalty: number;   // points tomorrow should debit
+  clearsAtHour: number;       // decimal hour clearance completes (>24 = after midnight)
+  hoursPastMidnight: number;  // informational for coaching — carries NO points
+  penalty: number;            // points debited on the drinking day, in full
 }
 
 const EMPTY_LOAD = (hoursPerDrink: number): AlcoholLoad => ({
   drinks: 0, hoursPerDrink, suppressionHours: 0, depth: 0,
-  hoursToday: 0, carryoverHours: 0, todayPenalty: 0, carryoverPenalty: 0,
+  clearsAtHour: 0, hoursPastMidnight: 0, penalty: 0,
 });
 
 /**
  * Resolve a day's alcohol into suppressed clearance-hours and the points they cost.
+ *
+ * The FULL session is charged to the day it was drunk, including clearance that runs
+ * past midnight. v3.1.0 deferred the overnight remainder to the next day, which was
+ * conservative across two days but wrong on the one number the client actually sees:
+ * 7.5 drinks logged at 23:15 put 88% of the cost on tomorrow and scored 81 — better
+ * than the same drinks at 18:00. That re-opened the late-drinking loophole v3.0's
+ * pause-weight rescale had already closed. Midnight is a calendar artifact, not
+ * physiology: the session incurred the suppression, so the session pays for it.
  *
  * Clearance is zero-order and continuous, so the window opens at the FIRST drink and
  * runs for the full dose duration regardless of how the drinks were batched into log
@@ -125,21 +131,17 @@ export function computeAlcoholLoad(opts: {
 
   const suppressionHours = drinks * hoursPerDrink;
   const depth            = alcoholSuppressionDepth(drinks);
-  const startHour        = startMin / 60;
-  const endHour          = startHour + suppressionHours;
-  const hoursToday       = Math.max(0, Math.min(endHour, 24) - startHour);
-  const carryoverHours   = Math.max(0, endHour - 24);
-  const pricePerHour     = depth * PTS_PER_SUPPRESSED_HOUR;
+  const clearsAtHour     = startMin / 60 + suppressionHours;
 
   return {
     drinks,
     hoursPerDrink,
     suppressionHours,
     depth,
-    hoursToday,
-    carryoverHours,
-    todayPenalty:     -hoursToday * pricePerHour,
-    carryoverPenalty: -carryoverHours * pricePerHour,
+    clearsAtHour,
+    hoursPastMidnight: Math.max(0, clearsAtHour - 24),
+    // Charged in full on the drinking day — no dependence on when the session started.
+    penalty: -suppressionHours * depth * PTS_PER_SUPPRESSED_HOUR,
   };
 }
 
@@ -162,10 +164,8 @@ export interface DailyVFInput {
   foodLogs?: FoodLogEntry[];
   exerciseLogs?: ExerciseLogEntry[];
   fitbitActivities?: FitbitActivity[];
-  // ── Cross-day input (resolved by the caller from history) ──
-  alcoholYesterday?: boolean;         // context only since v3.1; no longer drives a penalty
-  yesterdayFoodLogs?: FoodLogEntry[]; // yesterday's ledger → alcohol clearance carried into today
-  alcoholCarryoverPenalty?: number;   // ≤ 0; explicit override (re-sync from a stored breakdown)
+  // ── Cross-day context (resolved by the caller from history) ──
+  alcoholYesterday?: boolean;   // coaching context only; drives no penalty since v3.1
 }
 
 export interface DailyVFResult {
@@ -187,10 +187,9 @@ export interface DailyVFResult {
     fastingActive: boolean;
     alcoholDrinks: number;
     // ── Alcohol (v3.1) ──
-    alcoholAcutePenalty: number;      // ≤ 0; today's suppressed clearance-hours
-    alcoholCarryoverPenalty: number;  // ≤ 0; inherited from yesterday's spillover
-    alcoholCarryoverHours: number;    // clearance hours spilling into TOMORROW
-    alcoholSuppressionHours: number;  // total clearance time from today's drinks
+    alcoholAcutePenalty: number;      // ≤ 0; the whole session, charged to this day
+    alcoholSuppressionHours: number;  // total clearance time the session bought
+    alcoholHoursPastMidnight: number; // informational for coaching; carries no points
     alcoholHoursPerDrink: number;     // per-body clearance scalar actually used
     /** @deprecated v3.1 alias of alcoholAcutePenalty; kept so pre-v3.1 history renders. */
     alcoholPausePenalty: number;
@@ -270,23 +269,13 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const netSurplusPenalty = (netSurplus / D) * 100;
   score -= netSurplusPenalty;
 
-  // ── Acute alcohol: counterfactual debit on suppressed clearance-hours ────────
+  // ── Alcohol: counterfactual debit on suppressed clearance-hours ──────────────
+  // The whole session is charged here, overnight remainder included, so the number
+  // does not depend on which side of midnight the drinking started.
   const alcoholLoad = computeAlcoholLoad({
     foodLogs, fallbackDrinks: alcoholDrinks, heightCm, weightKg, age,
   });
-  score += alcoholLoad.todayPenalty;
-
-  // ── Alcohol carried over from yesterday's clearance running past midnight ────
-  // Those hours land on the next morning — fasted, insulin at the floor — which are
-  // the highest-value fat-oxidation hours of the day, so they are debited in full.
-  const alcoholCarryoverPenalty = Math.min(
-    0,
-    input.alcoholCarryoverPenalty ??
-      computeAlcoholLoad({
-        foodLogs: input.yesterdayFoodLogs, heightCm, weightKg, age,
-      }).carryoverPenalty,
-  );
-  score += alcoholCarryoverPenalty;
+  score += alcoholLoad.penalty;
 
   // ── Seed Oil Nudge (flat) ───────────────────────────────────────────────────
   const seedOilPenalty = seedOilMeals * -SEED_OIL_PENALTY_PER_MEAL;
@@ -306,14 +295,15 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   ];
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
-  if (alcoholLoad.todayPenalty < 0) {
+  if (alcoholLoad.penalty < 0) {
     parts.push(
-      `${alcoholLoad.drinks} drink(s) suppressed ${alcoholLoad.hoursToday.toFixed(1)}h of fat oxidation today ` +
-      `(${Math.round(alcoholLoad.depth * 100)}% depth) → ${Math.round(alcoholLoad.todayPenalty)} pts`,
+      `${alcoholLoad.drinks} drink(s) suppressed ${alcoholLoad.suppressionHours.toFixed(1)}h of fat oxidation ` +
+      `(${Math.round(alcoholLoad.depth * 100)}% depth) → ${Math.round(alcoholLoad.penalty)} pts`,
     );
+    if (alcoholLoad.hoursPastMidnight > 0) {
+      parts.push(`still clearing ${alcoholLoad.hoursPastMidnight.toFixed(1)}h past midnight (charged to this day)`);
+    }
   }
-  if (alcoholCarryoverPenalty < 0) parts.push(`last night's clearance carried in ${Math.round(alcoholCarryoverPenalty)} pts`);
-  if (alcoholLoad.carryoverHours > 0) parts.push(`${alcoholLoad.carryoverHours.toFixed(1)}h of clearance carries into tomorrow`);
   if (seedOilMeals > 0) parts.push(`${seedOilMeals} seed-oil meal(s)`);
 
   return {
@@ -332,12 +322,11 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       proteinMet,
       fastingActive,
       alcoholDrinks,
-      alcoholAcutePenalty:     Math.round(alcoholLoad.todayPenalty),
-      alcoholCarryoverPenalty: Math.round(alcoholCarryoverPenalty),
-      alcoholCarryoverHours:   Number(alcoholLoad.carryoverHours.toFixed(2)),
-      alcoholSuppressionHours: Number(alcoholLoad.suppressionHours.toFixed(2)),
-      alcoholHoursPerDrink:    Number(alcoholLoad.hoursPerDrink.toFixed(3)),
-      alcoholPausePenalty:     Math.round(alcoholLoad.todayPenalty), // deprecated alias
+      alcoholAcutePenalty:      Math.round(alcoholLoad.penalty),
+      alcoholSuppressionHours:  Number(alcoholLoad.suppressionHours.toFixed(2)),
+      alcoholHoursPastMidnight: Number(alcoholLoad.hoursPastMidnight.toFixed(2)),
+      alcoholHoursPerDrink:     Number(alcoholLoad.hoursPerDrink.toFixed(3)),
+      alcoholPausePenalty:      Math.round(alcoholLoad.penalty), // deprecated alias
       seedOilMeals,
       seedOilPenalty,
     },

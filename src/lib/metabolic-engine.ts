@@ -164,10 +164,20 @@ export function pointsDenominator(alpertNumber: number): number {
  *
  * So: cost = hours(linear in drinks) × depth(saturating) × price(constant).
  */
-export const ALCOHOL_SUPPRESSION_DMAX = 0.75; // max fraction of fat oxidation suppressed
-export const ALCOHOL_SUPPRESSION_K    = 1.0;  // drinks at which depth reaches DMAX/2
+export const ALCOHOL_SUPPRESSION_DMAX = 0.85; // max fraction of fat oxidation suppressed
+export const ALCOHOL_SUPPRESSION_K    = 0.4;  // drinks at which depth reaches DMAX/2
 export const HEPATIC_AGE_ONSET        = 40;   // liver volume begins declining ~40
 export const HEPATIC_AGE_DECLINE      = 0.005; // fractional loss per year past onset
+
+/**
+ * Hours to clear one standard drink for the anchor body.
+ *
+ * A standard drink is ~14 g ethanol and the liver clears ~7-10 g/hr, so 1.4-2 h is
+ * the real range. The familiar "one drink per hour" figure is the rate that holds
+ * BAC steady, not the time to clear a dose — anchoring on it (as v3.1.0 did)
+ * under-charged every drink by about a third.
+ */
+export const ANCHOR_HOURS_PER_DRINK = 1.5;
 
 /**
  * Price of one hour of fully-suppressed fat oxidation, in points.
@@ -182,7 +192,7 @@ export function bodySurfaceArea(heightCm?: number, weightKg?: number): number {
   return Math.sqrt(((heightCm ?? 175) * (weightKg ?? 80)) / 3600);
 }
 
-/** Anchor: 68 kg / 170 cm at HEPATIC_AGE_ONSET clears one standard drink per hour. */
+/** Anchor body: 68 kg / 170 cm at HEPATIC_AGE_ONSET, clearing ANCHOR_HOURS_PER_DRINK. */
 export const ANCHOR_BSA_M2 = bodySurfaceArea(170, 68); // ≈ 1.79 m²
 
 /** Liver volume (and hepatic blood flow) decline with age; floor keeps it sane. */
@@ -202,7 +212,7 @@ export function hepaticAgeFactor(age?: number): number {
  */
 export function clearanceHoursPerDrink(heightCm?: number, weightKg?: number, age?: number): number {
   const capacity = bodySurfaceArea(heightCm, weightKg) * hepaticAgeFactor(age);
-  return ANCHOR_BSA_M2 / Math.max(0.1, capacity);
+  return ANCHOR_HOURS_PER_DRINK * (ANCHOR_BSA_M2 / Math.max(0.1, capacity));
 }
 
 /** Saturating suppression depth (0..DMAX) as a function of total drinks. */

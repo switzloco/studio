@@ -85,7 +85,8 @@ export const SCORING_RELEASES: ScoringRelease[] = [
       'Drink COUNT now scales the penalty (the old boolean mask priced 1 and 20 drinks identically)',
       'Zero-order clearance: volume sets duration, saturating depth set by ADH ceiling',
       'Clearance rate scaled by body surface area + age (liver capacity), replacing lean mass',
-      'Overnight carryover charges spillover to the next morning, retiring the consecutive-day penalty',
+      'The whole session is charged to the night it happened — a late start is never cheaper',
+      'Consecutive-day penalty retired (it scaled off the day\'s own score, so worse days paid less)',
     ],
   },
 ];

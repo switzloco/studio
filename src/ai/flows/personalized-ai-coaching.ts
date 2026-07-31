@@ -596,7 +596,7 @@ const getRecentLogsTool = ai.defineTool(
 const scoreDailyVFTool = ai.defineTool(
   {
     name: 'score_daily_vf',
-    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine (v3.1 Bull–Lovelace). Call this at end-of-day or when the user asks for their daily score. Score is normalized per-user to their fat-oxidation ceiling: 100 pts = burning 70% of the user's Alpert number in fat that day, so the scale means the same for everyone. Score = Σ_slot[(fatBurned/D)×100 − (min(fatStored, faucet)/D)×100 − (muscleLost/10)×2 + (glycogenDrawn/D)×100 × 0.30] where D = 0.70 × Alpert. UNCAPPED both directions — glycogen debt from training earns 30% credit; fat storage penalty is capped per slot at the fat oxidation rate. Penalties: net caloric surplus; ALCOHOL as a counterfactual debit of one clearance-hour of ceiling fat oxidation per standard drink (~5.95 pts/hr × saturating depth, clearance rate set by the client's body surface area and age), with clearance past midnight carried into the next day; seed-oil meals = −5 each. Returns the score and a detailed breakdown.`,
+    description: `Calculates today's Visceral Fat score using the Hourly Metabolic Partitioning Engine (v3.1 Bull–Lovelace). Call this at end-of-day or when the user asks for their daily score. Score is normalized per-user to their fat-oxidation ceiling: 100 pts = burning 70% of the user's Alpert number in fat that day, so the scale means the same for everyone. Score = Σ_slot[(fatBurned/D)×100 − (min(fatStored, faucet)/D)×100 − (muscleLost/10)×2 + (glycogenDrawn/D)×100 × 0.30] where D = 0.70 × Alpert. UNCAPPED both directions — glycogen debt from training earns 30% credit; fat storage penalty is capped per slot at the fat oxidation rate. Penalties: net caloric surplus; ALCOHOL as a counterfactual debit of the session's clearance-hours against the ceiling fat-oxidation rate (~5.95 pts/hr × saturating depth; ~1.5 h per standard drink for the anchor body, scaled by the client's body surface area and age), charged in full to the day the drinking happened regardless of when it started; seed-oil meals = −5 each. Returns the score and a detailed breakdown.`,
     inputSchema: z.object({
       userId: z.string(),
       localDate: z.string().describe('YYYY-MM-DD'),
@@ -691,8 +691,6 @@ const scoreDailyVFTool = ai.defineTool(
           foodLogs,
           exerciseLogs,
           alcoholYesterday,
-          // Alcohol clearance from last night that ran past midnight lands on today.
-          yesterdayFoodLogs: yesterdayFood,
         }),
     );
 
@@ -1242,12 +1240,12 @@ THE SCORING RULES — what actually moves the number (and how to coach them):
 
 Rule 1 — Protein Mandate: Below target protein (usually 150g) means the engine drains muscle protein to fund the deficit — which now directly costs points (−2 per 10 kcal). Call it out: "You're in deficit but protein was short — the engine had to burn muscle, and that's docking your score, not just your physique."
 
-Rule 2 — Alcohol Clearance Debit: Each standard drink costs ONE HOUR of the client's ceiling fat-oxidation rate — roughly 6 points per drink, charged whether or not they were burning fat in that hour. The old "3-hour pause" rule is gone; it only bit when the client was already earning, so drinking straight after dinner used to cost nothing. Now it always costs. Two things scale it, and both are worth explaining when asked:
+Rule 2 — Alcohol Clearance Debit: Each standard drink costs its CLEARANCE TIME (~1.5 hours for a mid-sized client) against the ceiling fat-oxidation rate — roughly 7-9 points per drink once past the first, charged whether or not they were burning fat in those hours. The old "3-hour pause" rule is gone; it only bit when the client was already earning, so drinking straight after dinner used to cost nothing. Now it always costs. Two things scale it, and both are worth explaining when asked:
   • VOLUME sets DURATION, not intensity. Ethanol clears at a near-constant grams/hour (zero-order), so ten drinks occupy the liver ten times as LONG — they don't suppress ten times as HARD. The suppression depth maxes out around 2-3 drinks.
   • BODY SIZE sets the clearance RATE, via liver capacity (body surface area), with a decline as the liver ages. A bigger client clears faster per drink. NEVER surface the age component to the client (see the age rule below) — describe it as their clearance rate or liver capacity, never as "because you're older."
-Coach it with the real arithmetic: "Six drinks bought about six hours where your fat-burn ceiling was clamped — that's −36 before we even price the calories."
+Coach it with the real arithmetic: "Six drinks bought about nine hours where your fat-burn ceiling was clamped — that's −43 before we even price the calories."
 
-Rule 3 — Overnight Carryover: Clearance that runs past midnight is charged to the NEXT day, because those hours land on the fasted morning window — the highest-value fat-oxidation hours the client has. This replaced the old flat consecutive-day penalty. Flag it forward, not backward: "Ten drinks ending at midnight means you're still clearing until ~6 AM — tomorrow starts about −26 in the hole before breakfast."
+Rule 3 — The Whole Session Is Charged To The Night It Happened: clearance that runs past midnight is still billed to the day they drank, so a late session is never cheaper than an early one. Drinking at 11 PM and drinking at 6 PM cost exactly the same. Do NOT tell the client a late night "carries over" or "starts tomorrow in the hole" — it does not; tomorrow starts clean. You still know the clearance time and it is worth saying, but frame it as a fact about their body and not as a scoring penalty: "Seven drinks starting at 11 PM means you're clearing until roughly 6 AM — that's the whole night with fat oxidation clamped, and it's all priced into tonight's number."
 
 Rule 3b — The Surplus Knee (the single most useful thing to tell a heavy drinker): the alcohol debit is only part of the cost, and usually the smaller part. While the client is still in a calorie deficit, each drink costs only the clearance debit (~4-6 pts). Once the drinks push the day into SURPLUS, every additional drink also carries its full calorie penalty — the marginal cost jumps roughly 5×. There is a real cliff mid-session and naming it is genuinely actionable: "Your first four were about −5 each. Five onward were −23 each, because that's where the night crossed into surplus. If you cap it at four next time you keep most of the day."
 
