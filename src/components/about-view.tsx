@@ -76,7 +76,7 @@ export function AboutView() {
           {[
             { icon: <Dumbbell className="w-5 h-5 text-orange-600" />, bg: 'bg-orange-100', label: 'Daily Scores', desc: 'Activity, protein, and sleep goals combine into a single daily equity score.' },
             { icon: <MessageSquare className="w-5 h-5 text-purple-600" />, bg: 'bg-purple-100', label: 'Food & Drink Logs', desc: 'Log meals through the AI coach. Macros are pulled from the USDA database, never guessed.' },
-            { icon: <ScanLine className="w-5 h-5 text-emerald-600" />, bg: 'bg-emerald-100', label: 'DEXA Integration', desc: 'Starting to integrate hard data from DEXA scans to keep the math grounded in reality.' },
+            { icon: <ScanLine className="w-5 h-5 text-emerald-600" />, bg: 'bg-emerald-100', label: 'Body Composition', desc: 'Enter body fat % from a DEXA scan or assessment to sharpen calorie and glycogen estimates.' },
           ].map(({ icon, bg, label, desc }) => (
             <Card key={label} className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
               <CardContent className="p-6">
@@ -90,8 +90,13 @@ export function AboutView() {
 
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-6">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-2">Beta Status</p>
-              the CFO is very much in beta. It&apos;s a sandbox for me to stay compliant with my own health protocols while experimenting with some new coding tools behind the scenes.
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-2">How to Read Your Score</p>
+            <p className="text-[11px] font-medium text-muted-foreground leading-relaxed">
+              Every day starts at zero and earns points for movement, protein, and sleep, minus
+              anything that works against visceral fat loss. Steps, sleep, and HRV only count toward
+              your score when they come from a connected device — anything you type in yourself is
+              kept, but marked as self-reported.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -146,7 +151,7 @@ export function AboutView() {
         <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-6 md:p-8 space-y-6">
             <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-              If you&apos;re testing this out, I want to hear from you. Whether you have ideas for new features, ways to improve the scoring system, or you just spotted a bug — your feedback is huge. You can use the form below, or just email me directly at <a href="mailto:nicholas.switzer@gmail.com" className="text-primary hover:underline font-bold">nicholas.switzer@gmail.com</a>.
+              I want to hear from you. Whether you have ideas for new features, ways to improve the scoring system, or you just spotted a bug — your feedback is huge. You can use the form below, or just email me directly at <a href="mailto:nicholas.switzer@gmail.com" className="text-primary hover:underline font-bold">nicholas.switzer@gmail.com</a>.
             </p>
 
             {status === 'success' ? (

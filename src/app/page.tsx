@@ -16,7 +16,21 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
-import { signInAnonymously, linkWithPopup, GoogleAuthProvider, signOut, signInWithPopup } from 'firebase/auth';
+import {
+  signInAnonymously,
+  linkWithPopup,
+  linkWithRedirect,
+  GoogleAuthProvider,
+  signOut,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from 'firebase/auth';
+import {
+  shouldUseRedirectSignIn,
+  isPopupUnavailableError,
+  isUserCancelledError,
+} from '@/lib/auth-environment';
 import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
@@ -344,6 +358,31 @@ export default function Home() {
     };
   }, [activeTab]);
 
+  // Complete a redirect-based Google sign-in. In the native shell and in
+  // standalone PWAs the popup transport is unavailable, so sign-in navigates
+  // away and lands back here — this is where that round trip is resolved.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then(result => {
+        if (cancelled || !result) return;
+        toast({
+          title: 'Portfolio Secured',
+          description: 'Identity verified. Full ledger access granted.',
+        });
+      })
+      .catch((e: any) => {
+        if (cancelled || isUserCancelledError(e)) return;
+        toast({ variant: 'destructive', title: 'Verification Failed', description: e.message });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoggingIn(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, toast]);
+
   // Show toast for Fitbit OAuth callback result.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -377,12 +416,44 @@ export default function Home() {
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+
+    // Inside the native shell / a standalone PWA there is no popup to open, so
+    // go straight to redirect rather than burning an attempt on a call that is
+    // guaranteed to fail with auth/popup-blocked.
+    if (shouldUseRedirectSignIn()) {
+      try {
+        await signInWithRedirect(auth, provider);
+        // Navigation is under way; the result is picked up on return.
+        return;
+      } catch (e: any) {
+        toast({ variant: 'destructive', title: 'Verification Failed', description: e.message });
+        setIsLoggingIn(false);
+        return;
+      }
+    }
+
     try {
       await signInWithPopup(auth, provider);
       toast({ title: "Portfolio Secured", description: "Identity verified. Full ledger access granted." });
+      setIsLoggingIn(false);
     } catch (e: any) {
+      if (isUserCancelledError(e)) {
+        setIsLoggingIn(false);
+        return;
+      }
+      // The popup transport is unavailable in this browser — fall back to
+      // redirect instead of surfacing a dead end.
+      if (isPopupUnavailableError(e)) {
+        try {
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectError: any) {
+          toast({ variant: 'destructive', title: 'Verification Failed', description: redirectError.message });
+          setIsLoggingIn(false);
+          return;
+        }
+      }
       toast({ variant: "destructive", title: "Verification Failed", description: e.message });
-    } finally {
       setIsLoggingIn(false);
     }
   };
@@ -390,10 +461,31 @@ export default function Home() {
   const handleUpgradeAccount = async () => {
     if (!user) return;
     const provider = new GoogleAuthProvider();
+
+    if (shouldUseRedirectSignIn()) {
+      try {
+        await linkWithRedirect(user, provider);
+        return;
+      } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: error.message });
+        return;
+      }
+    }
+
     try {
       await linkWithPopup(user, provider);
       toast({ title: "Portfolio Secured", description: "Your assets are now linked to your Google account." });
     } catch (error: any) {
+      if (isUserCancelledError(error)) return;
+      if (isPopupUnavailableError(error)) {
+        try {
+          await linkWithRedirect(user, provider);
+          return;
+        } catch (redirectError: any) {
+          toast({ variant: 'destructive', title: 'Sync Failed', description: redirectError.message });
+          return;
+        }
+      }
       toast({ variant: "destructive", title: "Sync Failed", description: error.message });
     }
   };

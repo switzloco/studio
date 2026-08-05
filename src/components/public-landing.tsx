@@ -60,9 +60,9 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
         <div className="max-w-4xl mx-auto text-center space-y-10 relative z-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary mb-4">
             <Zap className="w-3 h-3 fill-primary" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Now in Public Beta</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">USDA-Verified Macros</span>
           </div>
-          
+
           <div className="space-y-4">
             <h2 className="text-6xl md:text-8xl font-black tracking-tighter italic uppercase text-foreground leading-[0.9]">
               Audit Your <span className="text-primary">Biology</span>
@@ -87,7 +87,7 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
               onClick={onAnonymousLogin}
               disabled={isLoggingIn}
             >
-              Quick Preview (No Data Save)
+              Continue as Guest
             </Button>
           </div>
 
@@ -119,9 +119,9 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             </p>
             <ul className="space-y-3">
               {[
-                "Eliminate 'Garbage Data' through hardware verification",
-                "Calibrate metabolic engines via DEXA scan integration",
-                "Provide data-driven coaching that never guesses"
+                "Separate device-verified metrics from self-reported ones",
+                "Refine calorie and glycogen estimates with your body composition",
+                "Provide coaching that looks up macros instead of guessing"
               ].map(item => (
                 <li key={item} className="flex items-center gap-3 text-sm font-bold">
                   <div className="w-1.5 h-1.5 rounded-full bg-primary" />
@@ -131,10 +131,12 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             </ul>
           </div>
           <div className="relative">
-            <div className="aspect-square bg-gradient-to-br from-primary/20 to-accent/20 rounded-[3rem] rotate-3 flex items-center justify-center p-8 border-4 border-dashed border-primary/20">
+            <div className="aspect-square bg-gradient-to-br from-primary/20 to-accent/20 rounded-[3rem] rotate-3 flex items-center justify-center p-8">
               <div className="text-center space-y-4">
-                <BarChart3 className="w-24 h-24 text-primary mx-auto opacity-20" />
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Calibration Suite v1.0</p>
+                <BarChart3 className="w-24 h-24 text-primary mx-auto opacity-30" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Activity, protein, and sleep in one daily score
+                </p>
               </div>
             </div>
           </div>
@@ -154,7 +156,7 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
               {
                 icon: <MessageSquare className="w-6 h-6" />,
                 title: "AI Coach",
-                desc: "Real-time nutritional audit and workout programming powered by Gemini 2.0 Flash."
+                desc: "Log meals and workouts in plain language. Macros are looked up in the USDA database, never guessed."
               },
               {
                 icon: <Target className="w-6 h-6" />,
@@ -164,7 +166,7 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
               {
                 icon: <History className="w-6 h-6" />,
                 title: "Audit Ledger",
-                desc: "A permanent, encrypted record of every health decision and metabolic shift."
+                desc: "A running record of every meal, workout, and daily score, kept private to your account."
               }
             ].map((feature, i) => (
               <Card key={i} className="border-none shadow-xl bg-card hover:translate-y-[-4px] transition-transform duration-300">

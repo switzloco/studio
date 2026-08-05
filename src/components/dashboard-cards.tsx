@@ -460,30 +460,17 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       ? process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID 
       : process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
 
+    const providerLabel = provider === 'google' ? 'Google Health' : 'Fitbit';
+
     if (!clientId) {
-      // No real credentials — run mock handshake locally
-      try {
-        await healthService.saveFitbitCredentials(db, user.uid, {
-          accessToken: 'mock_token',
-          refreshToken: 'mock_refresh',
-          fitbitUserId: 'mock_fitbit_user',
-          expiresAt: Date.now() + 8 * 60 * 60 * 1000,
-          provider,
-        });
-        await healthService.updateHealthData(db, user.uid, {
-          isDeviceVerified: true,
-          steps: 8432,
-          sleepHours: 7.2,
-          hrv: 62,
-        });
-        toast({ 
-          title: `${provider === 'google' ? 'Google Health' : 'Fitbit'} Linked (Demo)`, 
-          description: `Mock device data loaded. Set ${provider === 'google' ? 'NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID' : 'NEXT_PUBLIC_FITBIT_CLIENT_ID'} for real integration.` 
-        });
-      } catch (e) {
-        console.error(`[${provider} Mock] Failed:`, e);
-        toast({ variant: 'destructive', title: 'Connection Failed', description: `Could not simulate ${provider} link.` });
-      }
+      // Never fabricate device data — a missing client ID is a configuration
+      // fault, so surface it instead of writing a verified-looking snapshot.
+      console.error(`[${provider}] Missing OAuth client ID — cannot start device link.`);
+      toast({
+        variant: 'destructive',
+        title: `${providerLabel} Unavailable`,
+        description: `${providerLabel} linking is temporarily unavailable. Please try again later or connect a different device.`,
+      });
       return;
     }
 
@@ -573,25 +560,14 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     }
 
     if ('mock' in result) {
-      try {
-        await healthService.saveOuraCredentials(db, user.uid, {
-          accessToken: 'mock_oura_token',
-          refreshToken: 'mock_oura_refresh',
-          ouraUserId: 'mock_oura_user',
-          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        });
-        await healthService.updateHealthData(db, user.uid, {
-          isDeviceVerified: true,
-          connectedDevice: 'oura',
-          steps: 7841,
-          sleepHours: 7.5,
-          hrv: 58,
-        });
-        toast({ title: 'Oura Ring Linked (Demo)', description: 'Mock device data loaded. Set NEXT_PUBLIC_OURA_CLIENT_ID for real integration.' });
-      } catch (e) {
-        console.error('[Oura Mock] Failed:', e);
-        toast({ variant: 'destructive', title: 'Connection Failed', description: 'Could not simulate Oura link.' });
-      }
+      // Never fabricate device data — a missing client ID is a configuration
+      // fault, so surface it instead of writing a verified-looking snapshot.
+      console.error('[Oura] Missing OAuth client ID — cannot start device link.');
+      toast({
+        variant: 'destructive',
+        title: 'Oura Unavailable',
+        description: 'Oura linking is temporarily unavailable. Please try again later or connect a different device.',
+      });
       return;
     }
 
