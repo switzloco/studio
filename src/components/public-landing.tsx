@@ -32,23 +32,23 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
           <Link href="#features" className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">Features</Link>
           <Link href="#purpose" className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">Purpose</Link>
           <Link href="/privacy" className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">Privacy</Link>
-          <Button 
-            size="sm" 
+          <Button
+            size="sm"
             className="rounded-xl font-black uppercase tracking-widest text-[10px] h-9"
-            onClick={onLogin}
+            onClick={onAnonymousLogin}
             disabled={isLoggingIn}
           >
             Launch App
           </Button>
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
+        <Button
+          variant="outline"
+          size="sm"
           className="md:hidden rounded-xl font-black uppercase tracking-widest text-[10px] h-9 border-2"
-          onClick={onLogin}
+          onClick={onAnonymousLogin}
           disabled={isLoggingIn}
         >
-          Login
+          Launch App
         </Button>
       </nav>
 
@@ -72,10 +72,14 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             </p>
           </div>
 
+          {/* Guest entry leads. It is the only sign-in path with no popup and
+              no external navigation, so it works identically in the browser, a
+              standalone PWA, and the native WebView — nobody can be locked out
+              of the app by an OAuth transport that the host refuses. */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <Button
               className="h-16 px-10 rounded-2xl text-base font-black uppercase tracking-widest shadow-2xl group w-full sm:w-auto"
-              onClick={onLogin}
+              onClick={onAnonymousLogin}
               disabled={isLoggingIn}
             >
               Start Your Audit
@@ -84,12 +88,15 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             <Button
               variant="outline"
               className="h-16 px-10 rounded-2xl text-xs font-black uppercase tracking-widest border-2 w-full sm:w-auto bg-background/50 backdrop-blur-sm"
-              onClick={onAnonymousLogin}
+              onClick={onLogin}
               disabled={isLoggingIn}
             >
-              Continue as Guest
+              Sign In With Google
             </Button>
           </div>
+          <p className="text-xs font-medium text-muted-foreground/70">
+            No account needed to start. Sign in with Google any time to save your ledger across devices.
+          </p>
 
           <div className="pt-12 flex flex-wrap justify-center gap-8 opacity-40 grayscale group-hover:grayscale-0 transition-all">
             <div className="flex items-center gap-2">
