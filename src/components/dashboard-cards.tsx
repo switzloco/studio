@@ -5,7 +5,7 @@ import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle, Activity, TrendingUp, Watch } from "lucide-react";
+import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle, Activity, TrendingUp } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
@@ -19,7 +19,6 @@ import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
@@ -54,27 +53,6 @@ const OuraLogo = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="currentColor">
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
     <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
-  </svg>
-);
-
-const GoogleLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className}>
-    <path
-      fill="#4285F4"
-      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-    />
-    <path
-      fill="#34A853"
-      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-1 .67-2.28 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-    />
-    <path
-      fill="#FBBC05"
-      d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z"
-    />
-    <path
-      fill="#EA4335"
-      d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-    />
   </svg>
 );
 
@@ -276,7 +254,6 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
 
   const isLegacyFitbit = fitbitCreds?.provider === 'fitbit';
-  const isGoogleHealth = fitbitCreds?.provider === 'google';
 
   // Use computed totals from food_log (accurate) or fall back to user doc counter
   const dailyProteinG = computedTotals?.proteinG ?? (data?.dailyProteinG || 0);
@@ -453,14 +430,12 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     (!!fitbitForDate?.capturedOnDate && fitbitForDate.capturedOnDate <= selectedDateStr)
   );
 
-  const handleConnectFitbit = async (provider: 'fitbit' | 'google' = 'fitbit') => {
+  const handleConnectFitbit = async () => {
     if (!user) return;
 
-    const clientId = provider === 'google' 
-      ? process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID 
-      : process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
-
-    const providerLabel = provider === 'google' ? 'Google Health' : 'Fitbit';
+    const provider = 'fitbit' as const;
+    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    const providerLabel = 'Fitbit';
 
     if (!clientId) {
       // Never fabricate device data — a missing client ID is a configuration
@@ -773,46 +748,17 @@ const WithingsLogo = ({ className }: { className?: string }) => (
             </CardContent>
           </Card>
         ) : data.isDeviceVerified ? (
-          // Fitbit / Google Health connected (catch-all for legacy users with no connectedDevice field)
+          // Fitbit connected (catch-all for legacy users with no connectedDevice field)
           <div className="space-y-4">
-            {/* Migration banner — re-enable when Google Health API is ready (~Sept 2026 before Fitbit Web API sunset). */}
-            {false && isLegacyFitbit && (
-              <Card className="border-none bg-amber-50 ring-1 ring-amber-200 shadow-sm overflow-hidden">
-                <CardContent className="p-4 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-100 rounded-lg">
-                      <AlertTriangle className="w-5 h-5 text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-tight text-amber-800">Action Required: Migration</p>
-                      <p className="text-[10px] font-bold text-amber-700/70">
-                        The legacy Fitbit API is being decommissioned. Upgrade to Google Health infrastructure for continued service.
-                      </p>
-                    </div>
-                  </div>
-                  <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                    Upgrade Now
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
             <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
               <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-emerald-100 rounded-lg shrink-0 flex items-center gap-1.5">
-                    {isGoogleHealth ? (
-                      <>
-                        <GoogleLogo className="w-5 h-5" />
-                        <div className="w-px h-3 bg-emerald-300" />
-                        <FitbitLogo className="w-4 h-4 text-emerald-600" />
-                      </>
-                    ) : (
-                      <FitbitLogo className="w-5 h-5 text-emerald-600" />
-                    )}
+                    <FitbitLogo className="w-5 h-5 text-emerald-600" />
                   </div>
                   <div>
                     <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
-                      {isGoogleHealth ? 'Google Health Connected' : 'Fitbit Connected'}
+                      Fitbit Connected
                     </p>
                     <p className="text-[10px] font-bold text-emerald-700/70">
                       {fitbitCreds?.lastSyncedAt
@@ -853,68 +799,10 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                   Oura
                 </Button>
                 
-                <Button size="sm" onClick={() => handleConnectFitbit('fitbit')} className="bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
+                <Button size="sm" onClick={handleConnectFitbit} className="bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
                   <FitbitLogo className="w-3.5 h-3.5 mr-2 text-emerald-600" />
                   Fitbit
                 </Button>
-
-                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg shadow-sm px-1.5 py-0.5 h-8">
-                  <Button size="sm" onClick={() => handleConnectFitbit('google')} className="bg-transparent hover:bg-slate-50 border-none shadow-none text-slate-700 font-black text-[10px] uppercase h-7 px-2">
-                    <div className="flex items-center">
-                      <GoogleLogo className="w-3.5 h-3.5 mr-1.5" />
-                      <span>Google Health</span>
-                    </div>
-                  </Button>
-                  <div className="w-px h-4 bg-slate-200" />
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button size="icon" variant="ghost" className="h-6 w-6 text-slate-400 hover:text-slate-700 rounded-md shrink-0">
-                        <Watch className="w-3.5 h-3.5" />
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                          <Watch className="w-5 h-5 text-emerald-600" />
-                          Samsung Watch Setup Guide
-                        </DialogTitle>
-                        <DialogDescription className="text-xs pt-1">
-                          Follow these steps to sync data from your Samsung Galaxy Watch (or other Wear OS device) to the CFO App.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 my-2 text-sm">
-                        <div className="flex gap-3">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">1</span>
-                          <div>
-                            <p className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Install Health Connect</p>
-                            <p className="text-xs text-foreground/80 leading-relaxed mt-0.5">Download <strong>Health Connect</strong> from the Google Play Store on your Android phone.</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">2</span>
-                          <div>
-                            <p className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Connect Samsung Health</p>
-                            <p className="text-xs text-foreground/80 leading-relaxed mt-0.5">Open <strong>Samsung Health settings</strong> on your phone, tap <strong>Health Connect</strong>, and toggle <strong>Allow all</strong> to sync steps, sleep, and activity segments.</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">3</span>
-                          <div>
-                            <p className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Link Google Fit</p>
-                            <p className="text-xs text-foreground/80 leading-relaxed mt-0.5">In <strong>Google Fit</strong> app settings, turn on <strong>Sync Fit with Health Connect</strong>, enabling it to read the shared watch data.</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800">4</span>
-                          <div>
-                            <p className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Authorize CFO App</p>
-                            <p className="text-xs text-foreground/80 leading-relaxed mt-0.5">Click <strong>Google Health</strong> in the CFO App and sign in with your Google account. Your watch data will now sync automatically in the background!</p>
-                          </div>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </div>
 
                 <Button size="sm" onClick={handleConnectWithings} className="bg-white border border-blue-200 hover:bg-blue-50 text-blue-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
                   <WithingsLogo className="w-3.5 h-3.5 mr-2" />
@@ -1032,10 +920,8 @@ const WithingsLogo = ({ className }: { className?: string }) => (
               </div>
               <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
               <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from {
-                isGoogleHealth ? 'Google Health'
-                  : data.connectedDevice === 'oura' ? 'Oura Ring'
+                data.connectedDevice === 'oura' ? 'Oura Ring'
                   : data.connectedDevice === 'withings' ? 'Withings'
-                  : data.connectedDevice === 'google' ? 'Google Health'
                   : 'Fitbit'
               }</p>
               <h4 className="text-4xl font-black italic">
