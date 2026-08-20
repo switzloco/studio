@@ -1,9 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials, WithingsCredentials, CampaignBriefDoc } from './health-service';
+import type { HealthData, HealthLog, HistoryEntry, UserPreferences, FitbitCredentials, FitbitDailySnapshot, OuraCredentials, WithingsCredentials } from './health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry, ChatMessage, ChatSession, SharedMeal, SharedMealItem } from './food-exercise-types';
-import type { CharacterSheet } from './campaign/types';
-import { defaultCharacterSheet } from './campaign/types';
 
 /**
  * @fileOverview Server-side health service using the Firebase Admin SDK.
@@ -436,30 +434,4 @@ export const adminHealthService = {
     return true;
   },
 
-  // --- Campaign Mode (persistent RPG Character Sheet) ---
-
-  async getCampaignState(db: Firestore, userId: string): Promise<CharacterSheet> {
-    const docRef = db.doc(`users/${userId}/campaign/state`);
-    const docSnap = await docRef.get();
-    if (docSnap.exists) return docSnap.data() as CharacterSheet;
-
-    const defaults = defaultCharacterSheet(new Date().toISOString().split('T')[0]);
-    await docRef.set(defaults, { merge: true });
-    return defaults;
-  },
-
-  async updateCampaignState(db: Firestore, userId: string, sheet: CharacterSheet): Promise<void> {
-    const docRef = db.doc(`users/${userId}/campaign/state`);
-    await docRef.set(this.deepClean({ ...sheet, updatedAt: FieldValue.serverTimestamp() }), { merge: true });
-  },
-
-  async getCampaignBrief(db: Firestore, userId: string, isoDate: string): Promise<CampaignBriefDoc | null> {
-    const snap = await db.doc(`users/${userId}/campaign_briefs/${isoDate}`).get();
-    return snap.exists ? (snap.data() as CampaignBriefDoc) : null;
-  },
-
-  async saveCampaignBrief(db: Firestore, userId: string, isoDate: string, text: string): Promise<void> {
-    const docRef = db.doc(`users/${userId}/campaign_briefs/${isoDate}`);
-    await docRef.set({ isoDate, text, generatedAt: FieldValue.serverTimestamp() });
-  },
 };

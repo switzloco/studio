@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, RotateCcw, Activity, MessageSquare, Sliders } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
@@ -24,8 +24,6 @@ const RANKS = [
   { label: 'Managing Director', min: 7500,  max: 9999,     color: 'text-orange-600',  bg: 'bg-orange-100'  },
   { label: 'Partner',           min: 10000, max: Infinity,  color: 'text-emerald-600', bg: 'bg-emerald-100' },
 ] as const;
-
-const STARTING_EQUITY = 0;
 
 function getRank(points: number) {
   return RANKS.find(r => points >= r.min && points <= r.max) ?? RANKS[0];
@@ -48,11 +46,7 @@ export function PreferencesView() {
   // Live points subscription
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData } = useDoc<HealthData>(userDocRef);
-  const points = healthData?.visceralFatPoints ?? STARTING_EQUITY;
-
-  // Points editor state
-  const [pointsInput, setPointsInput] = useState('');
-  const [isSavingPoints, setIsSavingPoints] = useState(false);
+  const points = healthData?.visceralFatPoints ?? 0;
 
   // Body composition inputs — seeded from live health data
   const [heightCm, setHeightCm] = useState('');
@@ -94,19 +88,6 @@ export function PreferencesView() {
     }
   };
 
-  const handleSetPoints = async (newPoints: number) => {
-    if (!user || isNaN(newPoints)) return;
-    setIsSavingPoints(true);
-    try {
-      await healthService.updateHealthData(db, user.uid, { visceralFatPoints: newPoints });
-      toast({ title: 'Points Updated', description: `Equity set to ${newPoints.toLocaleString()} pts.` });
-      setPointsInput('');
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Update Failed', description: e.message });
-    } finally {
-      setIsSavingPoints(false);
-    }
-  };
 
   useEffect(() => {
     if (user) {
@@ -273,38 +254,15 @@ export function PreferencesView() {
                 </div>
               </div>
 
-              {/* Controls */}
-              <div className="border-t pt-4 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Equity Controls</p>
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    placeholder="Set points manually…"
-                    value={pointsInput}
-                    onChange={e => setPointsInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSetPoints(Number(pointsInput))}
-                    className="h-10 text-sm bg-white/50 border-muted-foreground/10 font-bold"
-                  />
-                  <Button
-                    size="icon"
-                    className="h-10 w-10 shrink-0 rounded-xl"
-                    disabled={isSavingPoints || !pointsInput}
-                    onClick={() => handleSetPoints(Number(pointsInput))}
-                  >
-                    {isSavingPoints ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10 shrink-0 rounded-xl border-dashed"
-                    disabled={isSavingPoints}
-                    title="Reset to starting equity (1,250 pts)"
-                    onClick={() => handleSetPoints(STARTING_EQUITY)}
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </Button>
-                </div>
-                <p className="text-[9px] text-muted-foreground italic">Reset returns to {STARTING_EQUITY.toLocaleString()} pts (starting equity). Enter any value to jump to a specific tier.</p>
+              {/* Equity is derived, never set. Every point traces to a scored
+                  day in the ledger — see score-backfill.ts, which rebuilds the
+                  running total from history. There is deliberately no manual
+                  override here: a rank you can type in is not a rank. */}
+              <div className="border-t pt-4">
+                <p className="text-[9px] text-muted-foreground italic">
+                  Equity is the running total of every day you have scored. It is calculated
+                  from your ledger, so it always starts at zero and only moves when a day does.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -500,18 +458,6 @@ export function PreferencesView() {
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-1 min-w-0">
-                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Campaign Mode <span className="text-muted-foreground/50">(experimental)</span></p>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
-                    Adds a persistent RPG tab that turns your daily progress into a 20-level narrative campaign
-                  </p>
-                </div>
-                <Switch
-                  checked={prefs.campaignModeEnabled ?? false}
-                  onCheckedChange={(checked) => setPrefs({ ...prefs, campaignModeEnabled: checked })}
-                />
-              </div>
             </CardContent>
           </Card>
 
