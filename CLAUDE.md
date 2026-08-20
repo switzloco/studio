@@ -100,3 +100,38 @@ Files with `'use server'` may ONLY export `async function`s. Never export:
 - Plain objects or arrays
 - Type-only exports at runtime (use `export type { T }` which is erased, not `export { T }`)
 
+## App Store Constraints — Do Not Regress
+
+iOS build 1.0 (1) was rejected under guidelines 2.1.0, 2.2.0 and 2.3.8. Full
+context, remaining actions and cleanup candidates: **`docs/APP_STORE_STATUS.md`**.
+Read it before touching auth, the landing page, or user-visible copy.
+
+The rules below caused that rejection. They are not style preferences.
+
+**The native shell loads the live site.** `capacitor.config.ts` sets
+`server.url = https://cfofitness.app`, so a deploy to `main` reaches installed
+iOS/Android apps immediately. There is no staging between `main` and users'
+phones. Web fixes need no rebuild; a bad deploy breaks shipped apps.
+
+**Never call `signInWithPopup` / `linkWithPopup` unguarded.** The Capacitor
+WKWebView cannot open a popup and fails with `auth/popup-blocked` — this is what
+blocked App Review. Route through `shouldUseRedirectSignIn()` in
+`src/lib/auth-environment.ts`. Covered by
+`src/lib/__tests__/auth-environment.test.ts`. **The bug is invisible in a desktop
+browser**, where popups work; do not conclude sign-in is fine from a local test.
+
+**Guest entry stays the primary landing CTA.** It is the only sign-in path with
+no popup and no external navigation, so it is the guarantee that a reviewer can
+always get into the app. Demoting it re-opens the 2.1.0 rejection.
+
+**Never fabricate health data.** Missing OAuth credentials must raise an error,
+never write plausible-looking steps/sleep/HRV or set `isDeviceVerified: true`.
+
+**No beta / demo / preview / "testing" language in user-visible copy** — an
+automatic 2.2.0 rejection. Before shipping copy changes:
+`grep -rniE "\bbeta\b|demo|placeholder|coming soon" src/components src/app`
+
+**UI claims must match shipped behavior** (guideline 2.3.8). Do not name a model
+version, advertise an unbuilt integration, or claim a security property
+(encryption, "no data saved") that the code does not implement.
+
