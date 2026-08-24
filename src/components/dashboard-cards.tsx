@@ -433,9 +433,9 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const handleConnectFitbit = async () => {
     if (!user) return;
 
-    const provider = 'fitbit' as const;
-    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
-    const providerLabel = 'Fitbit';
+    const provider = 'google' as const;
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    const providerLabel = 'Google Health';
 
     if (!clientId) {
       // Never fabricate device data — a missing client ID is a configuration
@@ -758,7 +758,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                   </div>
                   <div>
                     <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
-                      Fitbit Connected
+                      {isLegacyFitbit ? 'Fitbit Connected' : 'Google Health Connected'}
                     </p>
                     <p className="text-[10px] font-bold text-emerald-700/70">
                       {fitbitCreds?.lastSyncedAt
@@ -801,7 +801,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 
                 <Button size="sm" onClick={handleConnectFitbit} className="bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
                   <FitbitLogo className="w-3.5 h-3.5 mr-2 text-emerald-600" />
-                  Fitbit
+                  Google Health
                 </Button>
 
                 <Button size="sm" onClick={handleConnectWithings} className="bg-white border border-blue-200 hover:bg-blue-50 text-blue-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">

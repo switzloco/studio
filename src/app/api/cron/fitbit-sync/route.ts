@@ -52,8 +52,8 @@ export async function GET(request: NextRequest) {
   const staleUsers: string[] = [];
   for (const userDoc of usersSnapshot.docs) {
     const userId = userDoc.id;
-    // Skip Oura users — they have their own cron at /api/cron/oura-sync.
-    if (userDoc.data().connectedDevice === 'oura') {
+    // Skip Oura and Withings users — they have their own cron.
+    if (userDoc.data().connectedDevice === 'oura' || userDoc.data().connectedDevice === 'withings') {
       results.push({ userId, status: 'skipped' });
       continue;
     }

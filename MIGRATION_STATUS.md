@@ -1,7 +1,8 @@
 # Google Health API Migration & Verification Plan
 
 ## Overview
-This project is migrating from the legacy Fitbit Web API to the **Google Health API (v4 REST)**. The decommissioning deadline for Fitbit is September 2026. We are currently in a "Dual-Provider" state.
+This project is migrating from the legacy Fitbit Web API to the **Google Health API (v4 REST)**. The decommissioning deadline for Fitbit is September 2026. 
+The UI now defaults to Google Health for new connections, though legacy Fitbit connections are still supported in a "Dual-Provider" state.
 
 ## 1. Technical Architecture
 We use a provider-agnostic wrapper in `fitbit-service.ts`.
