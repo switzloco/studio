@@ -426,7 +426,6 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   // data), or the snapshot was captured mid-day (capturedOnDate is that same
   // day, so caloriesOut is partial). Pressing "Sync Date" finalises it.
   const pastScoreProvisional = !isViewingToday && !!data.isDeviceVerified && !!historyEntry && (
-    historyEntry.breakdown?.caloriesOutEstimated === true ||
     (!!fitbitForDate?.capturedOnDate && fitbitForDate.capturedOnDate <= selectedDateStr)
   );
 
