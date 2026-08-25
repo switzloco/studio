@@ -641,6 +641,9 @@ export const fitbitService = {
         fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
+      console.log(`[GoogleHealth] Raw stepsRollup for ${targetDate}:`, JSON.stringify(stepsRollup, null, 2));
+      console.log(`[GoogleHealth] Raw stepsReconcile for ${targetDate}:`, JSON.stringify(stepsReconcile, null, 2));
+
       const stepsCount = Math.max(parseHealthSteps(stepsRollup), parseHealthSteps(stepsReconcile));
       const caloriesOut = parseHealthCalories(caloriesData);
       const sleepHours = parseHealthSleepHours(sleepData);
