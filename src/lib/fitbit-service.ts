@@ -563,7 +563,7 @@ export const fitbitService = {
       const sleepStartMs = startMs - 6 * 3_600_000;
       const sleepEndMs   = endMs   + 12 * 3_600_000;
 
-      const [stepsDefaultData, stepsMergedData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
+      const [stepsDefaultData, stepsMergedData, stepsHCData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
         // Default aggregation — Google Fit picks one canonical step source
         // (usually phone-pedometer-estimated). Often misses watch/Health Connect.
         googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
@@ -575,6 +575,15 @@ export const fitbitService = {
           'derived:com.google.step_count.delta:com.google.android.gms:merge_step_deltas',
         ).catch((err) => {
           console.warn('[FitbitService] Google Fit merged step datasource unavailable:', err?.message ?? err);
+          return null;
+        }),
+        // Explicit Health Connect datasource — often where Fitbit (via Health Connect) writes.
+        googleFitAggregate(
+          'com.google.step_count.delta',
+          accessToken, startMs, endMs,
+          'derived:com.google.step_count.delta:com.google.android.gms:health_connect',
+        ).catch((err) => {
+          console.warn('[FitbitService] Google Fit health_connect step datasource unavailable:', err?.message ?? err);
           return null;
         }),
         googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
@@ -594,7 +603,15 @@ export const fitbitService = {
       // wins for Samsung Health users, the default wins for native Google Fit.
       const stepsDefault = fitSumInt(stepsDefaultData);
       const stepsMerged  = stepsMergedData ? fitSumInt(stepsMergedData) : 0;
-      const stepsCount   = Math.max(stepsDefault, stepsMerged);
+      const stepsHC      = stepsHCData ? fitSumInt(stepsHCData) : 0;
+      
+      console.log(`[FitbitService] Step count diagnosis for ${targetDate}:`, {
+        stepsDefault,
+        stepsMerged,
+        stepsHC,
+      });
+
+      const stepsCount   = Math.max(stepsDefault, stepsMerged, stepsHC);
       const expended    = fitSumFp(caloriesData);
       const bmr         = bmrData ? fitSumFp(bmrData) : 0;
       // Samsung Health via Health Connect writes only active calories to
