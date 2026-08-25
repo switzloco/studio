@@ -99,44 +99,60 @@ async function googleHealthDailyRollUp(
   return res.json();
 }
 
-/**
- * Google Health API v4 — reconcile endpoint.
- * Fetches reconciled/merged continuous streams (e.g. sleep, weight).
- */
 async function googleHealthReconcile(
   dataType: string,
   accessToken: string,
   startTimeIso: string,
   endTimeIso: string,
 ): Promise<any> {
-  const filterKey = dataType.replace(/-/g, '_');
-  const filter = encodeURIComponent(
-    `${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.end_time <= "${endTimeIso}"`
+  // Use camelCase for the filter fields since JSON uses startTime/endTime.
+  // We'll try without the filterKey prefix first.
+  let filter = encodeURIComponent(
+    `interval.startTime >= "${startTimeIso}" AND interval.endTime <= "${endTimeIso}"`
   );
-  const res = await fetch(
-    `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-  if (!res.ok) {
-    // Fallback to simple list if reconcile with filter fails
-    const listRes = await fetch(`https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints`, {
+  
+  let allPoints: any[] = [];
+  let pageToken = '';
+
+  do {
+    const url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}${pageToken ? `&pageToken=${pageToken}` : ''}`;
+    const res = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
     });
-    if (listRes.ok) return listRes.json();
 
-    const body = await res.text().catch(() => '');
-    console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType}:`, body);
-    return null;
-  }
-  return res.json();
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType} with filter ${decodeURIComponent(filter)}:`, body);
+      
+      // If our filter failed, try falling back to the endpoint WITH the prefix
+      if (pageToken === '' && body.includes('Invalid filter')) {
+        const filterKey = dataType.replace(/-/g, '_');
+        filter = encodeURIComponent(`${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.end_time <= "${endTimeIso}"`);
+        const fallbackUrl = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}`;
+        const fallbackRes = await fetch(fallbackUrl, {
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        });
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          return fallbackData; // Note: doesn't paginate fallback for simplicity right now
+        } else {
+          console.warn(`[GoogleHealth] reconcile fallback error for ${dataType}:`, await fallbackRes.text().catch(()=>''));
+        }
+      }
+      return { dataPoints: allPoints }; // return what we have
+    }
+
+    const data = await res.json();
+    if (data.dataPoints) {
+      allPoints = allPoints.concat(data.dataPoints);
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+
+  return { dataPoints: allPoints };
 }
 
 /** Parse total steps from Google Health API dailyRollUp or reconcile response. */
