@@ -65,24 +65,17 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
 }
 
 /**
- * Google Fit REST API v1 — aggregate endpoint.
- * Uses a single daily bucket so we get one rolled-up value per metric.
- * @param dataTypeName e.g. 'com.google.step_count.delta'
- * @param startTimeMillis  UTC ms for window start (local midnight is best)
- * @param endTimeMillis    UTC ms for window end
+ * Google Health API v4 — dailyRollUp endpoint.
+ * Fetches daily aggregated totals (e.g. steps, total-calories).
  */
-async function googleFitAggregate(
-  dataTypeName: string,
+async function googleHealthDailyRollUp(
+  dataType: string,
   accessToken: string,
-  startTimeMillis: number,
-  endTimeMillis: number,
-  dataSourceId?: string,
+  startTimeIso: string,
+  endTimeIso: string,
 ): Promise<any> {
-  const aggregateBy = dataSourceId
-    ? [{ dataTypeName, dataSourceId }]
-    : [{ dataTypeName }];
   const res = await fetch(
-    'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
+    `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:dailyRollUp`,
     {
       method: 'POST',
       headers: {
@@ -90,73 +83,129 @@ async function googleFitAggregate(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        aggregateBy,
-        bucketByTime: { durationMillis: endTimeMillis - startTimeMillis },
-        startTimeMillis,
-        endTimeMillis,
+        range: {
+          startTime: startTimeIso,
+          endTime: endTimeIso,
+        },
+        windowSizeDays: 1,
       }),
     },
   );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error(`[FitbitService] Google Fit API error ${res.status} for ${dataTypeName}:`, body);
-    throw new FitbitApiError(res.status, `googlefit:${dataTypeName}`, `Google Fit API ${res.status}`, body);
+    console.error(`[GoogleHealth] dailyRollUp error ${res.status} for ${dataType}:`, body);
+    throw new FitbitApiError(res.status, `googlehealth:${dataType}`, `Google Health API ${res.status}`, body);
   }
   return res.json();
 }
 
-/** Sum all intVal data points across every bucket in a Google Fit aggregate response. */
-function fitSumInt(data: any): number {
-  let total = 0;
-  for (const bucket of (data?.bucket ?? [])) {
-    for (const dataset of (bucket?.dataset ?? [])) {
-      for (const point of (dataset?.point ?? [])) {
-        total += point?.value?.[0]?.intVal ?? 0;
-      }
-    }
-  }
-  return total;
-}
-
-/** Sum all fpVal data points across every bucket in a Google Fit aggregate response. */
-function fitSumFp(data: any): number {
-  let total = 0;
-  for (const bucket of (data?.bucket ?? [])) {
-    for (const dataset of (bucket?.dataset ?? [])) {
-      for (const point of (dataset?.point ?? [])) {
-        total += point?.value?.[0]?.fpVal ?? 0;
-      }
-    }
-  }
-  return total;
-}
-
 /**
- * Compute total sleep duration in seconds from a Google Fit sleep segment response.
- * Sleep segment intVal type codes:
- *   1 = Awake (within sleep cycle — do NOT count)
- *   2 = Sleep (generic / unclassified — count)
- *   3 = Out of bed (do NOT count)
- *   4 = Light sleep (count)
- *   5 = Deep sleep (count)
- *   6 = REM (count)
+ * Google Health API v4 — reconcile endpoint.
+ * Fetches reconciled/merged continuous streams (e.g. sleep, weight).
  */
-function fitSleepSeconds(data: any): number {
-  const SLEEP_TYPES = new Set([2, 4, 5, 6]);
-  let totalSec = 0;
-  for (const bucket of (data?.bucket ?? [])) {
-    for (const dataset of (bucket?.dataset ?? [])) {
-      for (const point of (dataset?.point ?? [])) {
-        const sleepType = point?.value?.[0]?.intVal ?? 0;
-        if (SLEEP_TYPES.has(sleepType)) {
-          const startMs = Math.round(Number(point.startTimeNanos) / 1_000_000);
-          const endMs   = Math.round(Number(point.endTimeNanos)   / 1_000_000);
-          totalSec += (endMs - startMs) / 1000;
+async function googleHealthReconcile(
+  dataType: string,
+  accessToken: string,
+  startTimeIso: string,
+  endTimeIso: string,
+): Promise<any> {
+  const filterKey = dataType.replace(/-/g, '_');
+  const filter = encodeURIComponent(
+    `${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.end_time <= "${endTimeIso}"`
+  );
+  const res = await fetch(
+    `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  if (!res.ok) {
+    // Fallback to simple list if reconcile with filter fails
+    const listRes = await fetch(`https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (listRes.ok) return listRes.json();
+
+    const body = await res.text().catch(() => '');
+    console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType}:`, body);
+    return null;
+  }
+  return res.json();
+}
+
+/** Parse total steps from Google Health API dailyRollUp or reconcile response. */
+function parseHealthSteps(data: any): number {
+  if (!data) return 0;
+  let total = 0;
+  const points = data?.dailyRollupDataPoints || data?.dataPoints || [];
+  for (const p of points) {
+    const val =
+      p?.value?.steps?.countSum ??
+      p?.value?.stepsRollupValue?.countSum ??
+      p?.value?.countSum ??
+      p?.value?.steps?.count ??
+      p?.value?.steps ??
+      p?.steps?.countSum ??
+      p?.steps?.count ??
+      0;
+    if (typeof val === 'number') total += val;
+    else if (typeof val === 'string') total += parseInt(val, 10) || 0;
+  }
+  return total;
+}
+
+/** Parse total calories from Google Health API dailyRollUp response. */
+function parseHealthCalories(data: any): number {
+  if (!data) return 0;
+  let total = 0;
+  const points = data?.dailyRollupDataPoints || data?.dataPoints || [];
+  for (const p of points) {
+    const val =
+      p?.value?.totalCalories?.calories ??
+      p?.value?.totalCaloriesRollupValue?.calories ??
+      p?.value?.calories ??
+      p?.value?.caloriesSum ??
+      p?.totalCalories?.calories ??
+      0;
+    if (typeof val === 'number') total += val;
+    else if (typeof val === 'string') total += parseFloat(val) || 0;
+  }
+  return Math.round(total);
+}
+
+/** Parse sleep duration in hours from Google Health API sleep data points. */
+function parseHealthSleepHours(data: any): number {
+  if (!data) return 0;
+  const points = data?.dataPoints || data?.sleepDataPoints || [];
+  let totalMinutes = 0;
+  for (const p of points) {
+    const sleepObj = p?.sleep || p;
+    const stages = sleepObj?.stages || [];
+    if (stages.length > 0) {
+      for (const s of stages) {
+        if (s?.stage && s.stage !== 'AWAKE' && s.stage !== 'OUT_OF_BED') {
+          const sStart = new Date(s.interval?.startTime || s.startTime).getTime();
+          const sEnd = new Date(s.interval?.endTime || s.endTime).getTime();
+          if (sEnd > sStart) {
+            totalMinutes += (sEnd - sStart) / 60000;
+          }
         }
       }
+    } else if (sleepObj?.interval) {
+      const sStart = new Date(sleepObj.interval.startTime).getTime();
+      const sEnd = new Date(sleepObj.interval.endTime).getTime();
+      if (sEnd > sStart) {
+        totalMinutes += (sEnd - sStart) / 60000;
+      }
     }
   }
-  return totalSec;
+  return Math.round((totalMinutes / 60) * 10) / 10;
 }
 
 /**
@@ -265,40 +314,29 @@ async function fetchActivitiesForDate(
   if (accessToken === 'mock_token') return [];
   try {
     if (provider === 'google') {
-      // Use a wide window (prev midnight → next midnight UTC) so we don't clip
-      // activities that straddle a local midnight boundary.
       const { startMs, endMs } = dateToUtcMs(date, timezoneOffset);
-      const data = await googleFitAggregate('com.google.activity.segment', accessToken, startMs, endMs);
+      const startTimeIso = new Date(startMs).toISOString();
+      const endTimeIso = new Date(endMs).toISOString();
+      const data = await googleHealthReconcile('activity-session', accessToken, startTimeIso, endTimeIso).catch(() => null);
       const activities: FitbitActivity[] = [];
-
-      for (const bucket of (data?.bucket ?? [])) {
-        for (const dataset of (bucket?.dataset ?? [])) {
-          for (const point of (dataset?.point ?? [])) {
-            const activityTypeId = point?.value?.[0]?.intVal ?? 0;
-            const startMs2 = Math.round(Number(point.startTimeNanos) / 1_000_000);
-            const endMs2   = Math.round(Number(point.endTimeNanos)   / 1_000_000);
-            const durationMin = Math.round((endMs2 - startMs2) / 60_000);
-
-            // Skip trivially short segments (GPS drift, brief pauses, etc.)
-            if (durationMin < 5) continue;
-
-            const activityName = GOOGLE_FIT_ACTIVITY_TYPES[activityTypeId] ?? 'Exercise';
-            const startDate = new Date(startMs2);
-            const hh = String(startDate.getUTCHours()).padStart(2, '0');
-            const mm = String(startDate.getUTCMinutes()).padStart(2, '0');
-
-            activities.push({
-              activityName,
-              startTime: `${hh}:${mm}`,
-              durationMin,
-              // Google Fit activity segments don't carry calorie data — that
-              // lives in com.google.calories.expended. Leave 0; calories come
-              // from the daily total in syncTodayData.
-              calories: 0,
-              activityTier: classifyActivityTier(activityName),
-            } satisfies FitbitActivity);
-          }
-        }
+      const points = data?.dataPoints || [];
+      for (const point of points) {
+        const session = point?.activitySession || point;
+        const name = session?.activityType || session?.title || 'Exercise';
+        const start = new Date(session?.interval?.startTime || session?.startTime || 0).getTime();
+        const end = new Date(session?.interval?.endTime || session?.endTime || 0).getTime();
+        const durationMin = Math.round((end - start) / 60000);
+        if (durationMin < 5) continue;
+        const startDate = new Date(start);
+        const hh = String(startDate.getUTCHours()).padStart(2, '0');
+        const mm = String(startDate.getUTCMinutes()).padStart(2, '0');
+        activities.push({
+          activityName: name,
+          startTime: `${hh}:${mm}`,
+          durationMin,
+          calories: 0,
+          activityTier: classifyActivityTier(name),
+        });
       }
       return activities;
     }
@@ -337,12 +375,26 @@ async function fetchActivitiesForDate(
 
 export const fitbitService = {
   /**
-   * Generates the authorization URL for the client.
+   * Generates authorization URL using default origin.
    */
-  getAuthUrl(userId: string, provider: 'fitbit' | 'google' = 'fitbit'): string {
-    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID || 'MOCK_ID';
+  getAuthUrl(userId: string, provider: 'fitbit' | 'google' = 'google'): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:9002';
     const redirectUri = `${origin}/api/auth/fitbit/callback`;
+    return this.getAuthorizationUrl(userId, redirectUri, provider);
+  },
+
+  /**
+   * Generates the authorization URL for the client.
+   * Embeds userId + redirectUri in the OAuth state param so the callback
+   * knows where to return and who to save tokens for.
+   */
+  getAuthorizationUrl(userId: string, redirectUri: string, provider: 'fitbit' | 'google' = 'google'): string {
+    const clientId = process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
+    if (!clientId && provider === 'fitbit') {
+      console.warn('[FitbitService] Missing NEXT_PUBLIC_FITBIT_CLIENT_ID — falling back to mock auth.');
+      return `${redirectUri}?code=mock_code&state=${encodeURIComponent(JSON.stringify({ uid: userId, redirect: redirectUri }))}`;
+    }
+
     const timezoneOffset = typeof window !== 'undefined' ? new Date().getTimezoneOffset() : 0;
     const state = encodeURIComponent(JSON.stringify({ 
       uid: userId, 
@@ -353,12 +405,12 @@ export const fitbitService = {
 
     if (provider === 'google') {
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || clientId;
-      // Google Fit REST API scopes (fitness.* namespace)
+      // Google Health API scopes (googlehealth.* namespace)
       const scopes = [
-        'https://www.googleapis.com/auth/fitness.activity.read',
-        'https://www.googleapis.com/auth/fitness.sleep.read',
-        'https://www.googleapis.com/auth/fitness.heart_rate.read',
-        'https://www.googleapis.com/auth/fitness.body.read',
+        'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+        'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+        'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+        'https://www.googleapis.com/auth/googlehealth.profile.readonly',
       ].join(' ');
       return `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;
     }
@@ -558,77 +610,53 @@ export const fitbitService = {
     if (provider === 'google') {
       // UTC ms window for steps/calories — strict 24 h anchored to UTC midnight.
       const { startMs, endMs } = dateToUtcMs(targetDate, timezoneOffset);
+      const startTimeIso = new Date(startMs).toISOString();
+      const endTimeIso   = new Date(endMs).toISOString();
       // Sleep window is wider (−6 h / +12 h) so overnight sessions that start
       // before local midnight aren't clipped by the UTC boundary.
-      const sleepStartMs = startMs - 6 * 3_600_000;
-      const sleepEndMs   = endMs   + 12 * 3_600_000;
+      const sleepStartIso = new Date(startMs - 6 * 3_600_000).toISOString();
+      const sleepEndIso   = new Date(endMs   + 12 * 3_600_000).toISOString();
 
-      const [stepsDefaultData, stepsMergedData, stepsHCData, sleepData, caloriesData, bmrData, activities] = await Promise.all([
-        // Default aggregation — Google Fit picks one canonical step source
-        // (usually phone-pedometer-estimated). Often misses watch/Health Connect.
-        googleFitAggregate('com.google.step_count.delta',  accessToken, startMs,      endMs),
-        // Explicit merge datasource — combines all step sources including
-        // Health Connect bridges (Samsung Watch, etc.). Non-fatal if missing.
-        googleFitAggregate(
-          'com.google.step_count.delta',
-          accessToken, startMs, endMs,
-          'derived:com.google.step_count.delta:com.google.android.gms:merge_step_deltas',
-        ).catch((err) => {
-          console.warn('[FitbitService] Google Fit merged step datasource unavailable:', err?.message ?? err);
-          return null;
-        }),
-        // Explicit Health Connect datasource — often where Fitbit (via Health Connect) writes.
-        googleFitAggregate(
-          'com.google.step_count.delta',
-          accessToken, startMs, endMs,
-          'derived:com.google.step_count.delta:com.google.android.gms:health_connect',
-        ).catch((err) => {
-          console.warn('[FitbitService] Google Fit health_connect step datasource unavailable:', err?.message ?? err);
-          return null;
-        }),
-        googleFitAggregate('com.google.sleep.segment',     accessToken, sleepStartMs,  sleepEndMs),
-        googleFitAggregate('com.google.calories.expended', accessToken, startMs,      endMs),
-        // Non-fatal: many accounts have no default BMR datasource (Google Fit
-        // returns 400 INVALID_ARGUMENT). Treat that as bmr=0 and let the caller
-        // estimate from the user's profile if needed.
-        googleFitAggregate('com.google.calories.bmr',      accessToken, startMs,      endMs)
+      const [stepsRollup, stepsReconcile, caloriesData, sleepData, activities] = await Promise.all([
+        googleHealthDailyRollUp('steps', accessToken, startTimeIso, endTimeIso)
           .catch((err) => {
-            console.warn('[FitbitService] Google Fit BMR unavailable, falling back to 0:', err?.message ?? err);
+            console.warn('[GoogleHealth] steps dailyRollUp error:', err?.message ?? err);
+            return null;
+          }),
+        googleHealthReconcile('steps', accessToken, startTimeIso, endTimeIso)
+          .catch((err) => {
+            console.warn('[GoogleHealth] steps reconcile error:', err?.message ?? err);
+            return null;
+          }),
+        googleHealthDailyRollUp('total-calories', accessToken, startTimeIso, endTimeIso)
+          .catch((err) => {
+            console.warn('[GoogleHealth] total-calories dailyRollUp error:', err?.message ?? err);
+            return null;
+          }),
+        googleHealthReconcile('sleep', accessToken, sleepStartIso, sleepEndIso)
+          .catch((err) => {
+            console.warn('[GoogleHealth] sleep reconcile error:', err?.message ?? err);
             return null;
           }),
         fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
       ]);
 
-      // Use whichever step source returned more — the merged source usually
-      // wins for Samsung Health users, the default wins for native Google Fit.
-      const stepsDefault = fitSumInt(stepsDefaultData);
-      const stepsMerged  = stepsMergedData ? fitSumInt(stepsMergedData) : 0;
-      const stepsHC      = stepsHCData ? fitSumInt(stepsHCData) : 0;
-      
-      console.log(`[FitbitService] Step count diagnosis for ${targetDate}:`, {
-        stepsDefault,
-        stepsMerged,
-        stepsHC,
+      const stepsCount = Math.max(parseHealthSteps(stepsRollup), parseHealthSteps(stepsReconcile));
+      const caloriesOut = parseHealthCalories(caloriesData);
+      const sleepHours = parseHealthSleepHours(sleepData);
+
+      console.log(`[GoogleHealth] Sync result for ${targetDate}:`, {
+        stepsCount,
+        caloriesOut,
+        sleepHours,
+        activitiesCount: activities.length,
       });
 
-      const stepsCount   = Math.max(stepsDefault, stepsMerged, stepsHC);
-      const expended    = fitSumFp(caloriesData);
-      const bmr         = bmrData ? fitSumFp(bmrData) : 0;
-      // Samsung Health via Health Connect writes only active calories to
-      // com.google.calories.expended (BMR is missing). Native Google Fit
-      // already includes BMR. Detect which case we're in: if expended < BMR
-      // it can only be active-only, so add BMR to get total TDEE.
-      // If BMR API is unavailable (bmr=0), the caller estimates from profile.
-      const caloriesOut = Math.round(expended > bmr ? expended : expended + bmr);
-      const sleepSec    = fitSleepSeconds(sleepData);
-
-      // Google Fit has no HRV data type — omit hrv so the metabolic engine
-      // runs at its neutral default (hrvMultiplier = 1.0). Recovery status is
-      // derived from sleep hours by the caller (fitbit-sync.ts).
+      // Google Health API recovery status is derived from sleep hours by the caller (fitbit-sync.ts).
       return {
         success: true,
         steps:      { value: stepsCount,        source: 'device' },
-        sleep:      { value: sleepSec / 3600,   source: 'device' },
+        sleep:      { value: sleepHours,        source: 'device' },
         hrv:        { value: 0,                 source: 'device' },
         caloriesOut: caloriesOut > 0 ? { value: caloriesOut, source: 'device' } : undefined,
         activities: activities.length > 0 ? activities : undefined,
@@ -698,7 +726,7 @@ export const fitbitService = {
           dailySnapshots[dateStr] = {
             steps:        r.steps.value,
             sleepHours:   r.sleep.value,
-            // No HRV from Google Fit — derive recoveryStatus from sleep
+            // Derive recoveryStatus from sleep
             recoveryStatus: r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low',
             caloriesOut:  r.caloriesOut?.value,
             activities:   r.activities,
@@ -713,12 +741,21 @@ export const fitbitService = {
 
       // Fetch body composition — weight in kg, height in metres (×100 → cm)
       const { startMs: bodyStart, endMs: bodyEnd } = dateToUtcMs(todayStr, timezoneOffset); 
+      const bodyStartIso = new Date(bodyStart - 30 * 86_400_000).toISOString();
+      const bodyEndIso   = new Date(bodyEnd).toISOString();
       const [weightData, heightData] = await Promise.all([
-        googleFitAggregate('com.google.weight', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),
-        googleFitAggregate('com.google.height', accessToken, bodyStart - 30 * 86_400_000, bodyEnd),
+        googleHealthReconcile('weight', accessToken, bodyStartIso, bodyEndIso).catch(() => null),
+        googleHealthReconcile('height', accessToken, bodyStartIso, bodyEndIso).catch(() => null),
       ]);
-      const weightKg = fitSumFp(weightData) > 0 ? Math.round(fitSumFp(weightData) * 10) / 10 : undefined;
-      const heightM  = fitSumFp(heightData) > 0 ? fitSumFp(heightData) : undefined;
+      const weightPoints = weightData?.dataPoints || [];
+      const latestWeight = weightPoints[weightPoints.length - 1]?.weight?.weightKg 
+        ?? weightPoints[weightPoints.length - 1]?.value?.weightKg;
+      const weightKg = latestWeight ? Math.round(Number(latestWeight) * 10) / 10 : undefined;
+
+      const heightPoints = heightData?.dataPoints || [];
+      const latestHeight = heightPoints[heightPoints.length - 1]?.height?.heightM 
+        ?? heightPoints[heightPoints.length - 1]?.value?.heightM;
+      const heightCm = latestHeight ? Math.round(Number(latestHeight) * 100) : undefined;
 
       const base = latestResult ?? {
         success: true,
@@ -731,7 +768,7 @@ export const fitbitService = {
       return {
         ...base,
         weightKg,
-        heightCm: heightM ? Math.round(heightM * 100) : undefined,
+        heightCm,
         dataDate: todayStr,
         dailySnapshots,
       };
