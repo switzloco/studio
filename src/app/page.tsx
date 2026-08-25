@@ -117,9 +117,9 @@ export default function Home() {
   useEffect(() => {
     if (!user || !healthData?.isDeviceVerified || hasSyncedFitbit.current) return;
     
-    // Skip if it's Oura (they use different patterns/background tasks usually)
-    // Actually, let's just focus on Fitbit and Withings which we manage here.
-    if (healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google') return;
+    // Skip Oura — it has its own sync cron and patterns.
+    // Google Health and legacy Fitbit both use syncFitbitData.
+    if (healthData?.connectedDevice === 'oura') return;
     hasSyncedFitbit.current = true;
 
     (async () => {
@@ -147,7 +147,7 @@ export default function Home() {
   // Backfill historical Fitbit snapshots once per session if yesterday is missing.
   // Silently fires in the background — no toast, no spinner.
   useEffect(() => {
-    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || healthData?.connectedDevice === 'google' || hasBackfilledFitbit.current) return;
+    if (!user || !healthData?.isDeviceVerified || healthData?.connectedDevice === 'oura' || hasBackfilledFitbit.current) return;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toLocaleDateString('en-CA');
