@@ -83,6 +83,19 @@ export interface FitbitActivity {
 }
 
 /** Per-day Fitbit metrics snapshot — keyed by YYYY-MM-DD in fitbitByDate. */
+/**
+ * Metrics a device sync could not produce a trustworthy value for — the call
+ * failed, or the provider holds no data for that day. A `0` in one of those
+ * fields means "unknown", NOT "none": callers must keep whatever is already
+ * stored rather than writing the zero over it.
+ */
+export interface HealthMetricAvailability {
+  steps?: boolean;
+  sleep?: boolean;
+  caloriesOut?: boolean;
+  activities?: boolean;
+}
+
 export interface FitbitDailySnapshot {
   steps?: number;
   hrv?: number;

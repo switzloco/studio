@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
+import { mergeDailySnapshot } from '@/lib/health-snapshot';
 import { fitbitService } from '@/lib/fitbit-service';
 
 /**
@@ -112,11 +113,13 @@ export async function GET(request: NextRequest) {
 
     if (syncResult) {
       // Build the health data update — include weight/height from profile if available.
-      const healthUpdate: Record<string, unknown> = {
-        steps: syncResult.steps.value,
-        sleepHours: syncResult.sleep.value,
-        hrv: syncResult.hrv.value,
-      };
+      // Only write metrics the provider actually returned: a 0 here means the
+      // sync couldn't read that metric, and writing it would wipe real data.
+      const unavailable = syncResult.unavailable ?? {};
+      const healthUpdate: Record<string, unknown> = {};
+      if (!unavailable.steps && syncResult.steps.value > 0) healthUpdate.steps = syncResult.steps.value;
+      if (!unavailable.sleep && syncResult.sleep.value > 0) healthUpdate.sleepHours = syncResult.sleep.value;
+      if (syncResult.hrv.value > 0) healthUpdate.hrv = syncResult.hrv.value;
       if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
       if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
       if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
@@ -135,11 +138,18 @@ export async function GET(request: NextRequest) {
 
       // Write per-day snapshots for all 7 days — this backfills the history so
       // previous-day views show correct steps, HRV, sleep, and calories.
+      // Merged, never blind-written: reconnecting must not flatten days the
+      // previous provider recorded but this one has no data for.
       if (syncResult.dailySnapshots) {
+        const existingByDate =
+          (await adminHealthService.getHealthSummary(firestore, userId))?.fitbitByDate ?? {};
         await Promise.all(
-          Object.entries(syncResult.dailySnapshots).map(([date, snap]) =>
-            adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snap)
-          )
+          Object.entries(syncResult.dailySnapshots).map(([date, snap]) => {
+            const merged = mergeDailySnapshot(existingByDate[date], snap);
+            return merged
+              ? adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, merged)
+              : Promise.resolve();
+          })
         );
       } else {
         // Fallback: write at least the most-recent-data-day snapshot.
@@ -156,7 +166,12 @@ export async function GET(request: NextRequest) {
         if (healthUpdate.dailyCaloriesOut) {
           snapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
         }
-        await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, snapshot);
+        const existing = (await adminHealthService.getHealthSummary(firestore, userId))
+          ?.fitbitByDate?.[snapshotDate];
+        const merged = mergeDailySnapshot(existing, snapshot, unavailable);
+        if (merged) {
+          await adminHealthService.saveFitbitDailySnapshot(firestore, userId, snapshotDate, merged);
+        }
       }
 
       const datePart = syncResult.dataDate ? ` (data from ${syncResult.dataDate})` : '';

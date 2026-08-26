@@ -52,6 +52,29 @@ The Genkit flow defines 8 LLM-callable tools:
 
 **Data trust policy:** Only accept steps/HRV/sleep data when `isDeviceVerified=true` (Fitbit OAuth). Self-reported exercise, height, and weight are always accepted.
 
+### Google Health API v4 (`src/lib/fitbit-service.ts`)
+Replaces the Fitbit Web API for `provider: 'google'` users. Two request shapes,
+both easy to get wrong — the details are commented at the top of the Google
+Health section in `fitbit-service.ts`:
+- `dataPoints:dailyRollUp` (POST) takes a **CivilTimeInterval**:
+  `range: { start: { date: {year,month,day} }, end: { date: {...} } }` (end
+  exclusive) plus an explicit `windowSizeDays`. `startTime`/`endTime` there
+  return HTTP 400 `Unknown name "startTime" at 'range'`.
+- `dataPoints:reconcile` / `:list` (GET) take an AIP-160 `filter` supporting
+  only `>=` and `<`. Civil-time fields take bare `YYYY-MM-DD` literals (a `Z`
+  suffix is rejected): `steps.interval.civil_start_time`,
+  `exercise.interval.civil_start_time`, `sleep.interval.civil_end_time` (sleep
+  filters on end time only), `weight.sample_time.civil_time`.
+- Values: steps `steps.countSum` (int64 **as a string**), calories
+  `totalCalories.kcalSum`, sleep `sleep.summary.minutesAsleep`, workouts live
+  under the `exercise` data type (there is no `activity-session`).
+
+**A missing day is not a zero day.** No rollup bucket means the device never
+synced; a real zero comes back as `countSum: "0"`. Sync results carry
+`unavailable` flags for metrics that couldn't be read, and every snapshot write
+goes through `mergeDailySnapshot` (`src/lib/health-snapshot.ts`) so an empty or
+failed sync can never overwrite stored history with zeroes.
+
 ### Observability — Arize Phoenix (`src/ai/observability/`)
 Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; leave off to disable).
 - `phoenix.ts` — registers a global OpenTelemetry tracer provider that exports Genkit's spans (prompt I/O, every tool call, sub-flows) to Phoenix over OTLP. Imported first in `genkit.ts` and via Next.js `src/instrumentation.ts` so it loads before Genkit. No-op + fail-safe when disabled.

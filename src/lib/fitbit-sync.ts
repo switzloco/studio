@@ -3,6 +3,7 @@ import { adminHealthService } from '@/lib/health-service-admin';
 import { fitbitService, FitbitApiError } from '@/lib/fitbit-service';
 import { calculateDailyVFScore } from './vf-scoring';
 import type { HistoryEntry } from './health-service';
+import { mergeDailySnapshot } from './health-snapshot';
 
 /** How often (ms) background sync should run — 6 hours. */
 export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -182,13 +183,20 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
   const localTime = new Date(now.getTime() - ((finalOffset || 0) * 60000));
   const today = localDate || localTime.toISOString().split('T')[0];
 
-  const healthUpdate: Record<string, unknown> = {
+  // Metrics the provider had no trustworthy value for this sync. Their zeroes
+  // are "unknown", not "none" — never let them overwrite stored data.
+  const unavailable = result.unavailable ?? {};
+  const existingHealth = await adminHealthService.getHealthSummary(firestore, userId);
+
+  // Build the daily snapshot for historical lookups (steps/HRV visible on past days).
+  // `today` is the local date this snapshot represents AND the date it was captured
+  // on — this is a live same-day sync, so caloriesOut is inherently partial until
+  // the day is finalised on a later sync (see refreshStalePastSnapshots).
+  const incomingSnapshot: import('./health-service').FitbitDailySnapshot = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
-    lastActiveDate: today,
+    capturedOnDate: today,
   };
-
-  console.log(`[syncFitbitData] Writing health update for ${userId} (${today}):`, JSON.stringify(healthUpdate));
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
@@ -204,43 +212,60 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
       console.log(`[syncFitbitData] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
     }
-    healthUpdate.dailyCaloriesOut = Math.round(calsOut);
+    incomingSnapshot.caloriesOut = Math.round(calsOut);
   }
 
-  // Only update HRV and recoveryStatus when Fitbit returns a valid reading.
+  // Only update HRV and recoveryStatus when the device returns a valid reading.
   // A value of 0 means the sensor failed or data is unavailable — ignore it
   // so stale-but-valid data isn't overwritten by a bad reading.
   const hrv = result.hrv.value;
   if (hrv > 0) {
-    healthUpdate.hrv = hrv;
-    if (hrv >= 50) healthUpdate.recoveryStatus = 'high';
-    else if (hrv >= 30) healthUpdate.recoveryStatus = 'medium';
-    else healthUpdate.recoveryStatus = 'low';
-  }
-
-  // Build the daily snapshot for historical lookups (steps/HRV visible on past days).
-  // `today` is the local date this snapshot represents AND the date it was captured
-  // on — this is a live same-day sync, so caloriesOut is inherently partial until
-  // the day is finalised on a later sync (see refreshStalePastSnapshots).
-  const dailySnapshot: import('./health-service').FitbitDailySnapshot = {
-    steps: result.steps.value,
-    sleepHours: result.sleep.value,
-    capturedOnDate: today,
-  };
-  if (hrv > 0) {
-    dailySnapshot.hrv = hrv;
-    dailySnapshot.recoveryStatus = healthUpdate.recoveryStatus as 'low' | 'medium' | 'high';
-  }
-  if (healthUpdate.dailyCaloriesOut) {
-    dailySnapshot.caloriesOut = healthUpdate.dailyCaloriesOut as number;
+    incomingSnapshot.hrv = hrv;
+    incomingSnapshot.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
+  } else if (!unavailable.sleep && result.sleep.value > 0) {
+    // Google Health exposes no HRV — recovery is derived from sleep instead.
+    incomingSnapshot.recoveryStatus =
+      result.sleep.value >= 7 ? 'high' : result.sleep.value >= 6 ? 'medium' : 'low';
   }
   if (result.activities && result.activities.length > 0) {
-    dailySnapshot.activities = result.activities;
+    incomingSnapshot.activities = result.activities;
   }
+
+  // Merge over whatever is already stored for today: an unavailable metric, or
+  // one the device reports lower than we already recorded, keeps its old value.
+  const existingSnapshot = existingHealth?.fitbitByDate?.[today];
+  const mergedSnapshot = mergeDailySnapshot(existingSnapshot, incomingSnapshot, unavailable);
+  const dayTotals = mergedSnapshot ?? existingSnapshot;
+
+  // The top-level health doc mirrors today's snapshot, so it never regresses
+  // either. A metric with no stored value yet is still written when the device
+  // actually reported it — a genuine 0 early in the day is real data; only an
+  // *unavailable* metric is withheld.
+  const pick = (stored: number | undefined, fresh: number, isUnavailable?: boolean) =>
+    stored ?? (isUnavailable ? undefined : fresh);
+
+  const healthUpdate: Record<string, unknown> = { lastActiveDate: today };
+  const steps = pick(dayTotals?.steps, result.steps.value, unavailable.steps);
+  if (steps != null) healthUpdate.steps = steps;
+  const sleepHours = pick(dayTotals?.sleepHours, result.sleep.value, unavailable.sleep);
+  if (sleepHours != null) healthUpdate.sleepHours = sleepHours;
+  if (dayTotals?.caloriesOut != null) healthUpdate.dailyCaloriesOut = dayTotals.caloriesOut;
+  if (dayTotals?.hrv != null && dayTotals.hrv > 0) healthUpdate.hrv = dayTotals.hrv;
+  if (dayTotals?.recoveryStatus) healthUpdate.recoveryStatus = dayTotals.recoveryStatus;
+
+  if (!mergedSnapshot) {
+    console.warn(
+      `[syncFitbitData] ${provider} returned nothing usable for ${today} ` +
+      `(unavailable: ${Object.keys(unavailable).join(',') || 'none'}) — keeping stored data.`,
+    );
+  }
+  console.log(`[syncFitbitData] Writing health update for ${userId} (${today}):`, JSON.stringify(healthUpdate));
 
   try {
     await adminHealthService.updateHealthData(firestore, userId, healthUpdate);
-    await adminHealthService.saveFitbitDailySnapshot(firestore, userId, today, dailySnapshot);
+    if (mergedSnapshot) {
+      await adminHealthService.saveFitbitDailySnapshot(firestore, userId, today, mergedSnapshot);
+    }
     // Stamp lastSyncedAt — reuse latestCreds (already in memory) to avoid a redundant re-fetch.
     await adminHealthService.saveFitbitCredentials(firestore, userId, {
       ...latestCreds,
@@ -380,15 +405,20 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   const capturedLocal = new Date(Date.now() - ((finalOffset || 0) * 60000));
   const capturedOnDate = capturedLocal.toISOString().split('T')[0];
 
+  const unavailable = result.unavailable ?? {};
   const hrv = result.hrv.value;
-  const snapshot: import('./health-service').FitbitDailySnapshot = {
+  const incomingSnapshot: import('./health-service').FitbitDailySnapshot = {
     steps: result.steps.value,
     sleepHours: result.sleep.value,
     capturedOnDate,
   };
   if (hrv > 0) {
-    snapshot.hrv = hrv;
-    snapshot.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
+    incomingSnapshot.hrv = hrv;
+    incomingSnapshot.recoveryStatus = hrv >= 50 ? 'high' : hrv >= 30 ? 'medium' : 'low';
+  } else if (!unavailable.sleep && result.sleep.value > 0) {
+    // Google Health exposes no HRV — recovery is derived from sleep instead.
+    incomingSnapshot.recoveryStatus =
+      result.sleep.value >= 7 ? 'high' : result.sleep.value >= 6 ? 'medium' : 'low';
   }
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
@@ -398,27 +428,28 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
       console.log(`[syncFitbitSnapshot] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
     }
-    snapshot.caloriesOut = Math.round(calsOut);
+    incomingSnapshot.caloriesOut = Math.round(calsOut);
   }
   if (result.activities && result.activities.length > 0) {
-    snapshot.activities = result.activities;
+    incomingSnapshot.activities = result.activities;
   }
 
   try {
     // ── Don't-regress guard ──────────────────────────────────────────────
-    // If the existing snapshot in Firebase already has *more* steps than
-    // what the API just returned, keep the old data.  This protects
-    // historical Fitbit-API snapshots from being overwritten with zeros
-    // when the new Google Health API doesn't have data for older dates.
+    // Merge over what is already stored for this day: a metric the provider
+    // couldn't give us, or one it reports lower than we already recorded,
+    // keeps its stored value. This is what protects historical Fitbit-era
+    // snapshots from being flattened when Google Health has no data for an
+    // older date. A merge that changes nothing means there is nothing to
+    // save — and nothing that could change the day's score either.
     const existingHealth = await adminHealthService.getHealthSummary(firestore, userId);
     const existingSnap = existingHealth?.fitbitByDate?.[date];
-    const existingSteps = existingSnap?.steps ?? 0;
-    const snapshotSteps = snapshot?.steps ?? 0;
-    
-    if (existingSnap && existingSteps > 0 && snapshotSteps < existingSteps) {
+    const snapshot = mergeDailySnapshot(existingSnap, incomingSnapshot, unavailable);
+
+    if (!snapshot) {
       console.log(
-        `[syncFitbitSnapshot] Skipping save for ${date} — existing snapshot has ${existingSteps} steps, ` +
-        `new data only has ${snapshotSteps}. Keeping existing data.`
+        `[syncFitbitSnapshot] Nothing new for ${date} ` +
+        `(unavailable: ${Object.keys(unavailable).join(',') || 'none'}) — keeping existing data.`,
       );
       return { success: true }; // nothing to update, but not a failure
     }
@@ -445,16 +476,16 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
 
         const newResult = calculateDailyVFScore({
           caloriesIn: totalCaloriesIn,
-          caloriesOut: snapshot.caloriesOut ?? entry.breakdown?.caloriesOut ?? health.dailyCaloriesOut ?? 2000,
+          caloriesOut: snapshot.caloriesOut || entry.breakdown?.caloriesOut || health.dailyCaloriesOut || 2000,
           proteinG: totalProteinG,
           proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
           fastingHours: entry.breakdown?.fastingHours ?? 0,
           alcoholDrinks: totalAlcoholDrinks,
-          sleepHours: snapshot.sleepHours ?? entry.breakdown?.sleepHours ?? 7,
+          sleepHours: snapshot.sleepHours || entry.breakdown?.sleepHours || 7,
           seedOilMeals,
           weightKg: health.weightKg,
           bodyFatPct: health.bodyFatPct,
-          hrv: snapshot.hrv ?? health.fitbitByDate?.[date]?.hrv,
+          hrv: snapshot.hrv || health.fitbitByDate?.[date]?.hrv,
           foodLogs,
           exerciseLogs,
           fitbitActivities: snapshot.activities,
@@ -478,11 +509,11 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
             breakdown: {
               ...entry.breakdown,
               caloriesIn: totalCaloriesIn,
-              caloriesOut: snapshot.caloriesOut ?? entry.breakdown?.caloriesOut ?? health.dailyCaloriesOut ?? 2000,
+              caloriesOut: snapshot.caloriesOut || entry.breakdown?.caloriesOut || health.dailyCaloriesOut || 2000,
               proteinG: totalProteinG,
               proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
               fastingHours: entry.breakdown?.fastingHours ?? 0,
-              sleepHours: snapshot.sleepHours ?? entry.breakdown?.sleepHours ?? 7,
+              sleepHours: snapshot.sleepHours || entry.breakdown?.sleepHours || 7,
               ...newResult.breakdown,
             }
           };
@@ -566,7 +597,11 @@ export async function refreshStalePastSnapshots(
   userId: string,
   localDate: string,
   timezoneOffset?: number,
-  windowDays = 7,
+  // Two weeks rather than one: this is also the repair path for days a broken
+  // provider sync flattened to zeroes, and those need a wide enough window to
+  // be reachable. Only days that are actually stale are re-pulled, so a healthy
+  // history costs nothing.
+  windowDays = 14,
 ): Promise<{ ok: boolean; refreshed: number }> {
   const firestore = getAdminFirestore();
 

@@ -5,7 +5,9 @@
  */
 
 import { Firestore } from 'firebase/firestore';
-import { healthService, FitbitCredentials, FitbitActivity } from '@/lib/health-service';
+import { healthService, FitbitCredentials, FitbitActivity, HealthMetricAvailability } from '@/lib/health-service';
+
+export type { HealthMetricAvailability };
 
 export interface FitbitMetric {
   value: number;
@@ -20,6 +22,12 @@ export interface FitbitSyncResult {
   caloriesOut?: FitbitMetric;
   activities?: FitbitActivity[];
   isVerified: boolean;
+  /**
+   * Metrics the provider had no trustworthy value for on this sync. A `0` in
+   * one of those fields means "unknown", not "none" — see
+   * {@link HealthMetricAvailability}.
+   */
+  unavailable?: HealthMetricAvailability;
 }
 
 /** Extended result returned on initial connect — includes profile + history. */
@@ -64,215 +72,319 @@ async function fitbitFetch(endpoint: string, accessToken: string): Promise<unkno
   return res.json();
 }
 
+// ─── Google Health API v4 ───────────────────────────────────────────────────
+// Reference: https://developers.google.com/health/reference/rest/v4
+//
+// Two request shapes matter here, and both differ from the Fitbit Web API:
+//
+//   • dailyRollUp (POST) — daily totals aggregated over CIVIL days, i.e. the
+//     user's own calendar days. The body takes a CivilTimeInterval:
+//         { range: { start: { date: { year, month, day } },
+//                    end:   { date: { year, month, day } } },   // end exclusive
+//           windowSizeDays: 1 }
+//     The range fields are `start`/`end` — sending `startTime`/`endTime` gets a
+//     400 "Invalid JSON payload received. Unknown name \"startTime\" at 'range'".
+//     `windowSizeDays` is documented as optional but the live API 400s without it.
+//
+//   • list / reconcile (GET) — individual points selected with an AIP-160
+//     `filter`. Only `>=` and `<` are supported (never `<=` or `>`), and the
+//     civil-time fields reject a timezone designator, so their literals are
+//     plain `YYYY-MM-DD` with no trailing `Z`. Per data type:
+//         steps    → steps.interval.civil_start_time
+//         exercise → exercise.interval.civil_start_time
+//         sleep    → sleep.interval.civil_end_time   (end time only)
+//         weight   → weight.sample_time.civil_time
+//
+// Because everything is expressed in civil days, no UTC-offset arithmetic is
+// needed: the local date string IS the query.
+
+const GOOGLE_HEALTH_BASE = 'https://health.googleapis.com/v4/users/me/dataTypes';
+
+/** YYYY-MM-DD → { year, month, day } for a CivilDateTime. */
+function toCivilDate(dateStr: string): { year: number; month: number; day: number } {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return { year, month, day };
+}
+
+/** YYYY-MM-DD ± n days → YYYY-MM-DD. Pure calendar arithmetic, no zone drift. */
+function addDaysToIsoDate(dateStr: string, delta: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** AIP-160 filter selecting one civil day on `field`. `date` is YYYY-MM-DD. */
+function civilDayFilter(field: string, date: string): string {
+  return `${field} >= "${date}" AND ${field} < "${addDaysToIsoDate(date, 1)}"`;
+}
+
+/** AIP-160 filter over a closed-open civil-date range. */
+function civilRangeFilter(field: string, startDate: string, endDateExclusive: string): string {
+  return `${field} >= "${startDate}" AND ${field} < "${endDateExclusive}"`;
+}
+
+/** protobuf JSON encodes int64 as a string and double as a number. */
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+/** Seconds from a google-duration string such as "-25200s". */
+function parseDurationSeconds(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const n = parseFloat(value.replace(/s$/, ''));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 /**
- * Google Health API v4 — dailyRollUp endpoint.
- * Fetches daily aggregated totals (e.g. steps, total-calories).
+ * Daily totals for one data type over a closed-open civil-date range.
+ * `endDate` is exclusive, so a single day is (date, date + 1 day).
+ *
+ * Throws {@link FitbitApiError} on any non-2xx: callers MUST distinguish
+ * "the API failed" from "the user has no data" — treating both as 0 is what
+ * overwrote real history with zeroes.
  */
 async function googleHealthDailyRollUp(
   dataType: string,
   accessToken: string,
-  startTimeIso: string,
-  endTimeIso: string,
+  startDate: string,
+  endDate: string,
 ): Promise<any> {
-  const res = await fetch(
-    `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:dailyRollUp`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        range: {
-          startTime: startTimeIso,
-          endTime: endTimeIso,
-        },
-        windowSizeDays: 1,
-      }),
+  const res = await fetch(`${GOOGLE_HEALTH_BASE}/${dataType}/dataPoints:dailyRollUp`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
     },
-  );
+    body: JSON.stringify({
+      range: {
+        start: { date: toCivilDate(startDate) },
+        end: { date: toCivilDate(endDate) },
+      },
+      windowSizeDays: 1,
+    }),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error(`[GoogleHealth] dailyRollUp error ${res.status} for ${dataType}:`, body);
-    throw new FitbitApiError(res.status, `googlehealth:${dataType}`, `Google Health API ${res.status}`, body);
+    console.error(
+      `[GoogleHealth] dailyRollUp ${res.status} for ${dataType} ${startDate}→${endDate}:`,
+      body,
+    );
+    throw new FitbitApiError(
+      res.status,
+      `googlehealth:${dataType}:dailyRollUp`,
+      `Google Health API ${res.status} on ${dataType}:dailyRollUp`,
+      body,
+    );
   }
   return res.json();
 }
 
+/**
+ * Reconciled (multi-source-merged) data points matching an AIP-160 filter.
+ * Follows `nextPageToken`. Throws {@link FitbitApiError} on any non-2xx.
+ */
 async function googleHealthReconcile(
   dataType: string,
   accessToken: string,
-  startTimeIso: string,
-  endTimeIso: string,
-): Promise<any> {
-  // AIP-160 filter: use snake_case data-type prefix + .interval.start_time
-  // e.g. steps.interval.start_time >= "..." AND steps.interval.start_time < "..."
-  const filterKey = dataType.replace(/-/g, '_');
-  const filter = encodeURIComponent(
-    `${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.start_time < "${endTimeIso}"`
-  );
-  
-  let allPoints: any[] = [];
+  filter: string,
+  pageSize?: number,
+): Promise<{ dataPoints: any[] }> {
+  const allPoints: any[] = [];
   let pageToken = '';
   let pageCount = 0;
-  const MAX_PAGES = 200; // safety limit
+  const MAX_PAGES = 50;
 
   do {
-    const url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}${pageToken ? `&pageToken=${pageToken}` : ''}`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const params = new URLSearchParams({ filter });
+    if (pageSize) params.set('pageSize', String(pageSize));
+    if (pageToken) params.set('pageToken', pageToken);
 
+    const res = await fetch(
+      `${GOOGLE_HEALTH_BASE}/${dataType}/dataPoints:reconcile?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType}:`, body);
-      return { dataPoints: allPoints }; // return what we have so far
+      console.error(`[GoogleHealth] reconcile ${res.status} for ${dataType} (${filter}):`, body);
+      throw new FitbitApiError(
+        res.status,
+        `googlehealth:${dataType}:reconcile`,
+        `Google Health API ${res.status} on ${dataType}:reconcile`,
+        body,
+      );
     }
 
     const data = await res.json();
-    if (data.dataPoints) {
-      allPoints = allPoints.concat(data.dataPoints);
-    }
-    pageToken = data.nextPageToken || '';
+    if (Array.isArray(data?.dataPoints)) allPoints.push(...data.dataPoints);
+    pageToken = data?.nextPageToken || '';
     pageCount++;
   } while (pageToken && pageCount < MAX_PAGES);
 
-  if (pageCount >= MAX_PAGES) {
-    console.warn(`[GoogleHealth] reconcile hit ${MAX_PAGES} page limit for ${dataType}, collected ${allPoints.length} points`);
+  if (pageToken) {
+    console.warn(
+      `[GoogleHealth] reconcile hit the ${MAX_PAGES}-page limit for ${dataType}; kept ${allPoints.length} points`,
+    );
   }
 
   return { dataPoints: allPoints };
 }
 
-/** Parse total steps from Google Health API dailyRollUp or reconcile response. */
+/** Rollup buckets that actually carry a value for `key` (absent ≠ zero). */
+function rollupBuckets(data: any, key: string): any[] {
+  const points: any[] = data?.rollupDataPoints ?? [];
+  return points.filter((p) => p?.[key] != null);
+}
+
+/**
+ * Total steps from a dailyRollUp (`steps.countSum`, int64-as-string) or from
+ * raw list/reconcile points (`steps.count`).
+ */
 function parseHealthSteps(data: any): number {
   if (!data) return 0;
   let total = 0;
-  // dailyRollUp uses "rollupDataPoints", reconcile/list uses "dataPoints"
-  const points = data?.rollupDataPoints || data?.dataPoints || [];
-  for (const p of points) {
-    const val =
-      // dailyRollUp aggregated fields
-      p?.steps?.countSum ??
-      // reconcile individual data points
-      p?.steps?.count ??
-      // fallback: nested under value
-      p?.value?.steps?.countSum ??
-      p?.value?.steps?.count ??
-      p?.value?.countSum ??
-      0;
-    if (typeof val === 'number') total += val;
-    else if (typeof val === 'string') total += parseInt(val, 10) || 0;
+  for (const p of data?.rollupDataPoints ?? []) {
+    total += toNumber(p?.steps?.countSum);
   }
-  return total;
-}
-
-/** Parse total calories from Google Health API dailyRollUp response. */
-function parseHealthCalories(data: any): number {
-  if (!data) return 0;
-  let total = 0;
-  // dailyRollUp uses "rollupDataPoints", reconcile/list uses "dataPoints"
-  const points = data?.rollupDataPoints || data?.dataPoints || [];
-  for (const p of points) {
-    const val =
-      // dailyRollUp: total_calories data type uses camelCase in response
-      p?.totalCalories?.caloriesSum ??
-      p?.totalCalories?.calories ??
-      // reconcile individual points
-      p?.total_calories?.calories ??
-      // fallback: nested under value
-      p?.value?.totalCalories?.calories ??
-      p?.value?.calories ??
-      p?.value?.caloriesSum ??
-      0;
-    if (typeof val === 'number') total += val;
-    else if (typeof val === 'string') total += parseFloat(val) || 0;
+  for (const p of data?.dataPoints ?? []) {
+    total += toNumber(p?.steps?.count);
   }
   return Math.round(total);
 }
 
-/** Parse sleep duration in hours from Google Health API sleep data points. */
-function parseHealthSleepHours(data: any): number {
+/** Total calories burned from a `total-calories` dailyRollUp (`kcalSum`). */
+function parseHealthCalories(data: any): number {
   if (!data) return 0;
-  const points = data?.dataPoints || data?.sleepDataPoints || [];
-  let totalMinutes = 0;
-  for (const p of points) {
-    const sleepObj = p?.sleep || p;
-    const stages = sleepObj?.stages || [];
-    if (stages.length > 0) {
-      for (const s of stages) {
-        if (s?.stage && s.stage !== 'AWAKE' && s.stage !== 'OUT_OF_BED') {
-          const sStart = new Date(s.interval?.startTime || s.startTime).getTime();
-          const sEnd = new Date(s.interval?.endTime || s.endTime).getTime();
-          if (sEnd > sStart) {
-            totalMinutes += (sEnd - sStart) / 60000;
-          }
-        }
-      }
-    } else if (sleepObj?.interval) {
-      const sStart = new Date(sleepObj.interval.startTime).getTime();
-      const sEnd = new Date(sleepObj.interval.endTime).getTime();
-      if (sEnd > sStart) {
-        totalMinutes += (sEnd - sStart) / 60000;
-      }
-    }
+  let total = 0;
+  for (const p of data?.rollupDataPoints ?? []) {
+    total += toNumber(p?.totalCalories?.kcalSum);
   }
+  return Math.round(total);
+}
+
+/**
+ * Sleep hours from `sleep` session points. Prefers the API's own
+ * `summary.minutesAsleep` (int64-as-string) and falls back to summing the
+ * non-awake stages for sessions the stage algorithm hasn't finished yet.
+ */
+function parseHealthSleepHours(data: any): number {
+  const points: any[] = data?.dataPoints ?? [];
+  let totalMinutes = 0;
+
+  for (const point of points) {
+    const sleep = point?.sleep ?? point;
+
+    const summaryMinutes = toNumber(sleep?.summary?.minutesAsleep);
+    if (summaryMinutes > 0) {
+      totalMinutes += summaryMinutes;
+      continue;
+    }
+
+    const stages: any[] = sleep?.stages ?? [];
+    let stageMinutes = 0;
+    for (const stage of stages) {
+      const type = String(stage?.type ?? '');
+      if (type === 'AWAKE' || type === 'OUT_OF_BED' || type === 'UNKNOWN') continue;
+      const start = Date.parse(stage?.startTime ?? '');
+      const end = Date.parse(stage?.endTime ?? '');
+      if (end > start) stageMinutes += (end - start) / 60_000;
+    }
+    if (stageMinutes > 0) {
+      totalMinutes += stageMinutes;
+      continue;
+    }
+
+    // Classic (stage-less) sleep: the session interval is the whole record.
+    const start = Date.parse(sleep?.interval?.startTime ?? '');
+    const end = Date.parse(sleep?.interval?.endTime ?? '');
+    if (end > start) totalMinutes += (end - start) / 60_000;
+  }
+
   return Math.round((totalMinutes / 60) * 10) / 10;
 }
 
-/**
- * Convert a YYYY-MM-DD local date string to UTC millisecond boundaries.
- * Adjusts for the user's local timezone offset so the window matches their local day.
- * @param dateStr YYYY-MM-DD
- * @param timezoneOffset Minutes (UTC - local). e.g. 420 for PDT.
- */
-function dateToUtcMs(dateStr: string, timezoneOffset: number = 0): { startMs: number; endMs: number } {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  // Date.UTC(y, m-1, d) is midnight UTC on that date.
-  // Adding timezoneOffset (in minutes) shifts it to the local midnight in UTC ms.
-  const startMs = Date.UTC(y, m - 1, d) + (timezoneOffset * 60 * 1000);
-  return { startMs, endMs: startMs + 86_400_000 };
+/** "STRENGTH_TRAINING" → "Strength Training". */
+function humanizeExerciseType(type: string): string {
+  return type
+    .toLowerCase()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 }
 
-/**
- * Map Google Fit activity type IDs → human-readable names.
- * Full list: https://developers.google.com/fit/rest/v1/reference/activity-types
- */
-const GOOGLE_FIT_ACTIVITY_TYPES: Record<number, string> = {
-  0: 'In Vehicle', 1: 'Biking', 2: 'On Foot', 3: 'Still', 4: 'Unknown',
-  5: 'Tilting', 7: 'Walking', 8: 'Running', 9: 'Aerobics', 10: 'Badminton',
-  11: 'Baseball', 12: 'Basketball', 13: 'Biathlon', 14: 'Handbiking',
-  15: 'Mountain Biking', 16: 'Road Biking', 17: 'Spinning', 18: 'Stationary Biking',
-  19: 'Utility Biking', 20: 'Boxing', 21: 'Calisthenics', 22: 'Circuit Training',
-  23: 'Cricket', 24: 'Cross Country Skiing', 25: 'Cross Fit', 26: 'Curling',
-  27: 'Dancing', 28: 'Diving', 29: 'Elliptical', 30: 'Fencing',
-  31: 'Football (American)', 32: 'Football (Australian)', 33: 'Football (Soccer)',
-  34: 'Frisbee', 35: 'Gardening', 36: 'Golf', 37: 'Gymnastics',
-  38: 'Handball', 39: 'Hiking', 40: 'Hockey', 41: 'Horseback Riding',
-  42: 'Housework', 43: 'Jumping Rope', 44: 'Kayaking', 45: 'Kettlebell Training',
-  46: 'Kickboxing', 47: 'Kitesurfing', 48: 'Martial Arts', 49: 'Meditation',
-  50: 'Mixed Martial Arts', 51: 'P90X', 52: 'Paragliding', 53: 'Pilates',
-  54: 'Polo', 55: 'Racquetball', 56: 'Rock Climbing', 57: 'Rowing',
-  58: 'Rowing Machine', 59: 'Rugby', 60: 'Jogging', 61: 'Running on Sand',
-  62: 'Running (Treadmill)', 63: 'Sailing', 64: 'Scuba Diving',
-  65: 'Skateboarding', 66: 'Skating', 67: 'Cross Skating', 68: 'Indoor Skating',
-  69: 'Inline Skating', 70: 'Skiing', 71: 'Back Country Skiing',
-  72: 'Downhill Skiing', 73: 'Kite Skiing', 74: 'Nordic Skiing',
-  75: 'Snowboarding', 76: 'Snowmobile', 77: 'Snowshoeing',
-  78: 'Squash', 79: 'Stair Climbing', 80: 'Stair Climbing Machine',
-  81: 'Stand Up Paddleboarding', 82: 'Strength Training', 83: 'Surfing',
-  84: 'Swimming (Open Water)', 85: 'Swimming (Pool)', 86: 'Table Tennis',
-  87: 'Team Sports', 88: 'Tennis', 89: 'Treadmill (Walking)',
-  90: 'Volleyball (Beach)', 91: 'Volleyball (Indoor)', 92: 'Wakeboarding',
-  93: 'Walking (Fitness)', 94: 'NNordic Walking', 95: 'Walking (Treadmill)',
-  96: 'Waterpolo', 97: 'Weightlifting', 98: 'Wheelchair', 99: 'Windsurfing',
-  100: 'Yoga', 101: 'Zumba', 108: 'Diving', 109: 'Ergometer',
-  110: 'Ice Skating', 111: 'Indoor Cycling', 112: 'Stairmaster',
-  113: 'HIIT', 114: 'Interval Training', 116: 'Walking', 117: 'Swimming',
-};
+/** Workouts from `exercise` session points. */
+function parseHealthExercises(data: any): FitbitActivity[] {
+  const points: any[] = data?.dataPoints ?? [];
+  const activities: FitbitActivity[] = [];
+
+  for (const point of points) {
+    const exercise = point?.exercise ?? point;
+    const interval = exercise?.interval ?? {};
+    const start = Date.parse(interval?.startTime ?? '');
+    const end = Date.parse(interval?.endTime ?? '');
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+
+    const activeSeconds = parseDurationSeconds(exercise?.activeDuration);
+    const durationMin = Math.round(
+      (activeSeconds > 0 ? activeSeconds * 1000 : end - start) / 60_000,
+    );
+    if (durationMin < 5) continue;
+
+    const name =
+      exercise?.displayName ||
+      (exercise?.exerciseType ? humanizeExerciseType(String(exercise.exerciseType)) : 'Exercise');
+
+    // startTime is a true UTC instant; startUtcOffset puts it back in the
+    // user's local wall clock, which is what the activity list displays.
+    const localStart = new Date(start + parseDurationSeconds(interval?.startUtcOffset) * 1000);
+    const hh = String(localStart.getUTCHours()).padStart(2, '0');
+    const mm = String(localStart.getUTCMinutes()).padStart(2, '0');
+
+    const metrics = exercise?.metricsSummary ?? {};
+    const avgHr = toNumber(metrics?.averageHeartRateBeatsPerMinute) || undefined;
+
+    activities.push({
+      activityName: name,
+      startTime: `${hh}:${mm}`,
+      durationMin,
+      calories: Math.round(toNumber(metrics?.caloriesKcal)),
+      averageHeartRate: avgHr,
+      activityTier: classifyActivityTier(name, undefined, undefined, avgHr),
+    });
+  }
+
+  return activities;
+}
+
+/** The API caps `exercise` and `sleep` pages at 25 points. */
+const SESSION_PAGE_SIZE = 25;
+
+/** Numeric field of the most recent sample point (weight, height, …). */
+function latestSampleValue(data: any, typeKey: string, field: string): number {
+  const points: any[] = data?.dataPoints ?? [];
+  let bestTime = -Infinity;
+  let bestValue = 0;
+  for (const point of points) {
+    const sample = point?.[typeKey];
+    if (!sample) continue;
+    const t = Date.parse(sample?.sampleTime?.physicalTime ?? '');
+    const time = Number.isFinite(t) ? t : -Infinity;
+    if (time >= bestTime) {
+      bestTime = time;
+      bestValue = toNumber(sample?.[field]);
+    }
+  }
+  return bestValue;
+}
 
 // Maps lowercase Fitbit activity names → accuracy tier for calorie discount.
 // Default (unrecognized): tier2_steady_state.
@@ -321,41 +433,11 @@ function classifyActivityTier(
  * Silently returns [] on failure — non-critical for glycogen fallback.
  */
 async function fetchActivitiesForDate(
-  accessToken: string, 
-  date: string, 
-  provider: 'fitbit' | 'google' = 'fitbit',
-  timezoneOffset?: number
+  accessToken: string,
+  date: string,
 ): Promise<FitbitActivity[]> {
   if (accessToken === 'mock_token') return [];
   try {
-    if (provider === 'google') {
-      const { startMs, endMs } = dateToUtcMs(date, timezoneOffset);
-      const startTimeIso = new Date(startMs).toISOString();
-      const endTimeIso = new Date(endMs).toISOString();
-      const data = await googleHealthReconcile('activity-session', accessToken, startTimeIso, endTimeIso).catch(() => null);
-      const activities: FitbitActivity[] = [];
-      const points = data?.dataPoints || [];
-      for (const point of points) {
-        const session = point?.activitySession || point;
-        const name = session?.activityType || session?.title || 'Exercise';
-        const start = new Date(session?.interval?.startTime || session?.startTime || 0).getTime();
-        const end = new Date(session?.interval?.endTime || session?.endTime || 0).getTime();
-        const durationMin = Math.round((end - start) / 60000);
-        if (durationMin < 5) continue;
-        const startDate = new Date(start);
-        const hh = String(startDate.getUTCHours()).padStart(2, '0');
-        const mm = String(startDate.getUTCMinutes()).padStart(2, '0');
-        activities.push({
-          activityName: name,
-          startTime: `${hh}:${mm}`,
-          durationMin,
-          calories: 0,
-          activityTier: classifyActivityTier(name),
-        });
-      }
-      return activities;
-    }
-
     const data = await fitbitFetch(
       `/1/user/-/activities/list.json?afterDate=${date}&sort=asc&limit=20&offset=0`,
       accessToken,
@@ -623,62 +705,107 @@ export const fitbitService = {
     }
 
     if (provider === 'google') {
-      // UTC ms window for steps/calories — strict 24 h anchored to UTC midnight.
-      const { startMs, endMs } = dateToUtcMs(targetDate, timezoneOffset);
-      const startTimeIso = new Date(startMs).toISOString();
-      const endTimeIso   = new Date(endMs).toISOString();
-      // Sleep window is wider (−6 h / +12 h) so overnight sessions that start
-      // before local midnight aren't clipped by the UTC boundary.
-      const sleepStartIso = new Date(startMs - 6 * 3_600_000).toISOString();
-      const sleepEndIso   = new Date(endMs   + 12 * 3_600_000).toISOString();
+      // Google Health aggregates by CIVIL day, so the user's local date IS the
+      // query — no UTC window arithmetic, and no timezone offset to get wrong.
+      // Sleep is selected by the civil day it ENDS on: that is the only filter
+      // the API supports for sleep, and it is also what "last night's sleep for
+      // date D" means.
+      const nextDate = addDaysToIsoDate(targetDate, 1);
+      const unavailable: HealthMetricAvailability = {};
+      const failures: unknown[] = [];
 
-      const [stepsRollup, stepsReconcile, caloriesData, sleepData, activities] = await Promise.all([
-        googleHealthDailyRollUp('steps', accessToken, startTimeIso, endTimeIso)
-          .catch((err) => {
-            console.warn('[GoogleHealth] steps dailyRollUp error:', err?.message ?? err);
-            return null;
-          }),
-        googleHealthReconcile('steps', accessToken, startTimeIso, endTimeIso)
-          .catch((err) => {
-            console.warn('[GoogleHealth] steps reconcile error:', err?.message ?? err);
-            return null;
-          }),
-        googleHealthDailyRollUp('total-calories', accessToken, startTimeIso, endTimeIso)
-          .catch((err) => {
-            console.warn('[GoogleHealth] total-calories dailyRollUp error:', err?.message ?? err);
-            return null;
-          }),
-        googleHealthReconcile('sleep', accessToken, sleepStartIso, sleepEndIso)
-          .catch((err) => {
-            console.warn('[GoogleHealth] sleep reconcile error:', err?.message ?? err);
-            return null;
-          }),
-        fetchActivitiesForDate(accessToken, targetDate, 'google', timezoneOffset),
+      const [stepsRollup, caloriesRollup, sleepData, exerciseData] = await Promise.all([
+        googleHealthDailyRollUp('steps', accessToken, targetDate, nextDate).catch((err) => {
+          console.warn(`[GoogleHealth] steps fetch failed for ${targetDate}:`, err?.message ?? err);
+          failures.push(err);
+          unavailable.steps = true;
+          return null;
+        }),
+        googleHealthDailyRollUp('total-calories', accessToken, targetDate, nextDate).catch((err) => {
+          console.warn(`[GoogleHealth] total-calories fetch failed for ${targetDate}:`, err?.message ?? err);
+          failures.push(err);
+          unavailable.caloriesOut = true;
+          return null;
+        }),
+        googleHealthReconcile(
+          'sleep',
+          accessToken,
+          civilDayFilter('sleep.interval.civil_end_time', targetDate),
+          SESSION_PAGE_SIZE,
+        ).catch((err) => {
+          console.warn(`[GoogleHealth] sleep fetch failed for ${targetDate}:`, err?.message ?? err);
+          failures.push(err);
+          unavailable.sleep = true;
+          return null;
+        }),
+        googleHealthReconcile(
+          'exercise',
+          accessToken,
+          civilDayFilter('exercise.interval.civil_start_time', targetDate),
+          SESSION_PAGE_SIZE,
+        ).catch((err) => {
+          console.warn(`[GoogleHealth] exercise fetch failed for ${targetDate}:`, err?.message ?? err);
+          unavailable.activities = true;
+          return null;
+        }),
       ]);
 
-      console.log(`[GoogleHealth] Raw stepsRollup for ${targetDate}:`, JSON.stringify(stepsRollup, null, 2));
-      console.log(`[GoogleHealth] Raw stepsReconcile for ${targetDate}:`, JSON.stringify(stepsReconcile, null, 2));
+      // Every read failed — surface it as an API error rather than reporting a
+      // successful all-zero sync that would overwrite good data downstream.
+      if (unavailable.steps && unavailable.caloriesOut && unavailable.sleep) {
+        throw failures[0];
+      }
 
-      const stepsCount = Math.max(parseHealthSteps(stepsRollup), parseHealthSteps(stepsReconcile));
-      const caloriesOut = parseHealthCalories(caloriesData);
+      let stepsCount = parseHealthSteps(stepsRollup);
+      // A day with no rollup bucket is a day the device never synced — NOT a
+      // zero-step day (a real zero comes back as countSum "0"). Fall back to
+      // the raw interval stream before deciding we know nothing.
+      if (!unavailable.steps && rollupBuckets(stepsRollup, 'steps').length === 0) {
+        const rawSteps = await googleHealthReconcile(
+          'steps',
+          accessToken,
+          civilDayFilter('steps.interval.civil_start_time', targetDate),
+        ).catch((err) => {
+          console.warn(`[GoogleHealth] steps reconcile fallback failed for ${targetDate}:`, err?.message ?? err);
+          return null;
+        });
+        stepsCount = parseHealthSteps(rawSteps);
+        if (stepsCount === 0) unavailable.steps = true;
+      }
+
+      const caloriesOut = parseHealthCalories(caloriesRollup);
+      if (!unavailable.caloriesOut && rollupBuckets(caloriesRollup, 'totalCalories').length === 0) {
+        unavailable.caloriesOut = true;
+      }
+
       const sleepHours = parseHealthSleepHours(sleepData);
+      // No sleep session recorded is "we don't know", not "slept 0 hours".
+      if (!unavailable.sleep && sleepHours === 0) unavailable.sleep = true;
 
-      console.log(`[GoogleHealth] Sync result for ${targetDate}:`, {
-        stepsCount,
-        caloriesOut,
-        sleepHours,
-        activitiesCount: activities.length,
-      });
+      const activities = parseHealthExercises(exerciseData);
+
+      const unknown = Object.keys(unavailable);
+      console.log(
+        `[GoogleHealth] Sync result for ${targetDate}:`,
+        {
+          steps: stepsCount,
+          caloriesOut,
+          sleepHours,
+          activities: activities.length,
+          unavailable: unknown.length > 0 ? unknown.join(',') : 'none',
+        },
+      );
 
       // Google Health API recovery status is derived from sleep hours by the caller (fitbit-sync.ts).
       return {
         success: true,
-        steps:      { value: stepsCount,        source: 'device' },
-        sleep:      { value: sleepHours,        source: 'device' },
-        hrv:        { value: 0,                 source: 'device' },
+        steps:      { value: stepsCount,  source: 'device' },
+        sleep:      { value: sleepHours,  source: 'device' },
+        hrv:        { value: 0,           source: 'device' },
         caloriesOut: caloriesOut > 0 ? { value: caloriesOut, source: 'device' } : undefined,
         activities: activities.length > 0 ? activities : undefined,
         isVerified: true,
+        unavailable,
       };
     }
 
@@ -686,7 +813,7 @@ export const fitbitService = {
       fitbitFetch(`/1/user/-/activities/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1.2/user/-/sleep/date/${targetDate}.json`, accessToken),
       fitbitFetch(`/1/user/-/hrv/date/${targetDate}.json`, accessToken),
-      fetchActivitiesForDate(accessToken, targetDate, 'fitbit'),
+      fetchActivitiesForDate(accessToken, targetDate),
     ]);
 
     const steps = (activitiesData as any)?.summary?.steps ?? 0;
@@ -725,10 +852,11 @@ export const fitbitService = {
     }
 
     if (provider === 'google') {
+      // Local "today" for the user — Google Health queries are civil-day based,
+      // so this date string is all the window we need.
       const now = new Date();
       const localTime = new Date(now.getTime() - ((timezoneOffset || 0) * 60000));
-      const todayDate = localTime;
-      const todayStr  = todayDate.toISOString().split('T')[0];
+      const todayStr = localTime.toISOString().split('T')[0];
 
       // Backfill the last 7 days so the dashboard has history immediately
       // after connecting — mirrors what the Fitbit initial sync does.
@@ -736,44 +864,62 @@ export const fitbitService = {
       let latestResult: FitbitSyncResult | null = null;
 
       for (let i = 0; i < 7; i++) {
-        const d = new Date(todayDate);
-        d.setUTCDate(d.getUTCDate() - i);
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = addDaysToIsoDate(todayStr, -i);
         try {
           const r = await this.syncTodayData(accessToken, dateStr, 'google', timezoneOffset);
-          dailySnapshots[dateStr] = {
-            steps:        r.steps.value,
-            sleepHours:   r.sleep.value,
-            // Derive recoveryStatus from sleep
-            recoveryStatus: r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low',
-            caloriesOut:  r.caloriesOut?.value,
-            activities:   r.activities,
+          if (i === 0) latestResult = r;
+
+          // Only record what the provider actually knows. Writing an all-zero
+          // snapshot here would clobber real history for that day.
+          const snap: import('./health-service').FitbitDailySnapshot = {
             // Captured today; for i>0 (past days) this makes the snapshot final.
             capturedOnDate: todayStr,
           };
-          if (i === 0) latestResult = r;
+          if (!r.unavailable?.steps) snap.steps = r.steps.value;
+          if (!r.unavailable?.sleep) {
+            snap.sleepHours = r.sleep.value;
+            // Derive recoveryStatus from sleep
+            snap.recoveryStatus = r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low';
+          }
+          if (r.caloriesOut && r.caloriesOut.value > 0) snap.caloriesOut = r.caloriesOut.value;
+          if (r.activities && r.activities.length > 0) snap.activities = r.activities;
+
+          if (snap.steps != null || snap.sleepHours != null || snap.caloriesOut != null || snap.activities) {
+            dailySnapshots[dateStr] = snap;
+          }
         } catch (dayErr) {
           console.warn(`[FitbitService] Google initial sync: skipping ${dateStr}:`, dayErr);
         }
       }
 
-      // Fetch body composition — weight in kg, height in metres (×100 → cm)
-      const { startMs: bodyStart, endMs: bodyEnd } = dateToUtcMs(todayStr, timezoneOffset); 
-      const bodyStartIso = new Date(bodyStart - 30 * 86_400_000).toISOString();
-      const bodyEndIso   = new Date(bodyEnd).toISOString();
+      // Body composition — the newest weight/height sample in the last 30 days.
+      // These are sample types, filtered on their civil sample time.
+      const bodyStart = addDaysToIsoDate(todayStr, -30);
+      const bodyEnd = addDaysToIsoDate(todayStr, 1);
       const [weightData, heightData] = await Promise.all([
-        googleHealthReconcile('weight', accessToken, bodyStartIso, bodyEndIso).catch(() => null),
-        googleHealthReconcile('height', accessToken, bodyStartIso, bodyEndIso).catch(() => null),
+        googleHealthReconcile(
+          'weight',
+          accessToken,
+          civilRangeFilter('weight.sample_time.civil_time', bodyStart, bodyEnd),
+        ).catch((err) => {
+          console.warn('[GoogleHealth] weight fetch failed:', err?.message ?? err);
+          return null;
+        }),
+        googleHealthReconcile(
+          'height',
+          accessToken,
+          civilRangeFilter('height.sample_time.civil_time', bodyStart, bodyEnd),
+        ).catch((err) => {
+          console.warn('[GoogleHealth] height fetch failed:', err?.message ?? err);
+          return null;
+        }),
       ]);
-      const weightPoints = weightData?.dataPoints || [];
-      const latestWeight = weightPoints[weightPoints.length - 1]?.weight?.weightKg 
-        ?? weightPoints[weightPoints.length - 1]?.value?.weightKg;
-      const weightKg = latestWeight ? Math.round(Number(latestWeight) * 10) / 10 : undefined;
 
-      const heightPoints = heightData?.dataPoints || [];
-      const latestHeight = heightPoints[heightPoints.length - 1]?.height?.heightM 
-        ?? heightPoints[heightPoints.length - 1]?.value?.heightM;
-      const heightCm = latestHeight ? Math.round(Number(latestHeight) * 100) : undefined;
+      const weightGrams = latestSampleValue(weightData, 'weight', 'weightGrams');
+      const weightKg = weightGrams > 0 ? Math.round((weightGrams / 1000) * 10) / 10 : undefined;
+
+      const heightMm = latestSampleValue(heightData, 'height', 'heightMillimeters');
+      const heightCm = heightMm > 0 ? Math.round(heightMm / 10) : undefined;
 
       const base = latestResult ?? {
         success: true,

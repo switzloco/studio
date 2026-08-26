@@ -274,3 +274,89 @@ describe('syncFitbitSnapshot score recalculation', () => {
     expect(newHistory[2].equity).toBe(139);
   });
 });
+
+describe('syncFitbitSnapshot — zeroed syncs never overwrite stored history', () => {
+  const creds = {
+    accessToken: 'valid-token',
+    refreshToken: 'refresh-token',
+    expiresAt: Date.now() + 1000 * 60 * 60,
+    fitbitUserId: 'user1',
+    lastSyncedAt: Date.now(),
+    timezoneOffset: 0,
+    provider: 'google' as const,
+  };
+
+  const healthWithSnapshot = (snapshot: Record<string, unknown>) => ({
+    steps: 0,
+    hrv: 0,
+    sleepHours: 0,
+    recoveryStatus: 'medium' as const,
+    dailyProteinG: 0,
+    dailyCarbsG: 0,
+    dailyCaloriesIn: 0,
+    dailyCaloriesOut: 2000,
+    visceralFatPoints: 100,
+    history: [],
+    fitbitByDate: { '2026-08-25': snapshot },
+    isAnonymous: false,
+    onboardingDay: 1,
+    onboardingComplete: true,
+    isDeviceVerified: true,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(adminHealthService.getFitbitCredentials).mockResolvedValue(creds);
+    vi.mocked(adminHealthService.queryFoodLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.queryExerciseLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.getUserPreferences).mockResolvedValue({
+      weeklySchedule: '',
+      equipment: [],
+      targets: { proteinGoal: 150, fatPointsGoal: 3000 },
+      profile: {},
+    });
+  });
+
+  it('skips the write when every metric came back unavailable', async () => {
+    vi.mocked(fitbitService.syncTodayData).mockResolvedValue({
+      success: true,
+      steps: { value: 0, source: 'device' },
+      sleep: { value: 0, source: 'device' },
+      hrv: { value: 0, source: 'device' },
+      isVerified: true,
+      unavailable: { steps: true, sleep: true, caloriesOut: true },
+    } as any);
+    vi.mocked(adminHealthService.getHealthSummary).mockResolvedValue(
+      healthWithSnapshot({ steps: 9500, sleepHours: 7.4, caloriesOut: 2800, capturedOnDate: '2026-08-26' }) as any,
+    );
+
+    const result = await syncFitbitSnapshot('user-123', '2026-08-25', 0);
+
+    expect(result.success).toBe(true);
+    expect(adminHealthService.saveFitbitDailySnapshot).not.toHaveBeenCalled();
+    expect(adminHealthService.updateHealthData).not.toHaveBeenCalled();
+  });
+
+  it('fills in a metric that is newly available while keeping the stored ones', async () => {
+    vi.mocked(fitbitService.syncTodayData).mockResolvedValue({
+      success: true,
+      steps: { value: 0, source: 'device' },
+      sleep: { value: 7.9, source: 'device' },
+      hrv: { value: 0, source: 'device' },
+      isVerified: true,
+      unavailable: { steps: true, caloriesOut: true },
+    } as any);
+    vi.mocked(adminHealthService.getHealthSummary).mockResolvedValue(
+      healthWithSnapshot({ steps: 9500, caloriesOut: 2800, capturedOnDate: '2026-08-25' }) as any,
+    );
+
+    await syncFitbitSnapshot('user-123', '2026-08-25', 0);
+
+    expect(adminHealthService.saveFitbitDailySnapshot).toHaveBeenCalledWith(
+      expect.any(Object),
+      'user-123',
+      '2026-08-25',
+      expect.objectContaining({ steps: 9500, caloriesOut: 2800, sleepHours: 7.9, recoveryStatus: 'high' }),
+    );
+  });
+});
