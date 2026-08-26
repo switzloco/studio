@@ -105,14 +105,17 @@ async function googleHealthReconcile(
   startTimeIso: string,
   endTimeIso: string,
 ): Promise<any> {
-  // Use camelCase for the filter fields since JSON uses startTime/endTime.
-  // We'll try without the filterKey prefix first.
-  let filter = encodeURIComponent(
-    `interval.startTime >= "${startTimeIso}" AND interval.endTime <= "${endTimeIso}"`
+  // AIP-160 filter: use snake_case data-type prefix + .interval.start_time
+  // e.g. steps.interval.start_time >= "..." AND steps.interval.start_time < "..."
+  const filterKey = dataType.replace(/-/g, '_');
+  const filter = encodeURIComponent(
+    `${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.start_time < "${endTimeIso}"`
   );
   
   let allPoints: any[] = [];
   let pageToken = '';
+  let pageCount = 0;
+  const MAX_PAGES = 200; // safety limit
 
   do {
     const url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}${pageToken ? `&pageToken=${pageToken}` : ''}`;
@@ -125,24 +128,8 @@ async function googleHealthReconcile(
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType} with filter ${decodeURIComponent(filter)}:`, body);
-      
-      // If our filter failed, try falling back to the endpoint WITH the prefix
-      if (pageToken === '' && body.includes('Invalid filter')) {
-        const filterKey = dataType.replace(/-/g, '_');
-        filter = encodeURIComponent(`${filterKey}.interval.start_time >= "${startTimeIso}" AND ${filterKey}.interval.end_time <= "${endTimeIso}"`);
-        const fallbackUrl = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints:reconcile?filter=${filter}`;
-        const fallbackRes = await fetch(fallbackUrl, {
-          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        });
-        if (fallbackRes.ok) {
-          const fallbackData = await fallbackRes.json();
-          return fallbackData; // Note: doesn't paginate fallback for simplicity right now
-        } else {
-          console.warn(`[GoogleHealth] reconcile fallback error for ${dataType}:`, await fallbackRes.text().catch(()=>''));
-        }
-      }
-      return { dataPoints: allPoints }; // return what we have
+      console.warn(`[GoogleHealth] reconcile error ${res.status} for ${dataType}:`, body);
+      return { dataPoints: allPoints }; // return what we have so far
     }
 
     const data = await res.json();
@@ -150,7 +137,12 @@ async function googleHealthReconcile(
       allPoints = allPoints.concat(data.dataPoints);
     }
     pageToken = data.nextPageToken || '';
-  } while (pageToken);
+    pageCount++;
+  } while (pageToken && pageCount < MAX_PAGES);
+
+  if (pageCount >= MAX_PAGES) {
+    console.warn(`[GoogleHealth] reconcile hit ${MAX_PAGES} page limit for ${dataType}, collected ${allPoints.length} points`);
+  }
 
   return { dataPoints: allPoints };
 }
@@ -159,16 +151,18 @@ async function googleHealthReconcile(
 function parseHealthSteps(data: any): number {
   if (!data) return 0;
   let total = 0;
-  const points = data?.dailyRollupDataPoints || data?.dataPoints || [];
+  // dailyRollUp uses "rollupDataPoints", reconcile/list uses "dataPoints"
+  const points = data?.rollupDataPoints || data?.dataPoints || [];
   for (const p of points) {
     const val =
-      p?.value?.steps?.countSum ??
-      p?.value?.stepsRollupValue?.countSum ??
-      p?.value?.countSum ??
-      p?.value?.steps?.count ??
-      p?.value?.steps ??
+      // dailyRollUp aggregated fields
       p?.steps?.countSum ??
+      // reconcile individual data points
       p?.steps?.count ??
+      // fallback: nested under value
+      p?.value?.steps?.countSum ??
+      p?.value?.steps?.count ??
+      p?.value?.countSum ??
       0;
     if (typeof val === 'number') total += val;
     else if (typeof val === 'string') total += parseInt(val, 10) || 0;
@@ -180,14 +174,19 @@ function parseHealthSteps(data: any): number {
 function parseHealthCalories(data: any): number {
   if (!data) return 0;
   let total = 0;
-  const points = data?.dailyRollupDataPoints || data?.dataPoints || [];
+  // dailyRollUp uses "rollupDataPoints", reconcile/list uses "dataPoints"
+  const points = data?.rollupDataPoints || data?.dataPoints || [];
   for (const p of points) {
     const val =
+      // dailyRollUp: total_calories data type uses camelCase in response
+      p?.totalCalories?.caloriesSum ??
+      p?.totalCalories?.calories ??
+      // reconcile individual points
+      p?.total_calories?.calories ??
+      // fallback: nested under value
       p?.value?.totalCalories?.calories ??
-      p?.value?.totalCaloriesRollupValue?.calories ??
       p?.value?.calories ??
       p?.value?.caloriesSum ??
-      p?.totalCalories?.calories ??
       0;
     if (typeof val === 'number') total += val;
     else if (typeof val === 'string') total += parseFloat(val) || 0;

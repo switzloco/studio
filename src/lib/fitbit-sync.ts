@@ -538,6 +538,8 @@ function isSnapshotStale(
   legacyCutoffDate: string,
 ): boolean {
   if (!snap) return true;
+  // Zero steps + zero sleep = bad data from a broken API call. Always re-sync.
+  if (snap.steps === 0 && (snap.sleepHours === 0 || snap.sleepHours == null)) return true;
   if (snap.caloriesOut == null) return true;
   if (snap.capturedOnDate) return snap.capturedOnDate <= date;
   // Legacy snapshot with no capture metadata — only refresh recent days.
