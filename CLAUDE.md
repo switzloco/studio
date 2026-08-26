@@ -68,13 +68,27 @@ Health section in `fitbit-service.ts`:
 - Values: steps `steps.countSum` (int64 **as a string**), calories
   `totalCalories.kcalSum`, sleep `sleep.summary.minutesAsleep`, workouts live
   under the `exercise` data type (there is no `activity-session`).
-- **Calorie burn comes from three data types, not one.** `total-calories`
-  (BMR + active) is the direct answer but devices fill it in unevenly;
-  `active-energy-burned` (dailyRollUp) and `basal-energy-burned` (list/reconcile
-  only — it has no rollup) are the two halves. `readGoogleHealthCalories` takes
-  whichever is larger, since the halves should sum to the total. A BMR estimate
-  is added ONLY when the result is `caloriesBasis: 'active-only'` — never on top
-  of a full-day total.
+- **Calorie burn comes from four data types, ranked, not read from one.**
+  `total-calories` (BMR + active in one number) LOOKS like the direct answer,
+  but a live account proved it can silently drop the basal component for a
+  single day with no error: it reported 1,815 kcal for a day independently
+  confirmed (Fitbit app, Google Fit) at ~3,100, while the surrounding six days
+  in the same 7-day window were all normal (2,679–3,382). Nothing in the
+  response marks a day like that as partial — the hourly rollup summed to
+  exactly 1,815, meaning the shortfall is in Google's own per-hour data, not a
+  partial read on our end.
+  `calories-in-heart-rate-zone` (dailyRollUp, sum `caloriesInHeartRateZones[].kcal`
+  across zones) — Fitbit's own HR-derived per-minute burn — matched the true
+  figure on that broken day to within 7 kcal, so `readGoogleHealthCalories`
+  ranks it above `total-calories` whenever it's present and at least as large
+  as the day's `active-energy-burned` (guards against IT being the partial
+  read, e.g. no continuous HR sensor). Below that: `active-energy-burned` +
+  `basal-energy-burned` (list/reconcile only — it has no rollup) as two
+  measured halves, then `active-energy-burned` alone. The expensive per-interval
+  basal read is only fetched when neither HR-zone nor total looks complete
+  against that day's own active burn. A BMR estimate is added ONLY when the
+  result is `caloriesBasis: 'active-only'` — never on top of a figure that's
+  already a full-day total.
 
 **A missing day is not a zero day.** No rollup bucket means the device never
 synced; a real zero comes back as `countSum: "0"`. Sync results carry

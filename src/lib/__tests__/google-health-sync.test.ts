@@ -36,6 +36,14 @@ const steps = (countSum: string) => ({ rollupDataPoints: [{ civilStartTime: civi
 const totalCalories = (kcalSum: number) => ({ rollupDataPoints: [{ civilStartTime: civil, totalCalories: { kcalSum } }] });
 const activeEnergy = (kcalSum: number) => ({ rollupDataPoints: [{ civilStartTime: civil, activeEnergyBurned: { kcalSum } }] });
 const basalEnergy = (...kcals: number[]) => ({ dataPoints: kcals.map((kcal) => ({ basalEnergyBurned: { kcal } })) });
+const zoneCalories = (...zones: { zone: string; kcal: number }[]) => ({
+  rollupDataPoints: [{
+    civilStartTime: civil,
+    caloriesInHeartRateZone: {
+      caloriesInHeartRateZones: zones.map((z) => ({ heartRateZone: z.zone, kcal: z.kcal })),
+    },
+  }],
+});
 const sleep = (minutesAsleep: string) => ({
   dataPoints: [{
     sleep: {
@@ -147,18 +155,52 @@ describe('Google Health sync — calorie burn', () => {
     expect(r.unavailable?.caloriesOut).toBeUndefined();
   });
 
-  it('prefers active + basal when the reported total is below the day basal burn', async () => {
+  it('prefers heart-rate-zone calories when total-calories silently drops the basal component', async () => {
+    // Reproduces a live account: total-calories reported 1815 kcal for a day
+    // independently confirmed (Fitbit app, Google Fit) at ~3100 kcal.
+    // active-energy-burned was normal (782) - only the basal half of `total`
+    // was missing, with nothing in the response marking it as partial.
+    // calories-in-heart-rate-zone matched the true figure to within 7 kcal.
     mockGoogleHealth({
-      steps: steps('11530'),
-      'total-calories': totalCalories(1900),
-      'active-energy-burned': activeEnergy(1240),
-      'basal-energy-burned': basalEnergy(1860),
+      steps: steps('11562'),
+      'total-calories': totalCalories(1815),
+      'active-energy-burned': activeEnergy(782),
+      'calories-in-heart-rate-zone': zoneCalories({ zone: 'LIGHT', kcal: 3107 }),
       sleep: sleep('432'),
     });
 
     const r = await fitbitService.syncTodayData('token', '2026-08-25', 'google');
-    expect(r.caloriesOut?.value).toBe(3100);
-    expect(r.caloriesBasis).toBe('active+basal');
+    expect(r.caloriesOut?.value).toBe(3107);
+    expect(r.caloriesBasis).toBe('hr-zone');
+  });
+
+  it('falls back to total-calories when heart-rate-zone data is absent', async () => {
+    mockGoogleHealth({
+      steps: steps('11530'),
+      'total-calories': totalCalories(2842),
+      'active-energy-burned': activeEnergy(900),
+      sleep: sleep('432'),
+    });
+
+    const r = await fitbitService.syncTodayData('token', '2026-08-25', 'google');
+    expect(r.caloriesOut?.value).toBe(2842);
+    expect(r.caloriesBasis).toBe('total');
+  });
+
+  it('ignores a heart-rate-zone reading that is itself lower than active burn', async () => {
+    // A device with no continuous HR sensor can report a token/partial
+    // HR-zone figure - it must not outrank a total that is at least plausible.
+    mockGoogleHealth({
+      steps: steps('11530'),
+      'total-calories': totalCalories(2842),
+      'active-energy-burned': activeEnergy(900),
+      'calories-in-heart-rate-zone': zoneCalories({ zone: 'LIGHT', kcal: 50 }),
+      sleep: sleep('432'),
+    });
+
+    const r = await fitbitService.syncTodayData('token', '2026-08-25', 'google');
+    expect(r.caloriesOut?.value).toBe(2842);
+    expect(r.caloriesBasis).toBe('total');
   });
 
   it('flags an activity-only reading so the caller knows the basal half is missing', async () => {
@@ -219,6 +261,7 @@ describe('Google Health sync — missing data is never reported as zero', () => 
       steps: fail,
       'total-calories': fail,
       'active-energy-burned': fail,
+      'calories-in-heart-rate-zone': fail,
       'basal-energy-burned': fail,
       sleep: fail,
       exercise: fail,

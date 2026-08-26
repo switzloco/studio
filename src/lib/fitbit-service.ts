@@ -285,33 +285,65 @@ function parseBasalKcal(data: any): number {
 }
 
 /**
- * Where a day's calorie burn came from. `total-calories` is the direct answer,
- * but not every device publishes it — some write only the two halves. Knowing
- * which we got is what lets the caller decide whether anything is missing,
- * instead of quietly estimating the difference.
+ * Where a day's calorie burn came from, ranked by how much of the day it
+ * actually covers:
+ *   • `hr-zone`    — Fitbit's own HR-derived per-minute burn, summed across
+ *                    zones. Verified against a live account: matched the
+ *                    Fitbit/Google Fit app's own figure to within 7 kcal on a
+ *                    day `total-calories` under-reported by 1,300+ kcal.
+ *   • `total`      — `total-calories`: BMR + active in one number, but a
+ *                    stream Fitbit's pipeline can silently drop the basal
+ *                    component from for a single day without erroring —
+ *                    the failure this ranking exists to catch.
+ *   • `active+basal` / `active-only` — the two halves read separately, for
+ *                    devices that publish no HR-zone or total stream at all.
  */
-export type CaloriesBasis = 'total' | 'active+basal' | 'active-only';
+export type CaloriesBasis = 'hr-zone' | 'total' | 'active+basal' | 'active-only';
+
+/** Sum `caloriesInHeartRateZones[].kcal` across a dailyRollUp's zone buckets. */
+function parseZoneKcal(data: any): number {
+  let total = 0;
+  for (const p of data?.rollupDataPoints ?? []) {
+    for (const z of p?.caloriesInHeartRateZone?.caloriesInHeartRateZones ?? []) {
+      total += toNumber(z?.kcal);
+    }
+  }
+  return total;
+}
 
 /**
- * A day's calorie burn, read from whichever of the three energy data types the
- * device actually publishes:
- *   • `total-calories`      — BMR + active, the whole day in one number;
- *   • `active-energy-burned`— activity only (dailyRollUp);
- *   • `basal-energy-burned` — BMR only (list/reconcile; it has no rollup).
+ * A day's calorie burn, cross-checked across four Google Health data types
+ * rather than trusted from `total-calories` alone.
  *
- * The halves should add up to the total, so whichever is larger is the more
- * complete reading — a `total-calories` stream the device only partly fills in
- * is exactly how a 3,100 kcal day gets reported as 1,900. Returns null when no
- * source produced anything, and throws only when all three reads failed
- * outright (that is an API problem, not an empty day).
+ * `total-calories` is supposed to be BMR + active in one number, and usually
+ * is — but a live account showed a day where it silently dropped the basal
+ * component and reported 1,815 kcal for what was independently confirmed (the
+ * Fitbit app, and Google Fit) to be a ~3,100 kcal day. Six of the surrounding
+ * seven days had a normal `total-calories` in the 2,679–3,382 range; only the
+ * one day was wrong, and nothing in the response marked it as partial.
+ *
+ * `calories-in-heart-rate-zone` — Fitbit's own HR-derived per-minute burn,
+ * summed across zones — matched the true figure on that broken day to within
+ * 7 kcal, so it outranks `total-calories` whenever it's present and at least
+ * as large as the day's active burn (guarding against IT being the partial
+ * read, on a device with no continuous HR).
+ *
+ * The per-interval `basal-energy-burned` list is the most expensive of the
+ * four reads, so it's only fetched when neither whole-day source (HR-zone or
+ * total) looks complete against that day's own active-energy-burned — which
+ * is also exactly the situation where the fallback is needed.
+ *
+ * Returns null when no source produced anything, and throws only when the
+ * three cheap whole-day reads (total, active, HR-zone) all failed outright —
+ * that is an API problem, not an empty day.
  */
 async function readGoogleHealthCalories(
   accessToken: string,
   date: string,
   nextDate: string,
 ): Promise<{ kcal: number; basis: CaloriesBasis } | null> {
-  const errors: unknown[] = [];
-  const read = async <T>(label: string, request: Promise<T>): Promise<T | null> => {
+  const primaryErrors: unknown[] = [];
+  const read = async <T>(label: string, request: Promise<T>, errors = primaryErrors): Promise<T | null> => {
     try {
       return await request;
     } catch (err: any) {
@@ -321,36 +353,50 @@ async function readGoogleHealthCalories(
     }
   };
 
-  const [totalRollup, activeRollup, basalPoints] = await Promise.all([
+  const [totalRollup, activeRollup, zoneRollup] = await Promise.all([
     read('total-calories', googleHealthDailyRollUp('total-calories', accessToken, date, nextDate)),
     read('active-energy-burned', googleHealthDailyRollUp('active-energy-burned', accessToken, date, nextDate)),
-    read(
-      'basal-energy-burned',
-      googleHealthReconcile(
-        'basal-energy-burned',
-        accessToken,
-        civilDayFilter('basal_energy_burned.interval.civil_start_time', date),
-      ),
-    ),
+    read('calories-in-heart-rate-zone', googleHealthDailyRollUp('calories-in-heart-rate-zone', accessToken, date, nextDate)),
   ]);
-
-  if (errors.length === 3) throw errors[0];
 
   const total = parseRollupKcal(totalRollup, 'totalCalories');
   const active = parseRollupKcal(activeRollup, 'activeEnergyBurned');
+  const hrZone = parseZoneKcal(zoneRollup);
+
+  const basalErrors: unknown[] = [];
+  const needBasal = hrZone <= active && total <= active;
+  const basalPoints = needBasal
+    ? await read(
+        'basal-energy-burned',
+        googleHealthReconcile(
+          'basal-energy-burned',
+          accessToken,
+          civilDayFilter('basal_energy_burned.interval.civil_start_time', date),
+        ),
+        basalErrors,
+      )
+    : null;
+
+  if (primaryErrors.length === 3) throw primaryErrors[0];
+
   const basal = parseBasalKcal(basalPoints);
   const halves = basal + active;
 
   let result: { kcal: number; basis: CaloriesBasis } | null = null;
-  if (halves > 0 && halves >= total) {
+  if (hrZone > 0 && hrZone >= active) {
+    result = { kcal: Math.round(hrZone), basis: 'hr-zone' };
+  } else if (halves > 0 && halves >= total) {
     result = { kcal: Math.round(halves), basis: basal > 0 ? 'active+basal' : 'active-only' };
   } else if (total > 0) {
     result = { kcal: Math.round(total), basis: 'total' };
+  } else if (active > 0) {
+    result = { kcal: Math.round(active), basis: 'active-only' };
   }
 
   console.log(
     `[GoogleHealth] calories for ${date}: total=${Math.round(total)} active=${Math.round(active)} ` +
-    `basal=${Math.round(basal)} → ${result ? `${result.kcal} kcal (${result.basis})` : 'no data'}`,
+    `hrZone=${Math.round(hrZone)} basal=${needBasal ? Math.round(basal) : 'skipped'} → ` +
+    `${result ? `${result.kcal} kcal (${result.basis})` : 'no data'}`,
   );
 
   return result;
