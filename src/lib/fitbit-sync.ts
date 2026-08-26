@@ -410,12 +410,15 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
     // what the API just returned, keep the old data.  This protects
     // historical Fitbit-API snapshots from being overwritten with zeros
     // when the new Google Health API doesn't have data for older dates.
-    const health = await adminHealthService.getHealthSummary(firestore, userId);
-    const existingSnap = health?.fitbitByDate?.[date];
-    if (existingSnap && existingSnap.steps > 0 && snapshot.steps < existingSnap.steps) {
+    const existingHealth = await adminHealthService.getHealthSummary(firestore, userId);
+    const existingSnap = existingHealth?.fitbitByDate?.[date];
+    const existingSteps = existingSnap?.steps ?? 0;
+    const snapshotSteps = snapshot?.steps ?? 0;
+    
+    if (existingSnap && existingSteps > 0 && snapshotSteps < existingSteps) {
       console.log(
-        `[syncFitbitSnapshot] Skipping save for ${date} — existing snapshot has ${existingSnap.steps} steps, ` +
-        `new data only has ${snapshot.steps}. Keeping existing data.`
+        `[syncFitbitSnapshot] Skipping save for ${date} — existing snapshot has ${existingSteps} steps, ` +
+        `new data only has ${snapshotSteps}. Keeping existing data.`
       );
       return { success: true }; // nothing to update, but not a failure
     }
