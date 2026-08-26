@@ -12,6 +12,15 @@ export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const REPAIR_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * Fitbit's own calorie algorithm runs ~10% high, regardless of whether we read
+ * it via the legacy Fitbit Web API or via Google Health/Health Connect — a live
+ * account's dataSource proved the Google-Health-sourced figure still comes
+ * straight from the Fitbit device. Applied to every caloriesBasis except
+ * `active-only`, where the added BMR is our own formula and carries no such bias.
+ */
+const FITBIT_CALORIE_DISCOUNT = 0.90;
+
+/**
  * Days one repair walk may re-pull. Each costs a full provider round-trip plus
  * a rescore, so a backlog is drained a few days per walk rather than all at once.
  */
@@ -209,19 +218,24 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
   };
 
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
-    // Google Health data (including Samsung Health via Health Connect) is already accurate.
-    const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
-    let calsOut = result.caloriesOut.value * calorieDiscount;
+    // Fitbit's own algorithm runs its estimate ~10% high, whichever API surface
+    // delivers it. A live account's dataSource for the Google-Health-sourced
+    // reading named the device directly (`"Inspire 3"`, platform `FITBIT`) — this
+    // is not a more-accurate Google computation, it's the same Fitbit estimate
+    // through a new pipe, so the discount applies the same as it always did.
+    const calsFromDevice = result.caloriesOut.value * FITBIT_CALORIE_DISCOUNT;
+    let calsOut = calsFromDevice;
     // Only supplement when the device told us it published activity burn WITHOUT
-    // a basal half (some Health Connect sources do). Everything else is already a
-    // full-day figure — estimating on top of one inflates it.
+    // a basal half (some Health Connect sources do). The added BMR is our own
+    // formula, not Fitbit's, so it's added AFTER the discount — never discounted
+    // itself. Everything else is already a full-day figure; estimating on top
+    // of one would inflate it.
     if (result.caloriesBasis === 'active-only') {
       const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
       console.log(`[syncFitbitData] ${provider} reported activity burn only (${Math.round(calsOut)} kcal) — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
-    } else if (provider === 'google' && calsOut < 1200) {
-      console.warn(`[syncFitbitData] Google reported a full-day burn of only ${Math.round(calsOut)} kcal for ${today} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
+    } else if (calsOut < 1200) {
+      console.warn(`[syncFitbitData] ${provider} reported a full-day burn of only ${Math.round(calsOut)} kcal for ${today} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
     }
     incomingSnapshot.caloriesOut = Math.round(calsOut);
   }
@@ -432,15 +446,16 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
       result.sleep.value >= 7 ? 'high' : result.sleep.value >= 6 ? 'medium' : 'low';
   }
   if (result.caloriesOut && result.caloriesOut.value > 0) {
-    const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
-    let calsOut = result.caloriesOut.value * calorieDiscount;
+    // See syncFitbitData for why this discount applies to Google-Health-sourced
+    // readings too — it's the same Fitbit estimate, just a different transport.
+    let calsOut = result.caloriesOut.value * FITBIT_CALORIE_DISCOUNT;
     // See syncFitbitData: only an explicitly activity-only reading gets a BMR added.
     if (result.caloriesBasis === 'active-only') {
       const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
       console.log(`[syncFitbitSnapshot] ${provider} reported activity burn only (${Math.round(calsOut)} kcal) — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
-    } else if (provider === 'google' && calsOut < 1200) {
-      console.warn(`[syncFitbitSnapshot] Google reported a full-day burn of only ${Math.round(calsOut)} kcal for ${date} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
+    } else if (calsOut < 1200) {
+      console.warn(`[syncFitbitSnapshot] ${provider} reported a full-day burn of only ${Math.round(calsOut)} kcal for ${date} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
     }
     incomingSnapshot.caloriesOut = Math.round(calsOut);
   }

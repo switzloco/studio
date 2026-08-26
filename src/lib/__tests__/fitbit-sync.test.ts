@@ -423,3 +423,68 @@ describe('refreshStalePastSnapshots — repair volume', () => {
     expect(fitbitService.syncTodayData).not.toHaveBeenCalled();
   });
 });
+
+describe('syncFitbitSnapshot — the Fitbit calorie discount applies to Google Health too', () => {
+  const creds = {
+    accessToken: 'valid-token', refreshToken: 'refresh-token',
+    expiresAt: Date.now() + 1000 * 60 * 60, fitbitUserId: 'user1',
+    lastSyncedAt: Date.now(), timezoneOffset: 0, provider: 'google' as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(adminHealthService.getFitbitCredentials).mockResolvedValue(creds);
+    vi.mocked(adminHealthService.getHealthSummary).mockResolvedValue({
+      steps: 0, hrv: 0, sleepHours: 0, recoveryStatus: 'medium' as const,
+      dailyProteinG: 0, dailyCarbsG: 0, dailyCaloriesIn: 0, dailyCaloriesOut: 2000,
+      visceralFatPoints: 0, history: [],
+      isAnonymous: false, onboardingDay: 1, onboardingComplete: true, isDeviceVerified: true,
+    } as any);
+    vi.mocked(adminHealthService.queryFoodLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.queryExerciseLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.getUserPreferences).mockResolvedValue({
+      weeklySchedule: '', equipment: [], targets: { proteinGoal: 150, fatPointsGoal: 3000 }, profile: {},
+    });
+  });
+
+  it('discounts a Fitbit-sourced hr-zone reading by 10%, same as the legacy Fitbit path', async () => {
+    vi.mocked(fitbitService.syncTodayData).mockResolvedValue({
+      success: true,
+      steps: { value: 11562, source: 'device' },
+      sleep: { value: 7.6, source: 'device' },
+      hrv: { value: 0, source: 'device' },
+      caloriesOut: { value: 3107, source: 'device' },
+      caloriesBasis: 'hr-zone',
+      isVerified: true,
+    } as any);
+
+    await syncFitbitSnapshot('user-123', '2026-08-25', 0);
+
+    expect(adminHealthService.saveFitbitDailySnapshot).toHaveBeenCalledWith(
+      expect.any(Object), 'user-123', '2026-08-25',
+      expect.objectContaining({ caloriesOut: 2796 }), // 3107 * 0.90, rounded
+    );
+  });
+
+  it('does not discount the BMR estimate added on top of an active-only reading', async () => {
+    vi.mocked(fitbitService.syncTodayData).mockResolvedValue({
+      success: true,
+      steps: { value: 8000, source: 'device' },
+      sleep: { value: 7, source: 'device' },
+      hrv: { value: 0, source: 'device' },
+      caloriesOut: { value: 800, source: 'device' },
+      caloriesBasis: 'active-only',
+      isVerified: true,
+    } as any);
+
+    await syncFitbitSnapshot('user-123', '2026-08-25', 0);
+
+    // 800 * 0.90 (Fitbit's active-only reading, discounted) + 1600 (our own BMR
+    // estimate — no stored weight, so the estimateBmrFromProfile default — added
+    // AFTER the discount, undiscounted).
+    expect(adminHealthService.saveFitbitDailySnapshot).toHaveBeenCalledWith(
+      expect.any(Object), 'user-123', '2026-08-25',
+      expect.objectContaining({ caloriesOut: 2320 }),
+    );
+  });
+});
