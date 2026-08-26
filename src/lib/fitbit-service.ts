@@ -454,6 +454,158 @@ function parseHealthExercises(data: any): FitbitActivity[] {
 /** The API caps `exercise` and `sleep` pages at 25 points. */
 const SESSION_PAGE_SIZE = 25;
 
+/**
+ * Physical-time rollUp — aggregates over real instants rather than civil days,
+ * with an explicit `windowSize` duration. Used by the calorie diagnostic to see
+ * a day hour by hour; `dailyRollUp` can only bucket whole days.
+ */
+async function googleHealthRollUp(
+  dataType: string,
+  accessToken: string,
+  startTimeIso: string,
+  endTimeIso: string,
+  windowSize = '3600s',
+): Promise<any> {
+  const res = await fetch(`${GOOGLE_HEALTH_BASE}/${dataType}/dataPoints:rollUp`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ range: { startTime: startTimeIso, endTime: endTimeIso }, windowSize }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new FitbitApiError(
+      res.status,
+      `googlehealth:${dataType}:rollUp`,
+      `Google Health API ${res.status} on ${dataType}:rollUp`,
+      body,
+    );
+  }
+  return res.json();
+}
+
+/**
+ * Raw `:list` — unlike `:reconcile` it keeps each point's `dataSource`, which is
+ * how you tell which device or app actually wrote a value.
+ */
+async function googleHealthList(
+  dataType: string,
+  accessToken: string,
+  filter: string,
+  pageSize = 1000,
+): Promise<any> {
+  const params = new URLSearchParams({ filter, pageSize: String(pageSize) });
+  const res = await fetch(`${GOOGLE_HEALTH_BASE}/${dataType}/dataPoints?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new FitbitApiError(
+      res.status,
+      `googlehealth:${dataType}:list`,
+      `Google Health API ${res.status} on ${dataType}:list`,
+      body,
+    );
+  }
+  return res.json();
+}
+
+/** Device or app that wrote a data point, for diagnostics. */
+function pointSource(point: any): string {
+  const ds = point?.dataSource;
+  return ds?.device?.displayName || ds?.application?.packageName || 'unknown';
+}
+
+/**
+ * Everything the API will say about a day's calorie burn, in one object.
+ *
+ * Reading `total-calories` alone cannot tell you whether a low number is the
+ * whole story: the type is rollup-only, so its individual intervals can't be
+ * listed. This cross-references it against the listable halves and against an
+ * hourly breakdown, which is what distinguishes "the device reports a low
+ * total" from "the total only covers part of the day".
+ */
+export async function diagnoseGoogleHealthCalories(
+  accessToken: string,
+  date: string,
+  timezoneOffsetMinutes = 0,
+  days = 7,
+): Promise<Record<string, unknown>> {
+  const nextDate = addDaysToIsoDate(date, 1);
+  const seriesStart = addDaysToIsoDate(date, -(days - 1));
+
+  // Physical-time bounds of the local day, for the hourly breakdown.
+  const [y, m, d] = date.split('-').map(Number);
+  const dayStartMs = Date.UTC(y, m - 1, d) + timezoneOffsetMinutes * 60_000;
+  const dayStartIso = new Date(dayStartMs).toISOString();
+  const dayEndIso = new Date(dayStartMs + 86_400_000).toISOString();
+
+  const attempt = async <T>(label: string, run: () => Promise<T>): Promise<T | { error: string }> => {
+    try {
+      return await run();
+    } catch (err: any) {
+      return { error: `${label}: ${err?.message ?? String(err)}${err?.body ? ` — ${String(err.body).slice(0, 300)}` : ''}` };
+    }
+  };
+
+  const [totalSeries, activeSeries, stepSeries, hourly, activePoints, basalPoints] = await Promise.all([
+    attempt('total-calories series', () => googleHealthDailyRollUp('total-calories', accessToken, seriesStart, nextDate)),
+    attempt('active-energy series', () => googleHealthDailyRollUp('active-energy-burned', accessToken, seriesStart, nextDate)),
+    attempt('steps series', () => googleHealthDailyRollUp('steps', accessToken, seriesStart, nextDate)),
+    attempt('total-calories hourly', () => googleHealthRollUp('total-calories', accessToken, dayStartIso, dayEndIso)),
+    attempt('active-energy points', () =>
+      googleHealthList('active-energy-burned', accessToken, civilDayFilter('active_energy_burned.interval.civil_start_time', date))),
+    attempt('basal-energy points', () =>
+      googleHealthList('basal-energy-burned', accessToken, civilDayFilter('basal_energy_burned.interval.civil_start_time', date))),
+  ]);
+
+  const byDate = (data: any, read: (p: any) => number) => {
+    if (!data || 'error' in data) return data;
+    const out: Record<string, number> = {};
+    for (const p of data?.rollupDataPoints ?? []) {
+      const civ = p?.civilStartTime?.date;
+      if (!civ) continue;
+      const key = `${civ.year}-${String(civ.month).padStart(2, '0')}-${String(civ.day).padStart(2, '0')}`;
+      out[key] = Math.round(read(p));
+    }
+    return out;
+  };
+
+  const hourlyBuckets = hourly && !('error' in hourly)
+    ? (hourly?.rollupDataPoints ?? [])
+        .map((p: any) => ({ start: p?.startTime, kcal: Math.round(toNumber(p?.totalCalories?.kcalSum)) }))
+        .filter((b: any) => b.kcal > 0)
+    : hourly;
+
+  const summarisePoints = (data: any, key: string) => {
+    if (!data || 'error' in data) return data;
+    const points: any[] = data?.dataPoints ?? [];
+    return {
+      count: points.length,
+      kcalTotal: Math.round(points.reduce((sum, p) => sum + toNumber(p?.[key]?.kcal), 0)),
+      sources: [...new Set(points.map(pointSource))],
+      first: points[0]?.[key]?.interval?.startTime,
+      last: points[points.length - 1]?.[key]?.interval?.endTime,
+      sample: points.slice(0, 3),
+    };
+  };
+
+  return {
+    date,
+    timezoneOffsetMinutes,
+    dailySeries: {
+      totalCalories: byDate(totalSeries, (p) => toNumber(p?.totalCalories?.kcalSum)),
+      activeEnergyBurned: byDate(activeSeries, (p) => toNumber(p?.activeEnergyBurned?.kcalSum)),
+      steps: byDate(stepSeries, (p) => toNumber(p?.steps?.countSum)),
+    },
+    totalCaloriesHourly: hourlyBuckets,
+    activeEnergyBurned: summarisePoints(activePoints, 'activeEnergyBurned'),
+    basalEnergyBurned: summarisePoints(basalPoints, 'basalEnergyBurned'),
+  };
+}
+
 /** Numeric field of the most recent sample point (weight, height, …). */
 function latestSampleValue(data: any, typeKey: string, field: string): number {
   const points: any[] = data?.dataPoints ?? [];
