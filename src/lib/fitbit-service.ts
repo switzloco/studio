@@ -550,7 +550,7 @@ export async function diagnoseGoogleHealthCalories(
     }
   };
 
-  const [totalSeries, activeSeries, stepSeries, hourly, activePoints, basalPoints] = await Promise.all([
+  const [totalSeries, activeSeries, stepSeries, hourly, activePoints, basalPoints, zoneCalories, zoneMinutes] = await Promise.all([
     attempt('total-calories series', () => googleHealthDailyRollUp('total-calories', accessToken, seriesStart, nextDate)),
     attempt('active-energy series', () => googleHealthDailyRollUp('active-energy-burned', accessToken, seriesStart, nextDate)),
     attempt('steps series', () => googleHealthDailyRollUp('steps', accessToken, seriesStart, nextDate)),
@@ -559,6 +559,12 @@ export async function diagnoseGoogleHealthCalories(
       googleHealthList('active-energy-burned', accessToken, civilDayFilter('active_energy_burned.interval.civil_start_time', date))),
     attempt('basal-energy points', () =>
       googleHealthList('basal-energy-burned', accessToken, civilDayFilter('basal_energy_burned.interval.civil_start_time', date))),
+    // The device's own HR-derived calorie attribution — the most likely source
+    // of an activity figure that step counts alone can't reconstruct.
+    attempt('calories-in-heart-rate-zone', () =>
+      googleHealthDailyRollUp('calories-in-heart-rate-zone', accessToken, date, nextDate)),
+    attempt('active-zone-minutes', () =>
+      googleHealthDailyRollUp('active-zone-minutes', accessToken, date, nextDate)),
   ]);
 
   const byDate = (data: any, read: (p: any) => number) => {
@@ -592,9 +598,26 @@ export async function diagnoseGoogleHealthCalories(
     };
   };
 
+  const zoneBreakdown = zoneCalories && !('error' in zoneCalories)
+    ? (zoneCalories?.rollupDataPoints ?? []).flatMap((p: any) =>
+        (p?.caloriesInHeartRateZone?.caloriesInHeartRateZones ?? []).map((z: any) => ({
+          zone: z?.heartRateZone,
+          kcal: Math.round(toNumber(z?.kcal)),
+        })),
+      )
+    : zoneCalories;
+
+  const zoneCaloriesTotal = Array.isArray(zoneBreakdown)
+    ? zoneBreakdown.reduce((sum: number, z: any) => sum + z.kcal, 0)
+    : null;
+
   return {
     date,
     timezoneOffsetMinutes,
+    heartRateZoneCalories: { total: zoneCaloriesTotal, byZone: zoneBreakdown },
+    activeZoneMinutes: zoneMinutes && !('error' in zoneMinutes)
+      ? (zoneMinutes?.rollupDataPoints ?? []).map((p: any) => p?.activeZoneMinutes)
+      : zoneMinutes,
     dailySeries: {
       totalCalories: byDate(totalSeries, (p) => toNumber(p?.totalCalories?.kcalSum)),
       activeEnergyBurned: byDate(activeSeries, (p) => toNumber(p?.activeEnergyBurned?.kcalSum)),
