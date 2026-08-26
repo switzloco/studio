@@ -8,6 +8,15 @@ import { mergeDailySnapshot } from './health-snapshot';
 /** How often (ms) background sync should run — 6 hours. */
 export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+/** Minimum gap between past-day repair walks for one user — 6 hours. */
+const REPAIR_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Days one repair walk may re-pull. Each costs a full provider round-trip plus
+ * a rescore, so a backlog is drained a few days per walk rather than all at once.
+ */
+const MAX_REPAIRS_PER_RUN = 3;
+
 /**
  * Estimate resting BMR from the user's stored profile using Mifflin-St Jeor.
  * Used only when the provider published activity burn with no basal half to go
@@ -613,6 +622,15 @@ export async function refreshStalePastSnapshots(
   const creds = await adminHealthService.getFitbitCredentials(firestore, userId);
   if (!creds) return { ok: false, refreshed: 0 };
 
+  // Each repaired day is a full re-pull from the provider, so this walk is
+  // rate-limited twice over: a cooldown between walks, and a cap on the days
+  // any one walk touches. A backlog drains over several sessions instead of
+  // firing dozens of requests the moment the app opens.
+  const sinceLastRepair = Date.now() - (creds.lastRepairAt ?? 0);
+  if (sinceLastRepair < REPAIR_COOLDOWN_MS) {
+    return { ok: true, refreshed: 0 };
+  }
+
   const health = await adminHealthService.getHealthSummary(firestore, userId);
   const history = health?.history ?? [];
   if (history.length === 0) return { ok: true, refreshed: 0 };
@@ -631,8 +649,9 @@ export async function refreshStalePastSnapshots(
 
   if (staleDates.length === 0) return { ok: true, refreshed: 0 };
 
+  const batch = staleDates.slice(0, MAX_REPAIRS_PER_RUN);
   let refreshed = 0;
-  for (const date of staleDates) {
+  for (const date of batch) {
     try {
       const res = await syncFitbitSnapshot(userId, date, timezoneOffset);
       if (res.success) refreshed++;
@@ -641,6 +660,18 @@ export async function refreshStalePastSnapshots(
     }
   }
 
-  console.log(`[refreshStalePastSnapshots] Refreshed ${refreshed}/${staleDates.length} stale day(s) for ${userId}.`);
+  // Stamp the cooldown even on a partial run, so a permanently unfixable day
+  // can't turn every session into a fresh round of provider calls.
+  try {
+    await adminHealthService.saveFitbitCredentials(firestore, userId, { ...creds, lastRepairAt: Date.now() });
+  } catch (err) {
+    console.warn('[refreshStalePastSnapshots] Could not stamp lastRepairAt:', err);
+  }
+
+  const remaining = staleDates.length - batch.length;
+  console.log(
+    `[refreshStalePastSnapshots] Refreshed ${refreshed}/${batch.length} stale day(s) for ${userId}` +
+    `${remaining > 0 ? `; ${remaining} left for the next run` : ''}.`,
+  );
   return { ok: true, refreshed };
 }

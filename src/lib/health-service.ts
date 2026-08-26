@@ -204,6 +204,11 @@ export interface FitbitCredentials {
   lastSyncedAt?: number; // Unix ms timestamp of last successful data sync
   provider?: 'fitbit' | 'google'; // Indicates which OAuth provider was used
   timezoneOffset?: number; // Offset in minutes (UTC - local)
+  /**
+   * Unix ms of the last past-day repair walk. Repairs re-pull whole days from
+   * the provider, so they run on a cooldown rather than on every page load.
+   */
+  lastRepairAt?: number;
 }
 
 export interface OuraCredentials {

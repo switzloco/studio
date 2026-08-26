@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncFitbitSnapshot } from '../fitbit-sync';
+import { syncFitbitSnapshot, refreshStalePastSnapshots } from '../fitbit-sync';
 import { adminHealthService } from '../health-service-admin';
 import { fitbitService } from '../fitbit-service';
 import type { HistoryEntry } from '../health-service';
@@ -358,5 +358,68 @@ describe('syncFitbitSnapshot — zeroed syncs never overwrite stored history', (
       '2026-08-25',
       expect.objectContaining({ steps: 9500, caloriesOut: 2800, sleepHours: 7.9, recoveryStatus: 'high' }),
     );
+  });
+});
+
+describe('refreshStalePastSnapshots — repair volume', () => {
+  const history = Array.from({ length: 10 }, (_, i) => {
+    const day = String(15 + i).padStart(2, '0');
+    return { date: `Aug ${day}`, isoDate: `2026-08-${day}`, gain: 5, status: 'Bullish' as const, detail: '', equity: 5 };
+  });
+
+  // Every day is stale: zero steps and zero sleep is the signature of the
+  // broken syncs this walk exists to repair.
+  const zeroed = Object.fromEntries(
+    history.map((h) => [h.isoDate, { steps: 0, sleepHours: 0, capturedOnDate: '2026-08-26' }]),
+  );
+
+  const healthDoc = {
+    steps: 0, hrv: 0, sleepHours: 0, recoveryStatus: 'medium' as const,
+    dailyProteinG: 0, dailyCarbsG: 0, dailyCaloriesIn: 0, dailyCaloriesOut: 2000,
+    visceralFatPoints: 0, history, fitbitByDate: zeroed,
+    isAnonymous: false, onboardingDay: 1, onboardingComplete: true, isDeviceVerified: true,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(adminHealthService.queryFoodLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.queryExerciseLog).mockResolvedValue([]);
+    vi.mocked(adminHealthService.getUserPreferences).mockResolvedValue({
+      weeklySchedule: '', equipment: [], targets: { proteinGoal: 150, fatPointsGoal: 3000 }, profile: {},
+    });
+    vi.mocked(adminHealthService.getHealthSummary).mockResolvedValue(healthDoc as any);
+    vi.mocked(fitbitService.syncTodayData).mockResolvedValue({
+      success: true,
+      steps: { value: 9000, source: 'device' },
+      sleep: { value: 7, source: 'device' },
+      hrv: { value: 0, source: 'device' },
+      caloriesOut: { value: 2600, source: 'device' },
+      isVerified: true,
+    } as any);
+  });
+
+  it('repairs at most a few days per run instead of the whole backlog', async () => {
+    vi.mocked(adminHealthService.getFitbitCredentials).mockResolvedValue({
+      accessToken: 'valid-token', refreshToken: 'r', expiresAt: Date.now() + 3600_000,
+      fitbitUserId: 'u', provider: 'google', timezoneOffset: 0,
+    });
+
+    const res = await refreshStalePastSnapshots('user-123', '2026-08-26', 0);
+
+    expect(res.refreshed).toBeLessThanOrEqual(3);
+    expect(vi.mocked(fitbitService.syncTodayData).mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it('does nothing when a walk already ran inside the cooldown', async () => {
+    vi.mocked(adminHealthService.getFitbitCredentials).mockResolvedValue({
+      accessToken: 'valid-token', refreshToken: 'r', expiresAt: Date.now() + 3600_000,
+      fitbitUserId: 'u', provider: 'google', timezoneOffset: 0,
+      lastRepairAt: Date.now() - 60_000,
+    });
+
+    const res = await refreshStalePastSnapshots('user-123', '2026-08-26', 0);
+
+    expect(res).toEqual({ ok: true, refreshed: 0 });
+    expect(fitbitService.syncTodayData).not.toHaveBeenCalled();
   });
 });
