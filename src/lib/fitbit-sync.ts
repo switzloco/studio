@@ -405,6 +405,21 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   }
 
   try {
+    // ── Don't-regress guard ──────────────────────────────────────────────
+    // If the existing snapshot in Firebase already has *more* steps than
+    // what the API just returned, keep the old data.  This protects
+    // historical Fitbit-API snapshots from being overwritten with zeros
+    // when the new Google Health API doesn't have data for older dates.
+    const health = await adminHealthService.getHealthSummary(firestore, userId);
+    const existingSnap = health?.fitbitByDate?.[date];
+    if (existingSnap && existingSnap.steps > 0 && snapshot.steps < existingSnap.steps) {
+      console.log(
+        `[syncFitbitSnapshot] Skipping save for ${date} — existing snapshot has ${existingSnap.steps} steps, ` +
+        `new data only has ${snapshot.steps}. Keeping existing data.`
+      );
+      return { success: true }; // nothing to update, but not a failure
+    }
+
     await adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snapshot);
 
     // Query logs and health data to recalculate score if history exists
