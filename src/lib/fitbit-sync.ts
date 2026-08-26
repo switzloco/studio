@@ -10,8 +10,9 @@ export const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Estimate resting BMR from the user's stored profile using Mifflin-St Jeor.
- * Used when Google Fit doesn't expose a BMR datasource (common for Samsung
- * Health via Health Connect) and the reported caloriesOut is active-only.
+ * Used only when the provider published activity burn with no basal half to go
+ * with it (`caloriesBasis: 'active-only'`) — never to top up a figure that is
+ * already a full-day total.
  * Falls back to 1600 kcal — a reasonable adult average — if no weight is set.
  */
 async function estimateBmrFromProfile(firestore: import('firebase-admin/firestore').Firestore, userId: string): Promise<number> {
@@ -203,14 +204,15 @@ export async function syncFitbitData(userId: string, localDate?: string, timezon
     // Google Health data (including Samsung Health via Health Connect) is already accurate.
     const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
     let calsOut = result.caloriesOut.value * calorieDiscount;
-    // Google Fit BMR datasource is often unavailable for Samsung Health users
-    // (returns 400 INVALID_ARGUMENT). When the reported total is implausibly low
-    // for a full day, treat it as active-only and supplement with an estimated
-    // BMR so the score isn't a fake-massive surplus.
-    if (provider === 'google' && calsOut < 1500) {
+    // Only supplement when the device told us it published activity burn WITHOUT
+    // a basal half (some Health Connect sources do). Everything else is already a
+    // full-day figure — estimating on top of one inflates it.
+    if (result.caloriesBasis === 'active-only') {
       const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
-      console.log(`[syncFitbitData] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
+      console.log(`[syncFitbitData] ${provider} reported activity burn only (${Math.round(calsOut)} kcal) — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
+    } else if (provider === 'google' && calsOut < 1200) {
+      console.warn(`[syncFitbitData] Google reported a full-day burn of only ${Math.round(calsOut)} kcal for ${today} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
     }
     incomingSnapshot.caloriesOut = Math.round(calsOut);
   }
@@ -423,10 +425,13 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
   if (result.caloriesOut && result.caloriesOut.value > 0) {
     const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
     let calsOut = result.caloriesOut.value * calorieDiscount;
-    if (provider === 'google' && calsOut < 1500) {
+    // See syncFitbitData: only an explicitly activity-only reading gets a BMR added.
+    if (result.caloriesBasis === 'active-only') {
       const estimatedBmr = await estimateBmrFromProfile(firestore, userId);
-      console.log(`[syncFitbitSnapshot] Google caloriesOut ${Math.round(calsOut)} below BMR floor — adding estimated BMR ${estimatedBmr}`);
+      console.log(`[syncFitbitSnapshot] ${provider} reported activity burn only (${Math.round(calsOut)} kcal) — adding estimated BMR ${estimatedBmr}`);
       calsOut += estimatedBmr;
+    } else if (provider === 'google' && calsOut < 1200) {
+      console.warn(`[syncFitbitSnapshot] Google reported a full-day burn of only ${Math.round(calsOut)} kcal for ${date} (basis: ${result.caloriesBasis ?? 'unknown'}) — storing as-is.`);
     }
     incomingSnapshot.caloriesOut = Math.round(calsOut);
   }

@@ -68,6 +68,13 @@ Health section in `fitbit-service.ts`:
 - Values: steps `steps.countSum` (int64 **as a string**), calories
   `totalCalories.kcalSum`, sleep `sleep.summary.minutesAsleep`, workouts live
   under the `exercise` data type (there is no `activity-session`).
+- **Calorie burn comes from three data types, not one.** `total-calories`
+  (BMR + active) is the direct answer but devices fill it in unevenly;
+  `active-energy-burned` (dailyRollUp) and `basal-energy-burned` (list/reconcile
+  only — it has no rollup) are the two halves. `readGoogleHealthCalories` takes
+  whichever is larger, since the halves should sum to the total. A BMR estimate
+  is added ONLY when the result is `caloriesBasis: 'active-only'` — never on top
+  of a full-day total.
 
 **A missing day is not a zero day.** No rollup bucket means the device never
 synced; a real zero comes back as `countSum: "0"`. Sync results carry

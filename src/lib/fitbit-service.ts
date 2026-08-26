@@ -23,6 +23,12 @@ export interface FitbitSyncResult {
   activities?: FitbitActivity[];
   isVerified: boolean;
   /**
+   * Which energy data type `caloriesOut` was read from. `active-only` means the
+   * device published activity burn but no BMR, so the figure is NOT a full-day
+   * total — the caller has to make up the basal half.
+   */
+  caloriesBasis?: CaloriesBasis;
+  /**
    * Metrics the provider had no trustworthy value for on this sync. A `0` in
    * one of those fields means "unknown", not "none" — see
    * {@link HealthMetricAvailability}.
@@ -260,14 +266,94 @@ function parseHealthSteps(data: any): number {
   return Math.round(total);
 }
 
-/** Total calories burned from a `total-calories` dailyRollUp (`kcalSum`). */
-function parseHealthCalories(data: any): number {
-  if (!data) return 0;
+/** Sum a dailyRollUp's `kcalSum` for one energy data type. */
+function parseRollupKcal(data: any, key: 'totalCalories' | 'activeEnergyBurned'): number {
   let total = 0;
   for (const p of data?.rollupDataPoints ?? []) {
-    total += toNumber(p?.totalCalories?.kcalSum);
+    total += toNumber(p?.[key]?.kcalSum);
   }
-  return Math.round(total);
+  return total;
+}
+
+/** Sum `basal-energy-burned` points (per-interval `kcal`, no rollup support). */
+function parseBasalKcal(data: any): number {
+  let total = 0;
+  for (const p of data?.dataPoints ?? []) {
+    total += toNumber(p?.basalEnergyBurned?.kcal);
+  }
+  return total;
+}
+
+/**
+ * Where a day's calorie burn came from. `total-calories` is the direct answer,
+ * but not every device publishes it — some write only the two halves. Knowing
+ * which we got is what lets the caller decide whether anything is missing,
+ * instead of quietly estimating the difference.
+ */
+export type CaloriesBasis = 'total' | 'active+basal' | 'active-only';
+
+/**
+ * A day's calorie burn, read from whichever of the three energy data types the
+ * device actually publishes:
+ *   • `total-calories`      — BMR + active, the whole day in one number;
+ *   • `active-energy-burned`— activity only (dailyRollUp);
+ *   • `basal-energy-burned` — BMR only (list/reconcile; it has no rollup).
+ *
+ * The halves should add up to the total, so whichever is larger is the more
+ * complete reading — a `total-calories` stream the device only partly fills in
+ * is exactly how a 3,100 kcal day gets reported as 1,900. Returns null when no
+ * source produced anything, and throws only when all three reads failed
+ * outright (that is an API problem, not an empty day).
+ */
+async function readGoogleHealthCalories(
+  accessToken: string,
+  date: string,
+  nextDate: string,
+): Promise<{ kcal: number; basis: CaloriesBasis } | null> {
+  const errors: unknown[] = [];
+  const read = async <T>(label: string, request: Promise<T>): Promise<T | null> => {
+    try {
+      return await request;
+    } catch (err: any) {
+      console.warn(`[GoogleHealth] ${label} fetch failed for ${date}:`, err?.message ?? err);
+      errors.push(err);
+      return null;
+    }
+  };
+
+  const [totalRollup, activeRollup, basalPoints] = await Promise.all([
+    read('total-calories', googleHealthDailyRollUp('total-calories', accessToken, date, nextDate)),
+    read('active-energy-burned', googleHealthDailyRollUp('active-energy-burned', accessToken, date, nextDate)),
+    read(
+      'basal-energy-burned',
+      googleHealthReconcile(
+        'basal-energy-burned',
+        accessToken,
+        civilDayFilter('basal_energy_burned.interval.civil_start_time', date),
+      ),
+    ),
+  ]);
+
+  if (errors.length === 3) throw errors[0];
+
+  const total = parseRollupKcal(totalRollup, 'totalCalories');
+  const active = parseRollupKcal(activeRollup, 'activeEnergyBurned');
+  const basal = parseBasalKcal(basalPoints);
+  const halves = basal + active;
+
+  let result: { kcal: number; basis: CaloriesBasis } | null = null;
+  if (halves > 0 && halves >= total) {
+    result = { kcal: Math.round(halves), basis: basal > 0 ? 'active+basal' : 'active-only' };
+  } else if (total > 0) {
+    result = { kcal: Math.round(total), basis: 'total' };
+  }
+
+  console.log(
+    `[GoogleHealth] calories for ${date}: total=${Math.round(total)} active=${Math.round(active)} ` +
+    `basal=${Math.round(basal)} → ${result ? `${result.kcal} kcal (${result.basis})` : 'no data'}`,
+  );
+
+  return result;
 }
 
 /**
@@ -714,15 +800,15 @@ export const fitbitService = {
       const unavailable: HealthMetricAvailability = {};
       const failures: unknown[] = [];
 
-      const [stepsRollup, caloriesRollup, sleepData, exerciseData] = await Promise.all([
+      const [stepsRollup, calories, sleepData, exerciseData] = await Promise.all([
         googleHealthDailyRollUp('steps', accessToken, targetDate, nextDate).catch((err) => {
           console.warn(`[GoogleHealth] steps fetch failed for ${targetDate}:`, err?.message ?? err);
           failures.push(err);
           unavailable.steps = true;
           return null;
         }),
-        googleHealthDailyRollUp('total-calories', accessToken, targetDate, nextDate).catch((err) => {
-          console.warn(`[GoogleHealth] total-calories fetch failed for ${targetDate}:`, err?.message ?? err);
+        readGoogleHealthCalories(accessToken, targetDate, nextDate).catch((err) => {
+          console.warn(`[GoogleHealth] calories fetch failed for ${targetDate}:`, err?.message ?? err);
           failures.push(err);
           unavailable.caloriesOut = true;
           return null;
@@ -773,10 +859,8 @@ export const fitbitService = {
         if (stepsCount === 0) unavailable.steps = true;
       }
 
-      const caloriesOut = parseHealthCalories(caloriesRollup);
-      if (!unavailable.caloriesOut && rollupBuckets(caloriesRollup, 'totalCalories').length === 0) {
-        unavailable.caloriesOut = true;
-      }
+      const caloriesOut = calories?.kcal ?? 0;
+      if (!calories) unavailable.caloriesOut = true;
 
       const sleepHours = parseHealthSleepHours(sleepData);
       // No sleep session recorded is "we don't know", not "slept 0 hours".
@@ -791,6 +875,7 @@ export const fitbitService = {
           steps: stepsCount,
           caloriesOut,
           sleepHours,
+          caloriesBasis: calories?.basis ?? 'none',
           activities: activities.length,
           unavailable: unknown.length > 0 ? unknown.join(',') : 'none',
         },
@@ -803,6 +888,7 @@ export const fitbitService = {
         sleep:      { value: sleepHours,  source: 'device' },
         hrv:        { value: 0,           source: 'device' },
         caloriesOut: caloriesOut > 0 ? { value: caloriesOut, source: 'device' } : undefined,
+        caloriesBasis: calories?.basis,
         activities: activities.length > 0 ? activities : undefined,
         isVerified: true,
         unavailable,
