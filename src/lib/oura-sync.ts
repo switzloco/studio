@@ -31,15 +31,26 @@ export async function syncOuraData(userId: string, localDate?: string): Promise<
       refreshed = await ouraService.refreshAccessToken(creds.refreshToken);
     } catch (error) {
       console.error('[syncOuraData] Token refresh threw an unexpected error:', error);
-      return { success: false, reason: 'token_refresh_failed' };
+      refreshed = null;
     }
     if (!refreshed) {
-      console.error('[syncOuraData] Token refresh returned null — token may be revoked. Reconnect Oura.');
-      return { success: false, reason: 'token_refresh_failed' };
+      // Oura rotates refresh tokens on every use — a concurrent sync (cron vs.
+      // manual) may have already refreshed and saved a valid token. Check
+      // Firestore before giving up and forcing a reconnect.
+      const freshCreds = await adminHealthService.getOuraCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncOuraData] Token refresh failed but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        console.error('[syncOuraData] Token refresh returned null — token may be revoked. Reconnect Oura.');
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+    } else {
+      latestCreds = { ...refreshed, ouraUserId: creds.ouraUserId, lastSyncedAt: creds.lastSyncedAt };
+      await adminHealthService.saveOuraCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
     }
-    latestCreds = { ...refreshed, ouraUserId: creds.ouraUserId, lastSyncedAt: creds.lastSyncedAt };
-    await adminHealthService.saveOuraCredentials(firestore, userId, latestCreds);
-    accessToken = refreshed.accessToken;
   }
 
   let result;

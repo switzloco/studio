@@ -28,15 +28,27 @@ export async function syncWithingsData(userId: string, localDate?: string): Prom
       refreshed = await withingsService.refreshAccessToken(creds.refreshToken);
     } catch (error) {
       console.error('[syncWithingsData] Token refresh threw an unexpected error:', error);
-      return { success: false, reason: 'token_refresh_failed' };
+      refreshed = null;
     }
     if (!refreshed) {
-      console.error('[syncWithingsData] Token refresh returned null.');
-      return { success: false, reason: 'token_refresh_failed' };
+      // Withings rotates refresh tokens on every use (and access tokens expire
+      // every ~3 hours, the shortest of any provider here) — a concurrent sync
+      // (cron vs. manual) may have already refreshed and saved a valid token.
+      // Check Firestore before giving up and forcing a reconnect.
+      const freshCreds = await adminHealthService.getWithingsCredentials(firestore, userId);
+      if (freshCreds && freshCreds.expiresAt > Date.now() + fiveMinutes) {
+        console.log('[syncWithingsData] Token refresh failed but found newer valid credentials in Firestore.');
+        latestCreds = freshCreds;
+        accessToken = freshCreds.accessToken;
+      } else {
+        console.error('[syncWithingsData] Token refresh returned null.');
+        return { success: false, reason: 'token_refresh_failed' };
+      }
+    } else {
+      latestCreds = { ...refreshed, withingsUserId: creds.withingsUserId, lastSyncedAt: creds.lastSyncedAt };
+      await adminHealthService.saveWithingsCredentials(firestore, userId, latestCreds);
+      accessToken = refreshed.accessToken;
     }
-    latestCreds = { ...refreshed, withingsUserId: creds.withingsUserId, lastSyncedAt: creds.lastSyncedAt };
-    await adminHealthService.saveWithingsCredentials(firestore, userId, latestCreds);
-    accessToken = refreshed.accessToken;
   }
 
   let result;
