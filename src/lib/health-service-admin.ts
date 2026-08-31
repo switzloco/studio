@@ -296,6 +296,33 @@ export const adminHealthService = {
 
   async logFast(db: Firestore, userId: string, entry: Omit<FastLogEntry, 'timestamp'>): Promise<string> {
     const ref = db.collection(`users/${userId}/fast_log`);
+
+    // Closing a fast (endedAt provided): find the still-open entry and update
+    // it in place instead of inserting a new row, which would leave the
+    // original active entry orphaned forever (never gets an endedAt, so it
+    // keeps showing up as "currently fasting since <its original start>").
+    if (entry.endedAt) {
+      // Firestore has no "field is missing" query, and open entries are
+      // stored with endedAt simply absent (not null) — fetch and filter.
+      const openDocs = (await ref.get()).docs.filter(d => !d.data().endedAt);
+      if (openDocs.length > 0) {
+        const mostRecent = openDocs.sort((a, b) => (b.data().date || '').localeCompare(a.data().date || ''))[0];
+        const clean = Object.fromEntries(
+          Object.entries(entry).filter(([, v]) => v !== undefined)
+        );
+        await mostRecent.ref.update(clean);
+        return mostRecent.id;
+      }
+    }
+
+    if (!entry.endedAt) {
+      // Starting a fresh active fast. Any other still-open entry at this
+      // point is stale data from before entries could be closed in place —
+      // ignore it so it stops being picked up as "currently fasting".
+      const staleOpenDocs = (await ref.get()).docs.filter(d => !d.data().endedAt);
+      await Promise.all(staleOpenDocs.map(d => d.ref.update({ ignored: true })));
+    }
+
     const clean = Object.fromEntries(
       Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
     );
@@ -322,6 +349,7 @@ export const adminHealthService = {
     const snapshot = await ref
       .where('date', '>=', startDate)
       .where('date', '<=', endDate)
+      .orderBy('date', 'desc')
       .limit(limitCount)
       .get();
     return snapshot.docs
