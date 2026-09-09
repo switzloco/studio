@@ -3,7 +3,9 @@
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
 import { initializeFirebase } from '@/firebase/sdk';
+import { getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { fetchSlimUserContext } from '@/lib/user-context';
 
 function extractContentType(dataUri: string): string {
   const match = dataUri.match(/^data:([^;]+);/);
@@ -37,12 +39,20 @@ export async function sendChatMessage(
   try {
     if (!userId) throw new Error("Anonymous UID required for audit.");
 
-    const rateLimit = await checkRateLimit(userId, 'chat');
+    const resolvedDate = localDate || new Date().toISOString().split('T')[0];
+    const firestore = getAdminFirestore();
+
+    const [rateLimit, userContext] = await Promise.all([
+      checkRateLimit(userId, 'chat'),
+      fetchSlimUserContext(firestore, userId, resolvedDate).catch((err) => {
+        console.error('[sendChatMessage] Preload context error (falling back):', err);
+        return null;
+      }),
+    ]);
+
     if (!rateLimit.ok) {
       throw new Error(`Rate limit exceeded (${rateLimit.scope}). Please try again in ${rateLimit.retryAfter}s.`);
     }
-
-    const resolvedDate = localDate || new Date().toISOString().split('T')[0];
 
     const [yr, mo, dy] = resolvedDate.split('-').map(Number);
     const currentDay = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date(yr, mo - 1, dy));
@@ -64,6 +74,7 @@ export async function sendChatMessage(
       currentDay,
       localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
+      preloadedContext: userContext ? JSON.stringify(userContext, null, 2) : undefined,
       // Keep only recent chat history (last 10 turns) to optimize LLM input token usage
       chatHistory: chatHistory?.slice(-10),
       currentHealth: sanitizedHealth,

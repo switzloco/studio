@@ -2,6 +2,8 @@
 'use server';
 
 import { ledgerAnalyst } from '@/ai/flows/personalized-ai-coaching';
+import { getAdminFirestore } from '@/firebase/admin';
+import { fetchSlimUserContext } from '@/lib/user-context';
 
 const AI_TIMEOUT_MS = 45_000;
 
@@ -14,6 +16,12 @@ export async function sendLedgerMessage(
 ) {
   try {
     const resolvedDate = localDate ?? new Date().toISOString().split('T')[0];
+    const firestore = getAdminFirestore();
+
+    const userContext = await fetchSlimUserContext(firestore, userId, resolvedDate).catch((err) => {
+      console.error('[sendLedgerMessage] Preload context error (falling back):', err);
+      return null;
+    });
 
     const aiPromise = ledgerAnalyst({
       userId,
@@ -22,6 +30,7 @@ export async function sendLedgerMessage(
       currentDay: new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date()),
       localDate: resolvedDate,
       localTime: new Date().toLocaleTimeString('en-US'),
+      preloadedContext: userContext ? JSON.stringify(userContext, null, 2) : undefined,
       chatHistory,
     });
 

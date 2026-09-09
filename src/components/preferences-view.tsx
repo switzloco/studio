@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders, Search, Trash2, Utensils, Tag } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import { healthService, UserPreferences, HealthData } from '@/lib/health-service';
 import { useToast } from '@/hooks/use-toast';
 import { Progress } from '@/components/ui/progress';
+import { deleteNickname } from '@/app/actions/delete-nickname';
 
 // Rank tiers — financial seniority ladder matching the app's portfolio metaphor
 const RANKS = [
@@ -54,6 +55,34 @@ export function PreferencesView() {
   const [bodyFatPct, setBodyFatPct] = useState('');
   const [isSavingBodyComp, setIsSavingBodyComp] = useState(false);
   const [bodyCompSavedRecently, setBodyCompSavedRecently] = useState(false);
+
+  // Nicknames (Ticker Book) state
+  const [nicknameSearch, setNicknameSearch] = useState('');
+  const [nicknameMealFilter, setNicknameMealFilter] = useState<'all' | 'breakfast' | 'lunch' | 'dinner' | 'snack'>('all');
+  const [deletingNicknameKey, setDeletingNicknameKey] = useState<string | null>(null);
+
+  const handleDeleteNickname = async (key: string, name: string) => {
+    if (!user || !prefs) return;
+    if (!window.confirm(`Permanently liquidating ticker "${name}" from your portfolio. Proceed?`)) {
+      return;
+    }
+    setDeletingNicknameKey(key);
+    try {
+      const res = await deleteNickname(user.uid, key);
+      if (res.success) {
+        const nextNicknames = { ...(prefs.foodNicknames || {}) };
+        delete nextNicknames[key];
+        setPrefs({ ...prefs, foodNicknames: nextNicknames });
+        toast({ title: 'Ticker Liquidated', description: `"${name}" removed from your portfolio registry.` });
+      } else {
+        toast({ variant: 'destructive', title: 'Action Failed', description: res.error || 'Could not delete ticker.' });
+      }
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Action Failed', description: err.message });
+    } finally {
+      setDeletingNicknameKey(null);
+    }
+  };
 
   // Seed body comp fields once health data loads
   const bodyCompSeededRef = useRef(false);
@@ -575,6 +604,188 @@ export function PreferencesView() {
                   }
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Ticker Book (My Nicknames) Card */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                  <Tag className="w-4 h-4" />
+                  Ticker Book (My Nicknames)
+                </CardTitle>
+                <Badge variant="secondary" className="text-[10px] font-mono font-bold tracking-tight">
+                  {Object.keys(prefs.foodNicknames || {}).length} Tickers Filed
+                </Badge>
+              </div>
+              <p className="text-[11px] font-medium text-muted-foreground mt-1">
+                Custom meal tickers created by the CFO. Say any ticker name in chat to log instantly.
+              </p>
+            </CardHeader>
+            <CardContent className="p-6 pt-2 space-y-4">
+              {/* Search & Filter Bar */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search tickers or ingredients..."
+                    value={nicknameSearch}
+                    onChange={(e) => setNicknameSearch(e.target.value)}
+                    className="pl-8 h-9 text-xs"
+                  />
+                  {nicknameSearch && (
+                    <button
+                      onClick={() => setNicknameSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
+                  {(['all', 'breakfast', 'lunch', 'dinner', 'snack'] as const).map((meal) => (
+                    <Button
+                      key={meal}
+                      variant={nicknameMealFilter === meal ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setNicknameMealFilter(meal)}
+                      className="h-9 px-2.5 text-[10px] uppercase font-black tracking-wider shrink-0"
+                    >
+                      {meal}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ticker Cards Grid */}
+              {(() => {
+                const nicknamesMap = prefs.foodNicknames || {};
+                const entries = Object.entries(nicknamesMap);
+
+                const filtered = entries.filter(([key, item]) => {
+                  if (nicknameMealFilter !== 'all' && item.meal !== nicknameMealFilter) return false;
+                  if (!nicknameSearch.trim()) return true;
+                  const q = nicknameSearch.toLowerCase();
+                  const nameMatch = (item.nickname || key).toLowerCase().includes(q);
+                  const descMatch = item.description?.toLowerCase().includes(q);
+                  const itemMatch = item.items?.some((i) => i.toLowerCase().includes(q));
+                  return nameMatch || descMatch || itemMatch;
+                });
+
+                // Sort: meal group, then alphabetical
+                const mealOrder: Record<string, number> = { breakfast: 1, lunch: 2, dinner: 3, snack: 4 };
+                filtered.sort(([k1, a], [k2, b]) => {
+                  const orderA = mealOrder[a.meal] ?? 99;
+                  const orderB = mealOrder[b.meal] ?? 99;
+                  if (orderA !== orderB) return orderA - orderB;
+                  return (a.nickname || k1).localeCompare(b.nickname || k2);
+                });
+
+                if (entries.length === 0) {
+                  return (
+                    <div className="text-center py-8 px-4 border border-dashed rounded-xl bg-muted/20">
+                      <Utensils className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">No Tickers Filed Yet</p>
+                      <p className="text-[11px] text-muted-foreground/70 mt-1 max-w-sm mx-auto">
+                        When you log distinctive meals, the CFO will proactively propose Wall Street nicknames to file in your ledger.
+                      </p>
+                    </div>
+                  );
+                }
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-6 text-xs text-muted-foreground">
+                      No tickers matching &quot;{nicknameSearch}&quot;.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="max-h-[440px] overflow-y-auto pr-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {filtered.map(([key, item]) => {
+                        const mealBadgeStyles: Record<string, string> = {
+                          breakfast: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+                          lunch: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
+                          dinner: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300',
+                          snack: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+                        };
+
+                        const isDeleting = deletingNicknameKey === key;
+
+                        return (
+                          <div
+                            key={key}
+                            className="p-3.5 rounded-xl bg-muted/25 border hover:border-primary/30 transition-all flex flex-col justify-between gap-2.5 relative group"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-0.5 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h4 className="text-xs font-black text-foreground tracking-tight truncate">
+                                      {item.nickname || key}
+                                    </h4>
+                                    <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wider ${mealBadgeStyles[item.meal] || 'bg-muted text-muted-foreground'}`}>
+                                      {item.meal}
+                                    </span>
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteNickname(key, item.nickname || key)}
+                                  disabled={isDeleting}
+                                  className="h-6 w-6 text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  title="Liquidate Ticker"
+                                >
+                                  {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                </Button>
+                              </div>
+
+                              {item.description && (
+                                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="space-y-1.5 pt-1 border-t border-border/40">
+                              {/* Macro summary pill bar */}
+                              <div className="flex items-center gap-2 text-[10px] font-mono font-bold flex-wrap">
+                                <span className="text-foreground">{item.totalCalories ?? 0} kcal</span>
+                                <span className="text-muted-foreground">·</span>
+                                <span className="text-blue-600 dark:text-blue-400 font-bold">{item.totalProteinG ?? 0}g P</span>
+                                <span className="text-muted-foreground">·</span>
+                                <span className="text-amber-600 dark:text-amber-400">{item.totalCarbsG ?? 0}g C</span>
+                                <span className="text-muted-foreground">·</span>
+                                <span className="text-red-500/80">{item.totalFatG ?? 0}g F</span>
+                              </div>
+
+                              {/* Items tags preview */}
+                              {item.items && item.items.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                                  {item.items.slice(0, 3).map((it, i) => (
+                                    <span key={i} className="text-[9px] bg-background/80 px-1.5 py-0.5 rounded border text-muted-foreground truncate max-w-[110px]">
+                                      {it}
+                                    </span>
+                                  ))}
+                                  {item.items.length > 3 && (
+                                    <span className="text-[9px] text-muted-foreground font-mono">
+                                      +{item.items.length - 3} more
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
 

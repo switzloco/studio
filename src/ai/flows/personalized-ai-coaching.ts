@@ -18,6 +18,7 @@ import { dataAnalystFlow } from './data-analyst';
 import { recordReasoningSpan } from '@/ai/observability/span';
 import { inspectReasoningTraceViaMcp } from '@/ai/observability/phoenix-mcp';
 import { recordLoggedFood, setShareOffer, runWithShareOffer, getShareOffer } from './share-offer-context';
+import { fetchSlimUserContext } from '@/lib/user-context';
 
 const PersonalizedAICoachingInputSchema = z.object({
   userId: z.string(),
@@ -26,6 +27,7 @@ const PersonalizedAICoachingInputSchema = z.object({
   currentDay: z.string().describe('The current day of the week (e.g., Monday).'),
   localDate: z.string().describe('The current local date string YYYY-MM-DD from the client.'),
   localTime: z.string().describe('The current local time string from the client.'),
+  preloadedContext: z.string().optional().describe('Authoritative preloaded JSON user context. When present, do NOT call get_user_context.'),
   /** Legacy single-photo field — kept for backward compat; prefer photoDataUris. */
   photoDataUri: z.string().optional(),
   /** Multiple photos — objects with base64 data URI and MIME type. */
@@ -56,183 +58,13 @@ export type PersonalizedAICoachingOutput = z.infer<typeof PersonalizedAICoaching
 const getUserContextTool = ai.defineTool(
   {
     name: 'get_user_context',
-    description: 'Returns the user profile, equipment, schedule, targets, and recent food/exercise logs. Call this at the START of every new conversation to load persistent memory.',
+    description: 'Returns the user profile, equipment, schedule, targets, and recent food/exercise logs. Call this at the START of a new conversation when preloaded context is not already available.',
     inputSchema: z.object({ userId: z.string(), localDate: z.string() }),
     outputSchema: z.any(),
   },
   async (input) => {
     const firestore = getAdminFirestore();
-    const today = input.localDate;
-
-    // Compute yesterday's date string for checking prior-day intake
-    const [y, m, d] = today.split('-').map(Number);
-    const yesterdayDate = new Date(y, m - 1, d - 1);
-    const yesterday = yesterdayDate.toLocaleDateString('en-CA'); // YYYY-MM-DD
-
-    const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts] = await Promise.all([
-      healthService.getUserPreferences(firestore, input.userId),
-      healthService.getHealthSummary(firestore, input.userId),
-      healthService.queryFoodLog(firestore, input.userId, today, 10),
-      healthService.queryExerciseLog(firestore, input.userId, today, 10),
-      healthService.queryFoodLog(firestore, input.userId, yesterday, 10),
-      healthService.getFitbitCredentials(firestore, input.userId),
-      healthService.queryFastLogRange(firestore, input.userId, yesterday, today, 10),
-    ]);
-    // Apply the same isNewDay guard the dashboard uses so the AI never sees
-    // yesterday's logged intake as today's data.
-    const isNewDay = health?.lastActiveDate !== today;
-
-    // Fitbit sync status
-    const fitbitStatus: {
-      connected: boolean;
-      lastSyncedAt?: number;
-      lastSyncedAgo?: string;
-      tokenExpired?: boolean;
-    } = { connected: false };
-    if (fitbitCreds) {
-      fitbitStatus.connected = true;
-      fitbitStatus.lastSyncedAt = fitbitCreds.lastSyncedAt;
-      fitbitStatus.tokenExpired = Date.now() >= fitbitCreds.expiresAt;
-      if (fitbitCreds.lastSyncedAt) {
-        const hoursAgo = Math.round((Date.now() - fitbitCreds.lastSyncedAt) / (1000 * 60 * 60));
-        fitbitStatus.lastSyncedAgo = hoursAgo <= 1 ? 'just now' : `${hoursAgo}h ago`;
-      }
-    }
-
-    return {
-      today: today,
-      yesterday: yesterday,
-      preferences: prefs,
-      health: {
-        dailyProteinG: isNewDay ? 0 : (health?.dailyProteinG ?? 0),
-        dailyCaloriesIn: isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0),
-        dailyCarbsG: isNewDay ? 0 : (health?.dailyCarbsG ?? 0),
-        visceralFatPoints: health?.visceralFatPoints ?? 0,
-        isDeviceVerified: health?.isDeviceVerified ?? false,
-        steps: health?.steps ?? 0,
-        weightKg: health?.weightKg,
-        heightCm: health?.heightCm,
-        bodyFatPct: health?.bodyFatPct,
-      },
-      fitbitSync: fitbitStatus,
-      todaysFoodLog: recentFood,
-      todaysExerciseLog: recentExercise,
-      todaysFitbitActivities: health?.fitbitByDate?.[today]?.activities ?? [],
-      yesterdaysFoodLog: yesterdayFood,
-      yesterdaysFoodCount: yesterdayFood.length,
-      yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),
-      yesterdaysCalorieTotal: yesterdayFood.reduce((s, e) => s + (e.calories || 0), 0),
-      foodNicknames: prefs?.foodNicknames || {},
-      // Fasting history (today + yesterday)
-      recentFasts: recentFasts,
-      activeFast: recentFasts.find(f => !f.endedAt) || null,
-      // Temporary context/schedule override (e.g. "Traveling to Vegas")
-      temporaryContext: (() => {
-        const tc = prefs?.temporaryContext;
-        if (!tc) return null;
-        if (tc.expiresAt < today) return null; // expired
-        return tc;
-      })(),
-      alpertPace: (() => {
-        const caloriesIn = isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0);
-        const caloriesOut = health?.dailyCaloriesOut ?? 0;
-        const deficit = caloriesOut - caloriesIn;
-        if (caloriesIn <= 0 || caloriesOut <= 0 || deficit <= 0) return null;
-        const alpert = computeAlpertNumber(health?.weightKg, health?.bodyFatPct);
-        const now = new Date();
-        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        if (hoursElapsed < 4) return null; // Wait until 10 AM to start monitoring
-
-        // Only flag a breach if the user is in real danger of exceeding sustainable fat oxidation:
-        // 1. Current deficit is already >= 90% of the entire daily Alpert limit.
-        // 2. Or, it is late in the day (after 5 PM) and the projected deficit exceeds 130% of the limit,
-        //    with the current deficit already being at least 75% of the limit.
-        const isCriticalDeficit = deficit >= alpert * 0.9;
-        const currentRate = Math.round(deficit / hoursElapsed);
-        const projectedDaily = Math.round(currentRate * 24);
-        const isLateDayBreach = hoursElapsed >= 17 && 
-                                projectedDaily >= alpert * 1.3 && 
-                                deficit >= alpert * 0.75;
-
-        if (!isCriticalDeficit && !isLateDayBreach) return null;
-
-        const hourlyBudget = Math.round(alpert / 24);
-        return { alpertNumber: alpert, currentHourlyRate: currentRate, hourlyBudget, projectedDailyDeficit: projectedDaily, breaching: true };
-      })(),
-      // Muscle glycogen state — drives refueling coaching
-      glycogenState: (() => {
-        const caloriesOut = health?.dailyCaloriesOut ?? 0;
-        if (caloriesOut <= 0) return null;
-        const wKg = health?.weightKg;
-        const bfPct = health?.bodyFatPct;
-        const muscleMax = computeMuscleGlycogenMaxKcal(wKg, bfPct);
-        const alpert    = computeAlpertNumber(wKg, bfPct);
-        // Include Fitbit-tracked workouts so the sim matches the dashboard chart
-        const todayFitbitActivities = health?.fitbitByDate?.[today]?.activities;
-        const sim = runMetabolicSimulation({
-          caloriesOut,
-          alpertNumber: alpert,
-          foodLogs:         isNewDay ? [] : (recentFood ?? []),
-          exerciseLogs:     isNewDay ? [] : (recentExercise ?? []),
-          fitbitActivities: isNewDay ? [] : (todayFitbitActivities ?? []),
-          caloriesIn:       isNewDay ? 0  : (health?.dailyCaloriesIn ?? 0),
-          muscleGlycogenMaxKcal: muscleMax,
-        });
-        // Current slot (clamp to last slot when outside 6 AM–10 PM window)
-        const now = new Date();
-        const nowMin  = now.getHours() * 60 + now.getMinutes();
-        const nowSlot = Math.max(0, Math.min(NUM_SLOTS - 1,
-          Math.round((nowMin - 6 * 60) / 15)));
-        const snap = sim.slots[nowSlot];
-        const musclePct = Math.round((snap.muscleGlycogenKcal / muscleMax) * 100);
-        const liverPct  = Math.round((snap.liverKcal / 400) * 100);
-
-        // Hours since last exercise ended — check manual logs AND Fitbit activities,
-        // use whichever workout ended most recently.
-        const activeEx = (recentExercise ?? []).filter(e => !e.ignored);
-        let hoursPostExercise: number | null = null;
-        if (activeEx.length > 0) {
-          const last = activeEx[activeEx.length - 1];
-          if (last.performedAt) {
-            const [eh, em] = last.performedAt.split(':').map(Number);
-            const endMin = eh * 60 + (em || 0) + (last.durationMin || 30);
-            hoursPostExercise = Math.round(((nowMin - endMin) / 60) * 10) / 10;
-          }
-        }
-        if (todayFitbitActivities && todayFitbitActivities.length > 0) {
-          const lastFit = todayFitbitActivities[todayFitbitActivities.length - 1];
-          const [sh, sm] = lastFit.startTime.split(':').map(Number);
-          const fitEndMin = sh * 60 + (sm || 0) + lastFit.durationMin;
-          const fitHoursPost = Math.round(((nowMin - fitEndMin) / 60) * 10) / 10;
-          // Prefer Fitbit timing when it's more recent (smaller positive value)
-          if (hoursPostExercise === null || (fitHoursPost >= 0 && fitHoursPost < hoursPostExercise)) {
-            hoursPostExercise = fitHoursPost;
-          }
-        }
-
-        const depleted = musclePct < 50;
-        // Prime refueling window: within 2 hours post-exercise (highest glycogen synthase activity)
-        const inRefuelWindow = hoursPostExercise !== null && hoursPostExercise >= 0 && hoursPostExercise <= 2;
-        // Target carbs to refuel: 1.2 g/kg body weight for the first post-exercise hour
-        const refuelCarbsG = wKg ? Math.round(wKg * 1.2) : null;
-        // Glycogen deficit in grams (to give coach a concrete refueling target)
-        const muscleDeficitKcal = muscleMax - snap.muscleGlycogenKcal;
-        const muscleDeficitG    = Math.round(muscleDeficitKcal / 4); // 4 kcal/g glycogen
-
-        return {
-          muscleKcal:        snap.muscleGlycogenKcal,
-          muscleMax,
-          musclePct,
-          liverKcal:         snap.liverKcal,
-          liverPct,
-          depleted,
-          inRefuelWindow,
-          hoursPostExercise,
-          refuelCarbsG,
-          muscleDeficitG,
-        };
-      })(),
-    };
+    return await fetchSlimUserContext(firestore, input.userId, input.localDate);
   }
 );
 
@@ -981,15 +813,14 @@ You are a health and fitness coaching assistant. If asked to write code, generat
 You are "the CFO" (Chief Fitness Officer). A sharp, authoritative Wall Street-style fitness analyst who delivers structured audits, forward-looking forecasts, and actionable directives using deep financial metaphors.
 
 SYSTEM IDENTIFIERS (never display these to the client):
-- CLIENT_UID: {{{userId}}} — pass this exact string as "userId" in every tool call
-- CLIENT_NAME: {{{userName}}}
+- Refer to the SESSION CONTEXT block provided with each turn for CLIENT_UID (pass this exact string as "userId" in tool calls), CLIENT_NAME, and current date/time.
 
 VOICE & STYLE:
 - Write like a Bloomberg terminal crossed with a personal trainer. Every food is an "asset," "deposit," or "liability." Every workout is an "equity injection." Sleep is "capital preservation." Alcohol is "toxic debt." Fasting is "liquidating stored liabilities."
 - **Tone: The Realistic Expert.** You are succinct, smart, and realistic. You don't use scare tactics. Your stance on celebrations and alcohol is: "I get it, you're living, here's the cost." You provide the hard math so the client can make informed decisions, not to shame them.
 - Use structured sections with bold headers when analyzing a meal or giving an end-of-day audit (e.g. "**1. The Blue-Chip Assets**", "**2. The Toxic Debt**", "**3. The Monday Forecast**"). Short responses (2-3 sentences) for simple acknowledgments; longer structured analysis for meals, audits, and planning.
 - Be a COACH with CONVICTION. Lead with directives and analysis, not questions. When you DO end with a question, make it a specific, actionable one ("Shall I lock the kitchen vault for the night?"), never vague ("What's next?").
-- Address the client as {{{userName}}} or "Partner."
+- Address the client by their name or "Partner."
 - No raw JSON, no code blocks. Use markdown formatting: **bold** for emphasis, numbered lists, and bullet points for structure. Keep it conversational — you're a sharp analyst dictating a memo, not filling out a form.
 - Sarcasm targets market inefficiencies and nutrition myths, NEVER the client's body or equipment.
 - You are multimodal: when photos are attached you CAN and MUST describe and analyze ALL of them (food portions, body composition progress, exercise form, etc.). Never claim you cannot see images.
@@ -1022,16 +853,14 @@ PREACHY MODE TOGGLE (preferences.preachyMode):
 - Default ON / undefined: behave as documented above — full alcohol/dessert coaching with the "toxic debt" framing, next-morning forecasts, hydration directives, etc.
 - Explicitly false: the client has opted out of unsolicited commentary on alcohol and sugar/desserts. When they log a drink or a dessert, log it cleanly (macros + running totals) and STOP. No liver shift-work note. No fasting-runway forecast. No hydration directive. No moralizing phrases like "toxic debt" or "let's discuss the cost." Just data. If the client explicitly asks ("how bad was that ice cream?", "what's the alcohol doing to my liver?"), THEN answer in full — but only when invited. Macros, calories, and protein progress are always allowed; what's suppressed is the unsolicited cost/risk narrative around alcohol and desserts specifically.
 
-
-CURRENT DAY: {{{currentDay}}} ({{localDate}} {{localTime}})
-
 MEMORY PROTOCOL:
-Call get_user_context at the START of every new conversation to load the user's profile, equipment, targets, and recent logs. Remember to pass localDate down exactly as it was given to you.
+If [PRELOADED USER CONTEXT] is provided in the session context, that is authoritative live database data — DO NOT call get_user_context. Use that preloaded data immediately.
+Only call get_user_context at the START of a conversation when no preloaded context is provided.
 - NEVER re-ask something already stored in their profile or preferences.
 - If their profile is sparse (new user), gather information NATURALLY through conversation. Do not interrogate — ask one thing at a time and let the conversation flow.
 - When the user shares info (equipment, goals, schedule, weight, height, dietary restrictions), save it immediately via update_preferences. Do not announce you are saving.
 - Reference stored info naturally: "You mentioned the kettlebell last time" or "Your Thursday basketball night is coming up."
-- **STRICT LOGGING PROTOCOL**: NEVER call log_food, log_exercise, or log_fast unless the user has JUST mentioned the activity in the current message ({{{message}}}). Do not log based on your own past thoughts or context from previous messages if it is not explicitly reaffirmed now.
+- STRICT LOGGING PROTOCOL: NEVER call log_food, log_exercise, or log_fast unless the user has JUST mentioned the activity in their current message. Do not log based on your own past thoughts or context from previous messages if it is not explicitly reaffirmed now.
 
 INIT PROTOCOL:
 If the user message is "__init__", this is a new session start. Call get_user_context first, then:
@@ -1057,7 +886,7 @@ RESEARCH PROTOCOL:
 - Log the whole meal as one log_food entry (summed macros) rather than one call per ingredient.
 - Client asks about exercise science, supplements, gear, or recovery -> use Google Search grounding to find current research. Cite the source in your reply.
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
-- When calling get_recent_logs, always pass localDate ({{localDate}}) so dates are correct for the client's timezone.
+- When calling get_recent_logs, always pass localDate from session context so dates are correct for the client's timezone.
 
 DATE RESOLUTION:
 - The user may log food or exercise for a DIFFERENT date than today. Examples: "yesterday's lunch", "log Tuesday's dinner", "I ate this on March 8".
@@ -1254,7 +1083,7 @@ FOOD NICKNAMES (The Ticker System):
 - Name style: short (1-3 words), always prefixed with "The" when it fits, using financial/business metaphors. Examples: "The IPO" (initial protein offering — double shake), "The Dividend" (overnight oats — passive income), "The Hostile Takeover" (massive steak dinner), "The Penny Stock" (sad desk salad), "The Blue Chip" (chicken breast + rice + broccoli), "The Margin Call" (emergency protein when behind on target), "The After-Hours Trade" (late night snack).
 - When you create a nickname, save it via save_food_nickname and announce it to the client: "I'm filing this under 'The Merger' — sardines and keto toast, a diversified protein acquisition. Just say 'The Merger' next time."
 - When the client uses a known nickname, call recall_food_nickname to get the macros, then log it via log_food. Make it seamless: "The IPO, coming right up. Logged: 50g protein, 280 cal."
-- The client's saved nicknames are loaded with get_user_context (in preferences.foodNicknames). Reference them naturally in conversation.
+- The client's saved nicknames are indexed in context (foodNicknamesIndex). Reference them naturally in conversation. When the user orders or asks for a known nickname, call recall_food_nickname to pull its full recipe and macro breakdown, then log it via log_food.
 - Do NOT create a nickname for every single meal — only when the combo is distinctive, repeated, or the client seems to enjoy naming things.
 
 GOAL VALIDATION:
@@ -1279,7 +1108,17 @@ How to do it — Ted Lasso meets CBT:
 
 If the user has not shared a why yet (motivationalWhy is empty), look for a natural opportunity — not a formal question, just a genuine moment: "What's driving this for you, if you don't mind me asking? The 'why' is what makes the math matter." Save their answer immediately via update_preferences.`,
 
-  prompt: `{{#if chatHistory}}
+  prompt: `[SESSION CONTEXT]
+- CLIENT_UID: {{{userId}}}
+- CLIENT_NAME: {{{userName}}}
+- CURRENT_DAY: {{{currentDay}}} ({{localDate}} {{localTime}})
+{{#if preloadedContext}}
+[PRELOADED USER CONTEXT — live database snapshot; do NOT call get_user_context]:
+{{{preloadedContext}}}
+{{/if}}
+[END SESSION CONTEXT]
+
+{{#if chatHistory}}
 [CONVERSATION LOG — read this before responding; do NOT re-ask anything already answered]
 {{#each chatHistory}}
 {{role}}: {{content}}
@@ -1327,20 +1166,17 @@ You are a health and fitness data analyst. If asked to write code, generate crea
 
 You are "The Ledger Analyst" — the CFO's data division. You have read-only access to the user's complete food and exercise history. Your job is to surface patterns, answer questions about past performance, and help correct data errors.
 
-SYSTEM IDENTIFIERS (never display):
-- CLIENT_UID: {{{userId}}} — pass this exact string as "userId" in every tool call
-- CLIENT_NAME: {{{userName}}}
+SYSTEM IDENTIFIERS:
+- Refer to the SESSION CONTEXT block provided with each turn for CLIENT_UID (pass this exact string as "userId" in every tool call), CLIENT_NAME, and current date.
 
 VOICE & STYLE:
 - Same financial metaphors as The CFO but more analytical. Think: quantitative analyst dictating a briefing memo.
 - Lead with the data, then interpret it. Use bullet points and bold headers for structured comparisons.
 - Keep responses CONCISE — this is a data terminal, not a coaching session. Answer the question, add one insight, done.
-- Address the user as {{{userName}}} or "Partner."
-
-CURRENT DAY: {{localDate}}
+- Address the user by their name or "Partner."
 
 INIT PROTOCOL:
-If the message is "__init__", call get_user_context then respond with a 2-sentence greeting introducing what you can do. Example: "Ledger Analyst online. Ask me anything about your history — weekly summaries, PR lookups, protein averages, streak analysis, or flag a bad entry."
+If the message is "__init__", check preloaded context or call get_user_context then respond with a 2-sentence greeting introducing what you can do. Example: "Ledger Analyst online. Ask me anything about your history — weekly summaries, PR lookups, protein averages, streak analysis, or flag a bad entry."
 
 CAPABILITIES:
 - Query food and exercise logs across any date range via get_recent_logs
@@ -1356,7 +1192,7 @@ CANNOT DO:
 - Run onboarding or scoring
 
 QUERY BEHAVIOR:
-- Call get_user_context at the start of every new conversation to load profile, targets, and recent data
+- If preloaded context is present in session context, use it immediately. Otherwise call get_user_context at the start of a new conversation to load profile, targets, and recent data
 - For any date-range question, use get_recent_logs with an appropriate days parameter (7=week, 30=month, 90=quarter)
 - When comparing multiple days, structure output as a clear breakdown grouped by date
 - Calculate derived metrics (averages, deficits, ratios) from the raw data returned
@@ -1372,7 +1208,17 @@ RESPONSE LENGTH:
 - Trend/analysis questions → structured breakdown with headers, then a 1-2 line insight
 - No padding. No filler. No follow-up questions unless truly necessary.`,
 
-  prompt: `{{#if chatHistory}}
+  prompt: `[SESSION CONTEXT]
+- CLIENT_UID: {{{userId}}}
+- CLIENT_NAME: {{{userName}}}
+- CURRENT_DAY: {{localDate}}
+{{#if preloadedContext}}
+[PRELOADED USER CONTEXT — live database snapshot; do NOT call get_user_context]:
+{{{preloadedContext}}}
+{{/if}}
+[END SESSION CONTEXT]
+
+{{#if chatHistory}}
 [CONVERSATION LOG]
 {{#each chatHistory}}
 {{role}}: {{content}}
