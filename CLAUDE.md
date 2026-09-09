@@ -115,7 +115,6 @@ Optional, fully **env-gated on `PHOENIX_ENABLED=true`** (hackathon integration; 
 ### Environment Variables
 - `GOOGLE_GENAI_API_KEY` — Required for Genkit/Gemini
 - `NEXT_PUBLIC_FITBIT_CLIENT_ID` — Fitbit OAuth (optional, has mock fallback)
-- `SERPER_API_KEY` — Serper.dev key for `web_search` tool (optional; tool throws a clear error if missing)
 - `USDA_FOOD_API_KEY` — USDA FoodData Central key for `nutrition_lookup` (optional; falls back to `DEMO_KEY` at 100 req/hr)
 - `CFO_MODEL` — Override the coaching model (default `googleai/gemini-2.5-flash`)
 - `PHOENIX_ENABLED` — Set `true` to enable Arize Phoenix tracing + MCP trace introspection (default off)

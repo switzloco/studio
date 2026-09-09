@@ -186,9 +186,8 @@ User menu dropdown labels: "Active Portfolio" / "Discovery Audit" (status), "Por
 | `log_workout` | Updates visceral fat points based on movement. |
 | `log_vanity_metrics` | Updates self-reported (unverified) height and weight in the user ledger. |
 | `nutrition_lookup` | Calls USDA FoodData Central API — **never guess macros** |
-| `web_search` | Calls a search API for exercise science, supplement research |
 
-**Research policy:** When user mentions any food, call `nutrition_lookup` immediately. Never estimate macros from memory. If no USDA match, fall back to `web_search`. Cite source in reply ("per USDA data"). Do not mention you're searching — deliver results as confident CFO statements.
+**Research policy:** When user mentions any food, call `nutrition_lookup` immediately. Never estimate macros from memory. Cite source in reply ("per USDA data"). Do not mention you're searching — deliver results as confident CFO statements.
 
 **Data trust policy:** Steps, HRV, and sleep are only trusted when `isDeviceVerified = true` (Fitbit). Self-reported weight, height, and exercise are always accepted but labeled unverified ("Audit status: UNVERIFIED / SECONDARY").
 
@@ -294,7 +293,6 @@ NEXT_PUBLIC_FITBIT_CLIENT_ID=
 FITBIT_CLIENT_SECRET=
 GOOGLE_GENAI_API_KEY=
 USDA_FOOD_API_KEY=          # optional, falls back to DEMO_KEY at 100 req/hr
-SERPER_API_KEY=             # optional, for web_search tool
 ```
 
 ---
