@@ -14,6 +14,7 @@ import { syncWithingsData, disconnectWithings, getWithingsAuthUrl, WithingsSyncR
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
+import { computeAlpertPace } from '@/lib/alpert-pace';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
@@ -319,34 +320,18 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
       proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities]);
 
-  // Hourly Alpert pace — warn when the current deficit rate exceeds the sustainable ceiling.
-  // alpertNumber is kcal/day; hourly budget = alpertNumber / 24.
-  // If deficit so far > (alpertNumber × hoursElapsed / 24), the pace is unsustainable.
-    const alpertPace = React.useMemo(() => {
-        if (!data || !isViewingToday || dailyCaloriesIn <= 0 || dailyCaloriesOut <= 0 || alpertDeficit <= 0) return null;
-        const now = new Date();
-        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        
-        // Trigger only when user is in genuine danger of exceeding sustainable daily limit:
-        // 1. Current deficit is already 90% or more of the entire daily Alpert ceiling.
-        // 2. Or, it's after 5 PM (17:00) and the projected daily deficit exceeds 130% of the Alpert ceiling,
-        //    with the current deficit already being at least 75% of the ceiling.
-        const isCriticalDeficit = alpertDeficit >= alpertNumber * 0.9;
-        const currentHourlyRate = alpertDeficit / hoursElapsed;
-        const projectedDaily = Math.round(currentHourlyRate * 24);
-        const isLateDayBreach = hoursElapsed >= 17 && 
-                                projectedDaily >= alpertNumber * 1.3 && 
-                                alpertDeficit >= alpertNumber * 0.75;
-
-        if (!isCriticalDeficit && !isLateDayBreach) return null;
-
-        const hourlyBudget = alpertNumber / 24;
-        return { 
-            currentHourlyRate: Math.round(currentHourlyRate), 
-            hourlyBudget: Math.round(hourlyBudget), 
-            projectedDaily 
-        };
-    }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertDeficit, alpertNumber]);
+  // Alpert pace — warn when today's deficit is running past the daily fat ceiling.
+  // Fires on fasted days too (nothing logged); see computeAlpertPace.
+  const alpertPace = React.useMemo(() => {
+    if (!data || !isViewingToday) return null;
+    const now = new Date();
+    return computeAlpertPace({
+      caloriesIn: dailyCaloriesIn,
+      caloriesOut: dailyCaloriesOut,
+      alpertNumber,
+      hoursElapsed: now.getHours() + now.getMinutes() / 60,
+    });
+  }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertNumber]);
 
   // Run the metabolic simulation for the selected day
   const simulationResult = React.useMemo(() => {
@@ -840,7 +825,11 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 )}
               </div>
               <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
-                <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0 ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}` : 'Log food to calculate'}</span>
+                <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0
+                  ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}`
+                  : isViewingToday && dailyCaloriesOut > 0
+                    ? `${dailyCaloriesOut.toLocaleString()} kcal deficit · no food logged`
+                    : 'Log food to calculate'}</span>
                 <span>Max burn: {alpertNumber.toLocaleString()} kcal</span>
               </div>
             </div>
@@ -859,12 +848,21 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
                 <div>
                   <p className="text-[10px] font-black text-red-700 uppercase tracking-wide">
-                    Pace Breach — Muscle Loss Risk
+                    {alpertPace.fasted ? 'Fasted Past Max Fat Burn — Muscle Loss Risk' : 'Pace Breach — Muscle Loss Risk'}
                   </p>
-                  <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
-                    Burning at {alpertPace.currentHourlyRate} kcal/hr vs {alpertPace.hourlyBudget} kcal/hr ceiling.
-                    Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds max burn of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
-                  </p>
+                  {alpertPace.fasted ? (
+                    <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
+                      No food logged today. Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit vs {alpertNumber.toLocaleString()} kcal max fat burn
+                      — about {alpertPace.projectedBeyondAlpert.toLocaleString()} kcal has to come from glycogen or muscle.
+                      Keep movement easy (walking, not intervals) and break the fast protein-first (~40 g).
+                      Eaten already? Log it — this assumes zero intake.
+                    </p>
+                  ) : (
+                    <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
+                      Burning at {alpertPace.currentHourlyRate} kcal/hr vs {alpertPace.hourlyBudget} kcal/hr ceiling.
+                      Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds max burn of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

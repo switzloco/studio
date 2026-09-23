@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import { computeAlpertNumber } from '@/lib/vf-scoring';
+import { computeAlpertPace } from '@/lib/alpert-pace';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, NUM_SLOTS } from '@/lib/metabolic-engine';
 
 export interface SlimUserContext {
@@ -101,26 +102,25 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
       return tc;
     })(),
     alpertPace: (() => {
+      // Zero intake still counts — a fast is when this warning matters most.
       const caloriesIn = isNewDay ? 0 : (health?.dailyCaloriesIn ?? 0);
       const caloriesOut = health?.dailyCaloriesOut ?? 0;
-      const deficit = caloriesOut - caloriesIn;
-      if (caloriesIn <= 0 || caloriesOut <= 0 || deficit <= 0) return null;
       const alpert = computeAlpertNumber(health?.weightKg, health?.bodyFatPct);
       const now = new Date();
       const hoursElapsed = now.getHours() + now.getMinutes() / 60;
       if (hoursElapsed < 4) return null;
-
-      const isCriticalDeficit = deficit >= alpert * 0.9;
-      const currentRate = Math.round(deficit / hoursElapsed);
-      const projectedDaily = Math.round(currentRate * 24);
-      const isLateDayBreach = hoursElapsed >= 17 && 
-                              projectedDaily >= alpert * 1.3 && 
-                              deficit >= alpert * 0.75;
-
-      if (!isCriticalDeficit && !isLateDayBreach) return null;
-
-      const hourlyBudget = Math.round(alpert / 24);
-      return { alpertNumber: alpert, currentHourlyRate: currentRate, hourlyBudget, projectedDailyDeficit: projectedDaily, breaching: true };
+      const pace = computeAlpertPace({ caloriesIn, caloriesOut, alpertNumber: alpert, hoursElapsed });
+      if (!pace) return null;
+      return {
+        alpertNumber: alpert,
+        currentHourlyRate: pace.currentHourlyRate,
+        hourlyBudget: pace.hourlyBudget,
+        projectedDailyDeficit: pace.projectedDaily,
+        projectedBeyondAlpert: pace.projectedBeyondAlpert,
+        fasted: pace.fasted,
+        deliberateFast: pace.fasted && recentFasts.some(f => !f.endedAt),
+        breaching: true,
+      };
     })(),
     glycogenState: (() => {
       const caloriesOut = health?.dailyCaloriesOut ?? 0;
