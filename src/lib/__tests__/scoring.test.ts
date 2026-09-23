@@ -111,7 +111,7 @@ describe('VF v2 — muscle catabolism priced into the score', () => {
   it('reports muscle loss on an extreme zero-intake high-burn day', () => {
     const r = calculateDailyVFScore(cleanDay({ caloriesIn: 0, caloriesOut: 5000 }));
     expect(r.breakdown.muscleKcal).toBeGreaterThan(0);
-    expect(r.summary).toContain('muscle lost');
+    expect(r.summary).toContain(`muscle ${r.breakdown.muscleKcal} kcal`);
   });
 });
 
@@ -398,18 +398,20 @@ describe('VF v3 — effort registers', () => {
     expect(lift.score).toBeGreaterThan(rest.score);
   });
 
-  it('3. Storage penalty is capped symmetrically with fat oxidation', () => {
+  it('3. A surplus scores negative in proportion to the surplus (no per-slot storage cap since v3.2)', () => {
     const bingeFood = [
       food({ meal: 'lunch', consumedAt: '12:00', calories: 2500, carbsG: 200, fatG: 100, proteinG: 50 }),
     ];
-    const r = calculateDailyVFScore({
+    const at = (caloriesIn: number) => calculateDailyVFScore({
       ...cleanDay(refUser),
-      caloriesIn: 2500,
+      caloriesIn,
       caloriesOut: 2400,
-      foodLogs: bingeFood,
+      foodLogs: [food({ ...bingeFood[0], calories: caloriesIn })],
     });
 
-    expect(r.breakdown.fatStoragePenaltyCapped).toBeGreaterThan(0);
+    expect(at(2500).score).toBeLessThan(0);
+    expect(at(2900).score).toBeLessThan(at(2500).score);
+    expect(at(2500).breakdown.fatStoragePenaltyCapped).toBe(0);
   });
 
   it('4. Consecutive-day alcohol cannot single-handedly force a negative day on an excellent day', () => {
@@ -454,9 +456,66 @@ describe('VF v3 — effort registers', () => {
     expect(late).toBe(early);
   });
 
-  it('6. Glycogen credit is bounded', () => {
+  it('6. Glycogen credit is retired (v3.2)', () => {
     const r = calculateDailyVFScore(cleanDay(refUser));
-    expect(r.breakdown.glycogenCreditPoints).toBeGreaterThanOrEqual(0);
-    expect(r.breakdown.glycogenCreditPoints).toBeLessThan(100);
+    expect(r.breakdown.glycogenCreditPoints).toBe(0);
+  });
+});
+
+// ─── v3.2: energy balance, glycogen-neutral ───────────────────────────────────
+describe('VF v3.2 — glycogen is neutral, fat = deficit − muscle', () => {
+  const refUser = { weightKg: 93, bodyFatPct: 25, heightCm: 183, age: 40 };
+  const meals = (k: number): FoodLogEntry[] => [
+    food({ meal: 'breakfast', consumedAt: '07:30', calories: 500 * k, carbsG: 60 * k, proteinG: 35 * k, fatG: 12 * k }),
+    food({ meal: 'lunch', consumedAt: '12:30', calories: 800 * k, carbsG: 80 * k, proteinG: 55 * k, fatG: 25 * k }),
+    food({ meal: 'dinner', consumedAt: '19:00', calories: 1100 * k, carbsG: 110 * k, proteinG: 70 * k, fatG: 40 * k }),
+  ];
+  const basketball = exercise({
+    name: 'basketball', category: 'cardio', activityTier: 'tier3_anaerobic',
+    durationMin: 120, estimatedCaloriesBurned: 900, performedAt: '17:00',
+  });
+  const day = (caloriesIn: number, caloriesOut: number, extra: Partial<DailyVFInput> = {}) =>
+    calculateDailyVFScore({
+      ...cleanDay(refUser), caloriesIn, caloriesOut, foodLogs: meals(caloriesIn / 2400), ...extra,
+    });
+
+  // The v3.1 leak: the glycogen credit paid for glycogen drawn and never charged
+  // the refill, so doing nothing at maintenance scored ~+18 a day.
+  it('a maintenance day scores ~0 — rest or training', () => {
+    expect(Math.abs(day(2800, 2800).score)).toBeLessThanOrEqual(1);
+    expect(Math.abs(day(3700, 3700, { exerciseLogs: [basketball] }).score)).toBeLessThanOrEqual(1);
+  });
+
+  it('a carb refeed after a hard session is neutral at maintenance', () => {
+    const refeed = [
+      food({ meal: 'breakfast', consumedAt: '08:00', calories: 600, carbsG: 40, proteinG: 45, fatG: 25 }),
+      food({ meal: 'lunch', consumedAt: '13:00', calories: 900, carbsG: 90, proteinG: 60, fatG: 30 }),
+      food({ name: 'potato + sourdough', meal: 'dinner', consumedAt: '20:00', calories: 1900, carbsG: 260, proteinG: 90, fatG: 45 }),
+    ];
+    const r = day(3400, 3400, { foodLogs: refeed, exerciseLogs: [basketball] });
+    expect(Math.abs(r.score)).toBeLessThanOrEqual(1);
+  });
+
+  it('the same deficit scores the same whether it came from eating less or moving more', () => {
+    const ateLess = day(2400, 2800);
+    const movedMore = day(2800, 3200, { exerciseLogs: [exercise({ category: 'cardio', durationMin: 45, estimatedCaloriesBurned: 400, performedAt: '17:00' })] });
+    expect(ateLess.score).toBe(movedMore.score);
+    expect(ateLess.breakdown.fatBalanceKcal).toBe(400);
+  });
+
+  it('fat credit stops at the Alpert ceiling and reports the excess', () => {
+    const r = day(1200, 3400);
+    const { alpertNumber, fatBalanceKcal, deficitBeyondAlpertKcal, muscleKcal } = r.breakdown;
+    expect(fatBalanceKcal).toBe(alpertNumber);
+    expect(deficitBeyondAlpertKcal).toBe(2200 - muscleKcal - alpertNumber);
+    expect(r.summary).toContain('Alpert ceiling');
+  });
+
+  it('muscle lost is both removed from fat credit and penalized', () => {
+    const r = calculateDailyVFScore(cleanDay({ caloriesIn: 0, caloriesOut: 5000 }));
+    expect(r.breakdown.muscleKcal).toBeGreaterThan(0);
+    expect(r.breakdown.baseScore).toBeLessThan(
+      Math.round((r.breakdown.fatBalanceKcal / r.breakdown.pointsDenominator) * 100),
+    );
   });
 });

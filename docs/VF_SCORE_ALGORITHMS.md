@@ -5,11 +5,61 @@ What this file is: a self-contained description of each version of the CFO Fitne
 and penalize fat storage and muscle catabolism. It was written for review by a
 metabolic physiologist, or by an AI helping one.
 
-- Live version: **v3.1 "Bull–Lovelace"**
+- Live version: **v3.2 "Taylor–Joule"** (v3.2 section below; §2–§5 describe v3.1 and earlier)
 - Source of truth: `src/lib/vf-scoring.ts` (scoring), `src/lib/metabolic-engine.ts`
   (simulation and constants), `src/lib/scoring-releases.ts` (release history)
 - The v2.0 and v3.0 descriptions come from the release notes. v1.0 and v3.1 were
   read from the code.
+
+---
+
+## 0. v3.2 "Taylor–Joule" (current): energy balance, glycogen-neutral
+
+**Why it changed.** The v3.1 simulation starts every day at the same glycogen
+level (liver 280 kcal, muscle 80%) and never carries it over. So each day's
+glycogen swing is an artifact. The 30% glycogen credit then paid points for that
+drawdown without ever charging for the refill. The result was a rest day at
+maintenance (zero energy deficit) scoring about +18. Over a 65-day block that is
+~1,100 points with no fat lost.
+
+**The rule.** Over any run of days, glycogen returns to where it was. What's left
+of the energy deficit after muscle loss is fat.
+
+```
+fat   = min(Alpert, (caloriesOut − caloriesIn) − muscleLost)
+score = (fat / D) × 100 − (muscleLost / 10) × 2 + alcoholPenalty − 5 × seedOilMeals
+```
+
+| | v3.1 | v3.2 |
+|---|---|---|
+| Glycogen drawn | +30% credit | Neutral |
+| Carb refeed after training | Mostly scored as fat stored (refill = 6% / 15% of gross absorption) | Carbs refill glycogen before any fat is stored; neutral at maintenance |
+| Fat-storage penalty | Per-slot, capped at the faucet rate | Retired. A surplus scores negative directly |
+| Net-surplus penalty | Separate term | Retired (inside the energy balance) |
+| Deficit beyond Alpert | Implicitly limited by the per-slot faucet | Not credited; reported as `deficitBeyondAlpertKcal` |
+| Role of the simulation | Drives the score | Decides the fat-vs-muscle split and feeds the intraday charts |
+
+Reference results (205 lb, 25% body fat, D = 1,112):
+
+| Day | v3.1 | v3.2 | Energy-balance truth |
+|---|---|---|---|
+| Rest, maintenance | +18 | 0 | 0 |
+| Rest, −400 kcal | 37 | 36 | 36 |
+| Run day, maintenance | +7 | 0 | 0 |
+| Run day, −400 kcal | 23 | 36 | 36 |
+| Basketball + potato/sourdough refeed, maintenance | +36 | 0 | 0 |
+| One 1,800 kcal meal, −1,000 kcal | 79 | 90 | 90 |
+| Run day, 1,200 in / 3,400 out | 114 | 143 (Alpert cap) | 198 before the cap |
+
+**Calorie burn input.** The burn is the device's full-day figure × 0.90, now
+applied the same way on every path. The Google Health connect backfill
+previously skipped it. Validation studies put Fitbit slightly *low* on average
+(−7% vs doubly labeled water over 15 free-living days), so the 10% is a safety
+margin, not a bias correction.
+
+**Open questions for the reviewer.**
+1. Should deficit beyond the Alpert ceiling also be *penalized* as lean loss, not just left uncredited?
+2. The muscle term still comes from a same-day simulation with a fixed glycogen start. Is that the right proxy?
 
 ---
 
@@ -27,7 +77,7 @@ metabolic physiologist, or by an AI helping one.
 
 ## 2. Version comparison
 
-| | v1.0 Drago–Moore | v2.0 GSP–Gilfoyle | v3.0 Balboa–Hopper | v3.1 Bull–Lovelace (live) |
+| | v1.0 Drago–Moore | v2.0 GSP–Gilfoyle | v3.0 Balboa–Hopper | v3.1 Bull–Lovelace |
 |---|---|---|---|---|
 | Core idea | Deficit = points | Score simulated fat oxidation, normalized per body | v2 + training effort counts | v3.0 + alcohol rule rebuilt from the physiology |
 | Base score | `deficit / 10` | Σ slots: fat burned − fat stored − muscle lost | + 30% glycogen-drawn credit | same as v3.0 |
@@ -45,7 +95,7 @@ metabolic physiologist, or by an AI helping one.
 
 ---
 
-## 3. v3.1 formula (live)
+## 3. v3.1 formula (previous)
 
 ```
 score = Σ_slot [ (fatBurned / D)       × 100

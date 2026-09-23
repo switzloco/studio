@@ -1,14 +1,17 @@
 /**
- * @fileOverview Hourly Metabolic Partitioning Engine (v3 — Effort Registers)
+ * @fileOverview Hourly Metabolic Partitioning Engine (v3.2 — glycogen refills before fat)
  *
  * Simulates 5-bucket sequential energy drain across 15-minute slots from 6 AM to midnight.
  *
  * Drain priority per slot:
  *   1. Gut / Exogenous    — food being absorbed (insulin suppresses lipolysis)
  *   2. Fat Faucet         — rate-limited at alpertNumber/24/4 per slot; PAUSED while gut non-empty
- *   3. Liver Glycogen     — 400 kcal cap; replenishes from absorbed carbs
- *   4. Muscle Glycogen    — lean-mass-scaled cap; primary exercise buffer; replenishes from dietary carbs
+ *   3. Liver Glycogen     — 400 kcal cap
+ *   4. Muscle Glycogen    — lean-mass-scaled cap; primary exercise buffer
  *   5. Muscle Protein     — true last resort; contributes to score penalty (mitigated by anabolicSignal)
+ *
+ * Surplus per slot (absorption beyond burn): its carb share refills liver, then
+ * muscle glycogen (rate-limited); only the rest is stored as fat.
  */
 
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
@@ -27,10 +30,27 @@ const INSULIN_DECAY_RATE           = 0.125; // clears a max spike (1.0) in ~2 ho
 const ZONE2_FAT_BOOST              = 1.5;    // steady-state ≈ FatMax: fat faucet runs 1.5× resting Alpert
 
 /**
- * Glycogen credit fraction (30%): Glycogen drawn during exercise/deficit is genuine energy debt
- * that is refilled later from food that would otherwise be stored as fat.
+ * Glycogen credit — RETIRED in v3.2 (was 0.30 in v3.0–v3.1).
+ * The credit paid points for glycogen drawn but never charged them back when
+ * meals refilled it, so an ordinary day at maintenance scored ~+18 with no fat
+ * lost. v3.2 scores the day's energy balance directly (vf-scoring.ts), where
+ * glycogen is neutral, so there is nothing left for a credit to compensate.
+ * Kept at 0 so pre-v3.2 history fields keep their meaning.
  */
-export const GLYCOGEN_CREDIT_FRACTION = 0.30;
+export const GLYCOGEN_CREDIT_FRACTION = 0;
+
+/**
+ * Carb share assumed when only a daily kcal total is known (no per-meal logs).
+ * Roughly a typical mixed diet; only the glycogen-refill split depends on it.
+ */
+const FALLBACK_CARB_SHARE = 0.45;
+
+/**
+ * Max muscle glycogen resynthesis per 15-min slot, kcal per kg body weight.
+ * Sports-nutrition recovery guidance tops out at ~1.0–1.2 g carb/kg/h in the
+ * first hours after exhaustive exercise → 1.2 g × 4 kcal ÷ 4 slots = 1.2.
+ */
+const MUSCLE_GLYCOGEN_SYNTH_KCAL_PER_KG_SLOT = 1.2;
 
 /** Compute resting fat oxidation cap per 15-minute slot in kcal. */
 export function computeFaucetPerSlot(alpertNumber: number): number {
@@ -123,6 +143,9 @@ export interface MetabolicResult {
   totalOmega3Mg: number;
   totalAnabolicPotential: number;
   muscleGlycogenMaxKcal: number;
+  /** Liver + muscle glycogen at the first slot and after the last (informational). */
+  glycogenStartKcal: number;
+  glycogenEndKcal: number;
   score: number;
 }
 
@@ -252,6 +275,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   const proteinSpikes     = new Array<number>(NUM_SLOTS).fill(0);
   const caffeineIntake    = new Array<number>(NUM_SLOTS).fill(0);
   const liverAlcoholDrain  = new Array<number>(NUM_SLOTS).fill(0);
+  const carbAbsorptionPerSlot = new Array<number>(NUM_SLOTS).fill(0);
   const exerciseBurnPerSlot = new Array<number>(NUM_SLOTS).fill(0);
   const strengthSlots         = new Array<boolean>(NUM_SLOTS).fill(false);
   const zone2Slots            = new Array<boolean>(NUM_SLOTS).fill(false);
@@ -268,8 +292,11 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       const absorptionDuration = Math.min(24, 6 + fiberDelaySlots + fatDelaySlots);
       
       const perSlot = food.calories / absorptionDuration;
+      // Carb share of what's absorbed — the only part that can refill glycogen.
+      const carbPerSlot = Math.min(perSlot, ((food.carbsG || 0) * 4) / absorptionDuration);
       for (let s = eatSlot; s < Math.min(eatSlot + absorptionDuration, NUM_SLOTS); s++) {
         absorptionPerSlot[s] += perSlot;
+        carbAbsorptionPerSlot[s] += carbPerSlot;
         gutBySlot[s] += food.calories * (1 - (s - eatSlot) / absorptionDuration);
       }
 
@@ -309,6 +336,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       const perSlot = m.kcal / 6;
       for (let s = eatSlot; s < Math.min(eatSlot + 6, NUM_SLOTS); s++) {
         absorptionPerSlot[s] += perSlot;
+        carbAbsorptionPerSlot[s] += perSlot * FALLBACK_CARB_SHARE;
         gutBySlot[s] += m.kcal * (1 - (s - eatSlot) / 6);
       }
       insulinSpikes[eatSlot] += (m.kcal / 1000);
@@ -362,6 +390,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   }
 
   const bmrPerSlot = Math.max(0, caloriesOut - totalExerciseCal) / NUM_SLOTS;
+  const muscleSynthMaxPerSlot = (params.weightKg ?? 70) * MUSCLE_GLYCOGEN_SYNTH_KCAL_PER_KG_SLOT;
 
   const slots: MetabolicSlotData[] = [];
   let liverKcal           = Math.min(LIVER_MAX_KCAL, liverGlycogenStartKcal);
@@ -374,6 +403,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
   let cumulativeMuscleLost = 0;
   let cumulativeGlycogenDrawn = 0;
   let cumulativeAnabolicPotential = 0;
+  const glycogenStartKcal = liverKcal + muscleGlycogenKcal;
 
   for (let s = 0; s < NUM_SLOTS; s++) {
     // 1. Decay and Update Hormones/Drugs/Nutrients
@@ -425,19 +455,30 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     const currentLiverDrain = liverAlcoholDrain[s];
     const liverContribution = Math.min(remaining, liverKcal);
     liverKcal = Math.max(0, liverKcal - liverContribution - currentLiverDrain);
-    const liverRefillAmt = Math.min(LIVER_MAX_KCAL - liverKcal, absorptionThisSlot * 0.06);
-    liverKcal += liverRefillAmt;
     remaining -= liverContribution;
 
     const muscleGlycoContribution = Math.min(remaining, muscleGlycogenKcal);
     muscleGlycogenKcal = Math.max(0, muscleGlycogenKcal - muscleGlycoContribution);
-    const muscleRefillAmt = Math.min(muscleMax - muscleGlycogenKcal, absorptionThisSlot * 0.15);
-    muscleGlycogenKcal += muscleRefillAmt;
     remaining -= muscleGlycoContribution;
 
     // MPS signal (anabolicSignal) protects lean mass when protein/lifting are present
     const muscleContribution = Math.max(0, remaining * (1 - 0.5 * anabolicSignal));
-    const fatStoredThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot - liverRefillAmt - muscleRefillAmt);
+    // ── Surplus partitioning (v3.2) ──────────────────────────────────────────
+    // Only what absorption delivers BEYOND this slot's burn can be stored — the
+    // gut already spent the rest (pre-v3.2 refilled glycogen from gross
+    // absorption, conjuring energy on slots that were net-negative). Absorbed
+    // carbs go to glycogen before anything goes to fat (de novo lipogenesis is
+    // minor at normal intakes), liver first, then muscle at a bounded synthesis
+    // rate; only the remainder is stored as fat. So the potato after a hard
+    // session refills the tank instead of scoring as fat stored.
+    const surplusThisSlot = Math.max(0, absorptionThisSlot - burnThisSlot);
+    let carbSurplus = Math.min(surplusThisSlot, carbAbsorptionPerSlot[s] || 0);
+    const liverRefillAmt = Math.min(LIVER_MAX_KCAL - liverKcal, carbSurplus);
+    liverKcal += liverRefillAmt;
+    carbSurplus -= liverRefillAmt;
+    const muscleRefillAmt = Math.min(muscleMax - muscleGlycogenKcal, carbSurplus, muscleSynthMaxPerSlot);
+    muscleGlycogenKcal += muscleRefillAmt;
+    const fatStoredThisSlot = Math.max(0, surplusThisSlot - liverRefillAmt - muscleRefillAmt);
 
     cumulativeFatBurned     += fatContribution;
     cumulativeFatStored     += fatStoredThisSlot;
@@ -478,6 +519,8 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
     totalOmega3Mg,
     totalAnabolicPotential: Number(cumulativeAnabolicPotential.toFixed(2)),
     muscleGlycogenMaxKcal: muscleMax,
+    glycogenStartKcal: Math.round(glycogenStartKcal),
+    glycogenEndKcal: Math.round(liverKcal + muscleGlycogenKcal),
     score: computeMetabolicScore(cumulativeFatBurned, cumulativeFatStored, cumulativeMuscleLost, pointsDenominator(alpertNumber)),
   };
 }

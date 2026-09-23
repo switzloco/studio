@@ -1,21 +1,19 @@
 /**
- * @fileOverview Visceral Fat daily scoring engine (v3.1 — Zero-Order).
+ * @fileOverview Visceral Fat daily scoring engine (v3.2 — Energy Balance).
  *
  * SCORING: Points are normalized to each user's fat-oxidation ceiling, so the
  * scale means the same thing for every user regardless of body size.
- *   100 pts = burning 70% of the user's Alpert number in fat that day.
+ *   100 pts = losing fat equal to 70% of the user's Alpert number that day.
  *   Denominator  D = 0.70 × Alpert(weightKg, bodyFatPct)
- *   Score is UNCAPPED in both directions — no -200 floor, no +100 cap.
+ *   Score is UNCAPPED below; fat credit is capped at the Alpert ceiling above.
  *
- *   score = Σ_slot [ (fatBurned/D)×100 − (min(fatStored, faucet)/D)×100
- *                   − (muscleLost/10)×2 + (glycogenDrawn/D)×100 × 0.30 ]
- *           − netSurplusPenalty − alcoholPenalty − seedOil
+ *   fat   = min(Alpert, (caloriesOut − caloriesIn) − muscleLost)
+ *   score = (fat / D) × 100 − (muscleLost / 10) × 2 − alcoholPenalty − seedOil
  *
- * MECHANICS (v3.0):
- *   • Glycogen Credit — 30% credit for glycogen drawn during training/deficit.
- *   • Storage Cap Symmetry — per-slot fat storage penalty capped at the fat
- *     oxidation rate (alpertNumber / 24 / 4).
- *   • Seed Oil Nudge — −5 pts per seed-oil meal.
+ * v3.2: glycogen is neutral. The slot simulation still runs, but only to decide
+ * how much of the deficit came out of muscle (and for the intraday charts). The
+ * v3.0 glycogen credit, per-slot storage cap and net-surplus penalty are gone —
+ * a surplus now shows up directly as negative fat. See the fat-balance block.
  *
  * ALCOHOL (v3.1) — replaces the v2/v3 "metabolic pause" mask.
  *   The old rule zeroed POSITIVE score accrual for 3h per drinking entry. That made
@@ -40,11 +38,9 @@ import {
   runMetabolicSimulation,
   computeMuscleGlycogenMaxKcal,
   pointsDenominator,
-  computeFaucetPerSlot,
   clearanceHoursPerDrink,
   alcoholSuppressionDepth,
   PTS_PER_SUPPRESSED_HOUR,
-  GLYCOGEN_CREDIT_FRACTION,
   MUSCLE_PENALTY_PER_10KCAL,
   NUM_SLOTS,
 } from './metabolic-engine';
@@ -178,7 +174,12 @@ export interface DailyVFResult {
     totalFatBurned: number;
     totalFatStored: number;
     totalGlycogenDrawn: number;
+    glycogenNetKcal: number;          // end − start glycogen (informational; carries no points)
+    fatBalanceKcal: number;           // min(Alpert, deficit − muscle): the fat the score credits
+    deficitBeyondAlpertKcal: number;  // deficit the Alpert ceiling refused to count as fat
+    /** @deprecated v3.0–v3.1 only. */
     glycogenCreditPoints: number;
+    /** @deprecated v3.0–v3.1 only. */
     fatStoragePenaltyCapped: number;
     muscleKcal: number;
     baseScore: number;             // engine score before behavioral penalties
@@ -240,34 +241,30 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     muscleGlycogenMaxKcal: computeMuscleGlycogenMaxKcal(weightKg, bodyFatPct, hasCreatine),
   });
 
-  // ── Score the day slot-by-slot ──────────────────────────────────────────────
-  const faucetPerSlot = computeFaucetPerSlot(alpertNumber);
-  let baseScore = 0;    // engine score, Alpert-normalized, no behavioral penalties
-  let totalStorageExcusedKcal = 0;
-  let totalGlycogenCreditPts = 0;
+  // ── Fat balance (v3.2): energy balance, glycogen-neutral ──────────────────
+  // The simulation starts every day at the same glycogen level and never carries
+  // it over, so its per-day glycogen swing is an artifact — a hard-training day
+  // looks "paid for by glycogen", and the refill meal the next day is never
+  // charged either. Over any run of days glycogen returns to where it was, so
+  // what's left of the deficit after muscle is fat. Scoring that directly makes
+  // the potato after basketball neutral (sugar in, sugar out) and removes the
+  // v3.0 glycogen credit and per-slot storage cap, both of which were patches
+  // for the old accounting (the credit made maintenance days score ~+18).
+  //
+  // The simulation still decides the fat-vs-muscle split: when the deficit
+  // outruns the fat faucet and glycogen, it books muscle, which is both
+  // subtracted here and penalized below. Fat loss is capped at the Alpert
+  // ceiling — deficit beyond it is not fat, however hard the day was.
+  const muscleKcal = sim.totalMuscleLost;
+  const fatBalanceUncapped = deficit - muscleKcal;
+  const fatBalanceKcal = Math.min(alpertNumber, fatBalanceUncapped);
+  const deficitBeyondAlpertKcal = Math.max(0, fatBalanceUncapped - alpertNumber);
 
-  for (const slot of sim.slots) {
-    const storedThisSlot = Math.min(slot.fatStoredThisSlot, faucetPerSlot);
-    totalStorageExcusedKcal += Math.max(0, slot.fatStoredThisSlot - storedThisSlot);
-
-    const glycogenDrawnThisSlot = slot.liverContribution + slot.muscleGlycogenContribution;
-    const glycogenCreditPts = ((glycogenDrawnThisSlot / D) * 100) * GLYCOGEN_CREDIT_FRACTION;
-    totalGlycogenCreditPts += glycogenCreditPts;
-
-    baseScore +=
-      (slot.fatContribution / D) * 100 -
-      (storedThisSlot / D) * 100 -
-      (slot.muscleContribution / 10) * MUSCLE_PENALTY_PER_10KCAL +
-      glycogenCreditPts;
-  }
+  const fatPoints = (fatBalanceKcal / D) * 100;
+  const musclePenaltyPoints = (muscleKcal / 10) * MUSCLE_PENALTY_PER_10KCAL;
+  const baseScore = fatPoints - musclePenaltyPoints;
 
   let score = baseScore;
-
-  // ── Net Caloric Surplus Penalty ─────────────────────────────────────────────
-  // When caloriesIn > caloriesOut, net surplus calories cannot be masked by capped storage
-  const netSurplus = Math.max(0, caloriesIn - caloriesOut);
-  const netSurplusPenalty = (netSurplus / D) * 100;
-  score -= netSurplusPenalty;
 
   // ── Alcohol: counterfactual debit on suppressed clearance-hours ──────────────
   // The whole session is charged here, overnight remainder included, so the number
@@ -287,12 +284,16 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   // ── Coaching context ────────────────────────────────────────────────────────
   const proteinMet = proteinG >= proteinGoal;
   const fastingActive = fastingHours >= 16;
-  const glycogenCreditPoints = Math.round(totalGlycogenCreditPts);
-  const fatStoragePenaltyCapped = Math.round(totalStorageExcusedKcal);
+  const glycogenNetKcal = sim.glycogenEndKcal - sim.glycogenStartKcal;
 
   const parts: string[] = [
-    `fat burned ${sim.totalFatBurned} kcal, stored ${sim.totalFatStored} kcal (excused ${fatStoragePenaltyCapped} kcal excess), glycogen debt credit +${glycogenCreditPoints} pts, muscle lost ${sim.totalMuscleLost} kcal → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
+    `deficit ${deficit} kcal − muscle ${muscleKcal} kcal = fat ${Math.round(fatBalanceKcal)} kcal` +
+    (deficitBeyondAlpertKcal > 0 ? ` (capped at the ${alpertNumber} kcal Alpert ceiling — the other ${Math.round(deficitBeyondAlpertKcal)} kcal of deficit came from glycogen or lean tissue, not fat)` : '') +
+    ` → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
   ];
+  if (glycogenNetKcal <= -200) {
+    parts.push(`glycogen tank ran ${-glycogenNetKcal} kcal low — carbs refill it without costing points`);
+  }
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
   if (fastingActive) parts.push(`${fastingHours}h fast`);
   if (alcoholLoad.penalty < 0) {
@@ -315,9 +316,14 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       totalFatBurned: sim.totalFatBurned,
       totalFatStored: sim.totalFatStored,
       totalGlycogenDrawn: sim.totalGlycogenDrawn,
-      glycogenCreditPoints,
-      fatStoragePenaltyCapped,
-      muscleKcal: sim.totalMuscleLost,
+      glycogenNetKcal,
+      fatBalanceKcal: Math.round(fatBalanceKcal),
+      deficitBeyondAlpertKcal: Math.round(deficitBeyondAlpertKcal),
+      /** @deprecated retired in v3.2 (always 0); kept so pre-v3.2 history renders. */
+      glycogenCreditPoints: 0,
+      /** @deprecated retired in v3.2 (always 0); kept so pre-v3.2 history renders. */
+      fatStoragePenaltyCapped: 0,
+      muscleKcal,
       baseScore: Math.round(baseScore),
       proteinMet,
       fastingActive,

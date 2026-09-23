@@ -89,6 +89,20 @@ export const SCORING_RELEASES: ScoringRelease[] = [
       'Consecutive-day penalty retired (it scaled off the day\'s own score, so worse days paid less)',
     ],
   },
+  {
+    version: '3.2',
+    codename: 'Taylor–Joule',
+    bodyComp: { name: 'Coach Eric Taylor', real: false, source: 'Friday Night Lights', note: 'no shortcuts and no padded stats — the scoreboard is the scoreboard' },
+    tech:     { name: 'James Prescott Joule', real: true, source: 'First law of thermodynamics', note: 'proved energy is conserved — it moves between stores, it is never conjured' },
+    tagline: 'The books balance — glycogen is float, not profit.',
+    shipped: [
+      'Fat credit = energy deficit − muscle lost, capped at the Alpert ceiling',
+      'Glycogen is neutral: the 30% glycogen credit is retired (maintenance days no longer score ~+18)',
+      'A carb refeed after a hard session costs nothing — carbs refill glycogen before any fat is stored',
+      'Per-slot fat-storage cap and net-surplus penalty retired — a surplus scores negative directly',
+      'Deficit beyond the Alpert ceiling is reported, not credited as fat',
+    ],
+  },
 ];
 
 export const CURRENT_SCORING_RELEASE = SCORING_RELEASES[SCORING_RELEASES.length - 1];

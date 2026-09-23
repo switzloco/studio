@@ -44,6 +44,12 @@ export interface FitbitInitialSyncResult extends FitbitSyncResult {
   dataDate?: string;
   /** Per-day snapshots for the last 7 days, keyed by YYYY-MM-DD. */
   dailySnapshots?: Record<string, import('./health-service').FitbitDailySnapshot>;
+  /**
+   * How each snapshot's caloriesOut was sourced. The snapshots carry the RAW
+   * device figure; the caller must run it through `toScoringCaloriesOut`
+   * (fitbit-sync.ts) before storing, exactly as the periodic sync does.
+   */
+  dailyCaloriesBasis?: Record<string, CaloriesBasis>;
 }
 
 interface FitbitTokenResponse {
@@ -1168,6 +1174,7 @@ export const fitbitService = {
       // Backfill the last 7 days so the dashboard has history immediately
       // after connecting — mirrors what the Fitbit initial sync does.
       const dailySnapshots: Record<string, import('./health-service').FitbitDailySnapshot> = {};
+      const dailyCaloriesBasis: Record<string, CaloriesBasis> = {};
       let latestResult: FitbitSyncResult | null = null;
 
       for (let i = 0; i < 7; i++) {
@@ -1188,7 +1195,10 @@ export const fitbitService = {
             // Derive recoveryStatus from sleep
             snap.recoveryStatus = r.sleep.value >= 7 ? 'high' : r.sleep.value >= 6 ? 'medium' : 'low';
           }
-          if (r.caloriesOut && r.caloriesOut.value > 0) snap.caloriesOut = r.caloriesOut.value;
+          if (r.caloriesOut && r.caloriesOut.value > 0) {
+            snap.caloriesOut = r.caloriesOut.value;
+            if (r.caloriesBasis) dailyCaloriesBasis[dateStr] = r.caloriesBasis;
+          }
           if (r.activities && r.activities.length > 0) snap.activities = r.activities;
 
           if (snap.steps != null || snap.sleepHours != null || snap.caloriesOut != null || snap.activities) {
@@ -1242,6 +1252,7 @@ export const fitbitService = {
         heightCm,
         dataDate: todayStr,
         dailySnapshots,
+        dailyCaloriesBasis,
       };
     }
 

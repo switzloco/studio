@@ -251,27 +251,24 @@ describe('syncFitbitSnapshot score recalculation', () => {
     // So arguments are: (firestore, 'user-123', updates)
     const updatePayload = mockCalls[0][2] as any;
     
-    // Difference: newScore (28) - oldScore (228) = -200
-    // New visceralFatPoints = 258 - 200 = 58
-    // (Alpert-normalized v2: 654 kcal fat burned ÷ 813 (70% of 1162 Alpert) × 100,
-    //  less 412 kcal stored — a far cry from the old deficit/10 = 228.)
-    // Difference: newScore (109) - oldScore (228) = -119
-    // New visceralFatPoints = 258 - 119 = 139
-    expect(updatePayload.visceralFatPoints).toBe(139);
+    // v3.2 energy balance: deficit 1470 kcal (2970 − 1500), no muscle lost, but
+    // fat credit is capped at the 1162 kcal Alpert ceiling → 1162 ÷ 813 (70% of
+    // Alpert) × 100 = 143. Difference: 143 − 228 = −85 → 258 − 85 = 173.
+    expect(updatePayload.visceralFatPoints).toBe(173);
 
     // Verify history entries:
     // entry 1: equity remains 10
-    // entry 2: gain=109, equity=10+109=119
-    // entry 3: gain=20, equity=119+20=139
+    // entry 2: gain=143, equity=10+143=153
+    // entry 3: gain=20, equity=153+20=173
     const newHistory = updatePayload.history;
     expect(newHistory[0].equity).toBe(10);
 
-    expect(newHistory[1].gain).toBe(109);
-    expect(newHistory[1].equity).toBe(119);
+    expect(newHistory[1].gain).toBe(143);
+    expect(newHistory[1].equity).toBe(153);
     expect(newHistory[1].breakdown.caloriesOut).toBe(2970);
     expect(newHistory[1].breakdown.deficit).toBe(1470); // 2970 - 1500
 
-    expect(newHistory[2].equity).toBe(139);
+    expect(newHistory[2].equity).toBe(173);
   });
 });
 

@@ -4,6 +4,7 @@ import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
 import { mergeDailySnapshot } from '@/lib/health-snapshot';
 import { fitbitService } from '@/lib/fitbit-service';
+import { toScoringCaloriesOut } from '@/lib/fitbit-sync';
 
 /**
  * @fileOverview Fitbit OAuth2 Callback Handler.
@@ -123,10 +124,12 @@ export async function GET(request: NextRequest) {
       if (syncResult.weightKg) healthUpdate.weightKg = syncResult.weightKg;
       if (syncResult.heightCm) healthUpdate.heightCm = syncResult.heightCm;
       if (syncResult.caloriesOut && syncResult.caloriesOut.value > 0) {
-        // Fitbit TDEE estimates run ~10% high — apply a conservative accuracy adjustment.
-        // Google Health data (including Samsung Health via Health Connect) is already accurate.
-        const calorieDiscount = provider === 'google' ? 1.0 : 0.90;
-        healthUpdate.dailyCaloriesOut = Math.round(syncResult.caloriesOut.value * calorieDiscount);
+        // Same adjustment the periodic sync applies, for every provider: Google
+        // Health relays the Fitbit device's own estimate, so it is not exempt.
+        healthUpdate.dailyCaloriesOut = await toScoringCaloriesOut(
+          firestore, userId, syncResult.caloriesOut.value, syncResult.caloriesBasis,
+          { tag: 'FitbitCallback', provider, date: syncResult.dataDate ?? 'today' },
+        );
       }
 
       // Derive recovery status from HRV.
@@ -144,7 +147,19 @@ export async function GET(request: NextRequest) {
         const existingByDate =
           (await adminHealthService.getHealthSummary(firestore, userId))?.fitbitByDate ?? {};
         await Promise.all(
-          Object.entries(syncResult.dailySnapshots).map(([date, snap]) => {
+          Object.entries(syncResult.dailySnapshots).map(async ([date, rawSnap]) => {
+            // The backfilled snapshots carry the raw device burn. These days are
+            // stamped final, so the periodic sync never revisits them — adjust
+            // here or they keep an undiscounted (or basal-less) burn for good.
+            const snap = rawSnap.caloriesOut != null
+              ? {
+                  ...rawSnap,
+                  caloriesOut: await toScoringCaloriesOut(
+                    firestore, userId, rawSnap.caloriesOut, syncResult.dailyCaloriesBasis?.[date],
+                    { tag: 'FitbitCallback', provider, date },
+                  ),
+                }
+              : rawSnap;
             const merged = mergeDailySnapshot(existingByDate[date], snap);
             return merged
               ? adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, merged)
