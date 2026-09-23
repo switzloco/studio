@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { calculateDailyVFScore, DailyVFInput, computeAlpertNumber } from '../vf-scoring';
+import { estimateBmrKcal, creditedCaloriesOut } from '../metabolic-engine';
 import type { FoodLogEntry, ExerciseLogEntry } from '../food-exercise-types';
 import { SCORING_RELEASES, CURRENT_SCORING_RELEASE, hasOneFictionalHero } from '../scoring-releases';
 
@@ -479,35 +480,54 @@ describe('VF v3.2 — glycogen is neutral, fat = deficit − muscle', () => {
       ...cleanDay(refUser), caloriesIn, caloriesOut, foodLogs: meals(caloriesIn / 2400), ...extra,
     });
 
+  // "Maintenance" is measured against the burn the score counts (BMR + 50% of
+  // device activity), so these isolate the glycogen accounting.
+  const bmr = estimateBmrKcal(refUser.weightKg, refUser.heightCm, refUser.age);
+  const scoredOut = (deviceOut: number) => creditedCaloriesOut(deviceOut, bmr);
+
   // The v3.1 leak: the glycogen credit paid for glycogen drawn and never charged
   // the refill, so doing nothing at maintenance scored ~+18 a day.
   it('a maintenance day scores ~0 — rest or training', () => {
-    expect(Math.abs(day(2800, 2800).score)).toBeLessThanOrEqual(1);
-    expect(Math.abs(day(3700, 3700, { exerciseLogs: [basketball] }).score)).toBeLessThanOrEqual(1);
+    expect(Math.abs(day(scoredOut(2800), 2800).score)).toBeLessThanOrEqual(1);
+    expect(Math.abs(day(scoredOut(3700), 3700, { exerciseLogs: [basketball] }).score)).toBeLessThanOrEqual(1);
   });
 
   it('a carb refeed after a hard session is neutral at maintenance', () => {
+    const intake = scoredOut(3400);
+    const k = intake / 3400;
     const refeed = [
-      food({ meal: 'breakfast', consumedAt: '08:00', calories: 600, carbsG: 40, proteinG: 45, fatG: 25 }),
-      food({ meal: 'lunch', consumedAt: '13:00', calories: 900, carbsG: 90, proteinG: 60, fatG: 30 }),
-      food({ name: 'potato + sourdough', meal: 'dinner', consumedAt: '20:00', calories: 1900, carbsG: 260, proteinG: 90, fatG: 45 }),
+      food({ meal: 'breakfast', consumedAt: '08:00', calories: 600 * k, carbsG: 40 * k, proteinG: 45 * k, fatG: 25 * k }),
+      food({ meal: 'lunch', consumedAt: '13:00', calories: 900 * k, carbsG: 90 * k, proteinG: 60 * k, fatG: 30 * k }),
+      food({ name: 'potato + sourdough', meal: 'dinner', consumedAt: '20:00', calories: 1900 * k, carbsG: 260 * k, proteinG: 90 * k, fatG: 45 * k }),
     ];
-    const r = day(3400, 3400, { foodLogs: refeed, exerciseLogs: [basketball] });
+    const r = day(intake, 3400, { foodLogs: refeed, exerciseLogs: [basketball] });
     expect(Math.abs(r.score)).toBeLessThanOrEqual(1);
   });
 
-  it('the same deficit scores the same whether it came from eating less or moving more', () => {
+  it('activity above BMR is credited at half: burning 800 more is worth eating 400 less', () => {
     const ateLess = day(2400, 2800);
-    const movedMore = day(2800, 3200, { exerciseLogs: [exercise({ category: 'cardio', durationMin: 45, estimatedCaloriesBurned: 400, performedAt: '17:00' })] });
+    const movedMore = day(2800, 3600, { exerciseLogs: [exercise({ category: 'cardio', durationMin: 90, estimatedCaloriesBurned: 800, performedAt: '17:00' })] });
+    expect(ateLess.breakdown.deficit).toBe(movedMore.breakdown.deficit);
     expect(ateLess.score).toBe(movedMore.score);
-    expect(ateLess.breakdown.fatBalanceKcal).toBe(400);
+  });
+
+  it('eating back the full device burn on an active day scores as a surplus of half the activity', () => {
+    const r = day(3700, 3700, { exerciseLogs: [basketball] });
+    expect(r.breakdown.scoredCaloriesOut).toBe(Math.round(bmr + 0.5 * (3700 - bmr)));
+    expect(r.breakdown.deficit).toBe(r.breakdown.scoredCaloriesOut - 3700);
+    expect(r.score).toBeLessThan(0);
+  });
+
+  it('BMR is always counted in full, even on a day the device reports less', () => {
+    const r = day(1200, bmr - 100);
+    expect(r.breakdown.scoredCaloriesOut).toBe(bmr - 100);
   });
 
   it('fat credit stops at the Alpert ceiling and reports the excess', () => {
-    const r = day(1200, 3400);
-    const { alpertNumber, fatBalanceKcal, deficitBeyondAlpertKcal, muscleKcal } = r.breakdown;
+    const r = day(1000, 4400);
+    const { alpertNumber, fatBalanceKcal, deficitBeyondAlpertKcal, muscleKcal, deficit } = r.breakdown;
     expect(fatBalanceKcal).toBe(alpertNumber);
-    expect(deficitBeyondAlpertKcal).toBe(2200 - muscleKcal - alpertNumber);
+    expect(deficitBeyondAlpertKcal).toBe(deficit - muscleKcal - alpertNumber);
     expect(r.summary).toContain('Alpert ceiling');
   });
 

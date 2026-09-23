@@ -528,6 +528,10 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
           seedOilMeals,
           weightKg: health.weightKg,
           bodyFatPct: health.bodyFatPct,
+          // Height + age set the BMR the activity credit is measured from — pass
+          // them so a re-sync scores the day the same way the backfill does.
+          heightCm: health.heightCm,
+          age: prefs?.profile?.age,
           hrv: snapshot.hrv || health.fitbitByDate?.[date]?.hrv,
           foodLogs,
           exerciseLogs,

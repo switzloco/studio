@@ -52,6 +52,29 @@ const FALLBACK_CARB_SHARE = 0.45;
  */
 const MUSCLE_GLYCOGEN_SYNTH_KCAL_PER_KG_SLOT = 1.2;
 
+/**
+ * Share of above-BMR burn the score believes (v3.2). The resting half of the
+ * day is counted in full; everything the device adds on top — steps, games,
+ * workouts — is credited at 50%. That biases the score toward food intake,
+ * which the client controls and logs precisely, over wearable burn, whose
+ * per-person error runs ±20–30% (the population average is near zero, so this
+ * is caution about the spread, not a bias correction). A 22k-step basketball
+ * day still widens the deficit — by half what the watch claims.
+ * Replace with a per-user factor once there's a reliable weight trend.
+ */
+export const ACTIVITY_CREDIT_FRACTION = 0.5;
+
+/** Resting BMR, Mifflin-St Jeor averaged across sexes (sex isn't stored). */
+export function estimateBmrKcal(weightKg = 80, heightCm = 175, age = 40): number {
+  return Math.round(10 * weightKg + 6.25 * heightCm - 5 * age - 78);
+}
+
+/** Device burn → the burn the score counts: BMR in full, activity above it at ACTIVITY_CREDIT_FRACTION. */
+export function creditedCaloriesOut(caloriesOut: number, bmrKcal: number): number {
+  if (caloriesOut <= bmrKcal) return caloriesOut;
+  return Math.round(bmrKcal + ACTIVITY_CREDIT_FRACTION * (caloriesOut - bmrKcal));
+}
+
 /** Compute resting fat oxidation cap per 15-minute slot in kcal. */
 export function computeFaucetPerSlot(alpertNumber: number): number {
   return alpertNumber / 24 / 4;
@@ -107,6 +130,8 @@ export interface MetabolicEngineParams {
   heightCm?: number;   // with age, sets hepatic alcohol clearance rate
   age?: number;
   muscleGlycogenMaxKcal?: number;
+  /** Scales every exercise burn — pass ACTIVITY_CREDIT_FRACTION alongside a credited caloriesOut. */
+  exerciseCreditFraction?: number;
 }
 
 export interface MetabolicSlotData {
@@ -372,11 +397,13 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       });
 
   let totalExerciseCal = 0;
+  const exerciseCredit = params.exerciseCreditFraction ?? 1;
   for (const ex of logsToUse) {
     if (ex.cal <= 0) continue;
+    const exCal     = ex.cal * exerciseCredit;
     const startSlot = Math.max(0, Math.min(NUM_SLOTS - 1, timeToSlot(ex.start)));
     const numSlots  = Math.max(1, Math.round(ex.dur / INTERVAL_MIN));
-    const perSlot   = ex.cal / numSlots;
+    const perSlot   = exCal / numSlots;
     for (let s = startSlot; s < Math.min(startSlot + numSlots, NUM_SLOTS); s++) {
       exerciseBurnPerSlot[s] += perSlot;
       if ((ex as any).isStrength || activeLogs.find(l => l.name === (ex as any).name)?.category === 'strength') {
@@ -386,7 +413,7 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       // so the fat faucet runs above the resting Alpert ceiling here.
       if ((ex as any).isZone2) zone2Slots[s] = true;
     }
-    totalExerciseCal += ex.cal;
+    totalExerciseCal += exCal;
   }
 
   const bmrPerSlot = Math.max(0, caloriesOut - totalExerciseCal) / NUM_SLOTS;

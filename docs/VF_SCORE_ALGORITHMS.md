@@ -26,9 +26,17 @@ maintenance (zero energy deficit) scoring about +18. Over a 65-day block that is
 of the energy deficit after muscle loss is fat.
 
 ```
-fat   = min(Alpert, (caloriesOut − caloriesIn) − muscleLost)
+burn  = BMR + 0.5 × (deviceCaloriesOut − BMR)      // BMR: Mifflin-St Jeor, sex-averaged
+fat   = min(Alpert, (burn − caloriesIn) − muscleLost)
 score = (fat / D) × 100 − (muscleLost / 10) × 2 + alcoholPenalty − 5 × seedOilMeals
 ```
+
+**Activity credit (50%).** Food intake is logged precisely. Wearable burn has
+±20–30% per-person error, even though its population average is close to right.
+So the score counts resting burn in full and only half of what the device adds
+on top. The consequence: eating back the device's full burn on an active day
+scores as a surplus of half that day's activity. This is meant to be replaced
+by a per-user factor once there's a reliable weight trend.
 
 | | v3.1 | v3.2 |
 |---|---|---|
@@ -39,17 +47,21 @@ score = (fat / D) × 100 − (muscleLost / 10) × 2 + alcoholPenalty − 5 × se
 | Deficit beyond Alpert | Implicitly limited by the per-slot faucet | Not credited; reported as `deficitBeyondAlpertKcal` |
 | Role of the simulation | Drives the score | Decides the fat-vs-muscle split and feeds the intraday charts |
 
-Reference results (205 lb, 25% body fat, D = 1,112):
+Reference results (205 lb, 25% body fat, 183 cm, age 40; BMR ≈ 1,796, D = 1,112). "Device" is the watch's full-day burn after the 0.90 discount:
 
-| Day | v3.1 | v3.2 | Energy-balance truth |
+| Day | v3.1 | v3.2 | Burn counted |
 |---|---|---|---|
-| Rest, maintenance | +18 | 0 | 0 |
-| Rest, −400 kcal | 37 | 36 | 36 |
-| Run day, maintenance | +7 | 0 | 0 |
-| Run day, −400 kcal | 23 | 36 | 36 |
-| Basketball + potato/sourdough refeed, maintenance | +36 | 0 | 0 |
-| One 1,800 kcal meal, −1,000 kcal | 79 | 90 | 90 |
-| Run day, 1,200 in / 3,400 out | 114 | 143 (Alpert cap) | 198 before the cap |
+| Rest, eat = device burn | +18 | −45 | 2,298 of 2,800 |
+| Rest, 400 under device | +37 | −9 | 2,298 of 2,800 |
+| Run day, 400 under device | +23 | −36 | 2,598 of 3,400 |
+| Basketball, eat = device burn (refeed) | +5 | −86 | 2,748 of 3,700 |
+| Basketball, 1,650 eaten | 104 | 99 | 2,748 of 3,700 |
+| Rest, 1,650 eaten | 80 | 58 | 2,298 of 2,800 |
+
+The glycogen fix alone (burn counted in full) brings every maintenance day,
+rest or training, to 0 instead of v3.1's +7 to +36. The negative numbers above
+are the 50% activity credit at work: a day only scores positive once intake is
+below the *credited* burn.
 
 **Calorie burn input.** The burn is the device's full-day figure × 0.90, now
 applied the same way on every path. The Google Health connect backfill

@@ -7,7 +7,8 @@
  *   Denominator  D = 0.70 × Alpert(weightKg, bodyFatPct)
  *   Score is UNCAPPED below; fat credit is capped at the Alpert ceiling above.
  *
- *   fat   = min(Alpert, (caloriesOut − caloriesIn) − muscleLost)
+ *   burn  = BMR + 0.5 × (deviceCaloriesOut − BMR)      // activity credited at 50%
+ *   fat   = min(Alpert, (burn − caloriesIn) − muscleLost)
  *   score = (fat / D) × 100 − (muscleLost / 10) × 2 − alcoholPenalty − seedOil
  *
  * v3.2: glycogen is neutral. The slot simulation still runs, but only to decide
@@ -42,6 +43,9 @@ import {
   alcoholSuppressionDepth,
   PTS_PER_SUPPRESSED_HOUR,
   MUSCLE_PENALTY_PER_10KCAL,
+  ACTIVITY_CREDIT_FRACTION,
+  estimateBmrKcal,
+  creditedCaloriesOut,
   NUM_SLOTS,
 } from './metabolic-engine';
 
@@ -170,7 +174,10 @@ export interface DailyVFResult {
     // Engine outputs (now priced into the score)
     alpertNumber: number;
     pointsDenominator: number;     // D = 70% of Alpert
-    deficit: number;
+    bmrKcal: number;               // estimated resting burn, counted in full
+    scoredCaloriesOut: number;     // BMR + 50% of device burn above it
+    activityCreditFraction: number;
+    deficit: number;               // scoredCaloriesOut − caloriesIn
     totalFatBurned: number;
     totalFatStored: number;
     totalGlycogenDrawn: number;
@@ -222,11 +229,17 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
 
   const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
   const D = pointsDenominator(alpertNumber);   // 100 pts = burn 70% of Alpert in fat
-  const deficit = caloriesOut - caloriesIn;
+  // Activity credit: BMR counts in full, device burn above it at 50%, so the
+  // score leans on food intake (see ACTIVITY_CREDIT_FRACTION). Everything
+  // downstream — deficit, simulation, Alpert cap — runs on the credited burn.
+  const bmrKcal = estimateBmrKcal(weightKg, heightCm, age);
+  const scoredCaloriesOut = creditedCaloriesOut(caloriesOut, bmrKcal);
+  const deficit = scoredCaloriesOut - caloriesIn;
 
   // ── Run the metabolic simulation for per-slot fat/storage/muscle figures ─────
   const sim = runMetabolicSimulation({
-    caloriesOut,
+    caloriesOut: scoredCaloriesOut,
+    exerciseCreditFraction: ACTIVITY_CREDIT_FRACTION,
     alpertNumber,
     foodLogs,
     exerciseLogs,
@@ -287,7 +300,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
   const glycogenNetKcal = sim.glycogenEndKcal - sim.glycogenStartKcal;
 
   const parts: string[] = [
-    `deficit ${deficit} kcal − muscle ${muscleKcal} kcal = fat ${Math.round(fatBalanceKcal)} kcal` +
+    `scored burn ${scoredCaloriesOut} kcal (BMR ${bmrKcal} + ${Math.round(ACTIVITY_CREDIT_FRACTION * 100)}% of ${Math.max(0, caloriesOut - bmrKcal)} activity) − ${caloriesIn} in = deficit ${deficit} kcal − muscle ${muscleKcal} kcal = fat ${Math.round(fatBalanceKcal)} kcal` +
     (deficitBeyondAlpertKcal > 0 ? ` (capped at the ${alpertNumber} kcal Alpert ceiling — the other ${Math.round(deficitBeyondAlpertKcal)} kcal of deficit came from glycogen or lean tissue, not fat)` : '') +
     ` → ${score} pts (100 = 70% of ${alpertNumber} Alpert)`,
   ];
@@ -312,6 +325,9 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     breakdown: {
       alpertNumber,
       pointsDenominator: Math.round(D),
+      bmrKcal,
+      scoredCaloriesOut,
+      activityCreditFraction: ACTIVITY_CREDIT_FRACTION,
       deficit,
       totalFatBurned: sim.totalFatBurned,
       totalFatStored: sim.totalFatStored,

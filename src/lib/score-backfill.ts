@@ -9,12 +9,13 @@
  */
 
 import { calculateDailyVFScore } from './vf-scoring';
+import { estimateBmrKcal } from './metabolic-engine';
 import type { FoodLogEntry, ExerciseLogEntry } from './food-exercise-types';
 import type { HistoryEntry, VFBreakdown } from './health-service';
 
 /** Sex-averaged Mifflin–St Jeor resting metabolic rate (kcal/day). */
 export function estimateBMR(weightKg = 80, heightCm = 175, age = 40): number {
-  return Math.round(10 * weightKg + 6.25 * heightCm - 5 * age - 78);
+  return estimateBmrKcal(weightKg, heightCm, age);
 }
 
 /** Estimate total daily burn for a day with no device data: RMR × light-activity + logged exercise. */

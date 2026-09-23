@@ -97,6 +97,7 @@ export const SCORING_RELEASES: ScoringRelease[] = [
     tagline: 'The books balance — glycogen is float, not profit.',
     shipped: [
       'Fat credit = energy deficit − muscle lost, capped at the Alpert ceiling',
+      'Burn credited conservatively: BMR in full, device activity above it at 50% — the score leans on what you eat',
       'Glycogen is neutral: the 30% glycogen credit is retired (maintenance days no longer score ~+18)',
       'A carb refeed after a hard session costs nothing — carbs refill glycogen before any fat is stored',
       'Per-slot fat-storage cap and net-surplus penalty retired — a surplus scores negative directly',

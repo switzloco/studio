@@ -30,6 +30,13 @@ export interface VFBreakdown {
   totalFatStored?: number;
   muscleKcal?: number;
   caloriesOutEstimated?: boolean;     // true when caloriesOut was BMR-estimated (no device data for that day)
+  // ── v3.2 energy balance ──
+  bmrKcal?: number;                   // estimated resting burn, counted in full
+  scoredCaloriesOut?: number;         // BMR + activity-credited share of the device burn above it
+  activityCreditFraction?: number;    // share of above-BMR burn the score counted
+  fatBalanceKcal?: number;            // min(Alpert, deficit − muscle): fat the score credited
+  deficitBeyondAlpertKcal?: number;   // deficit past the Alpert ceiling, not credited as fat
+  glycogenNetKcal?: number;           // informational only
   // ── Alcohol, v3.1 (counterfactual clearance-hour debit) ──
   alcoholAcutePenalty?: number;       // ≤ 0; the whole session, charged to its own day
   alcoholSuppressionHours?: number;   // total clearance time the session bought

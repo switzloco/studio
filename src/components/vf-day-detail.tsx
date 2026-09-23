@@ -83,8 +83,37 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
 
         {hasBreakdown ? (
           <div className="space-y-3">
-            {/* Alpert math — v2 shows fat burned ÷ (70% of Alpert); falls back to legacy display */}
-            {b.totalFatBurned != null && b.pointsDenominator != null ? (
+            {/* Alpert math — v3.2 energy balance; v2–v3.1 fat burned ÷ (70% of Alpert); then legacy */}
+            {b.fatBalanceKcal != null && b.pointsDenominator != null && b.deficit != null ? (
+              <div className="p-4 rounded-xl bg-slate-50 ring-1 ring-slate-200 space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Alpert Score Math</p>
+                {b.scoredCaloriesOut != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Burn counted: {b.scoredCaloriesOut.toLocaleString()} kcal
+                    {b.bmrKcal != null && b.activityCreditFraction != null
+                      ? ` (resting ${b.bmrKcal.toLocaleString()} + ${Math.round(b.activityCreditFraction * 100)}% of ${Math.max(0, b.caloriesOut - b.bmrKcal).toLocaleString()} activity)`
+                      : ''}
+                    {' '}− {b.caloriesIn.toLocaleString()} eaten = {Math.abs(b.deficit).toLocaleString()} kcal {b.deficit >= 0 ? 'deficit' : 'surplus'}
+                  </p>
+                )}
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-bold text-foreground">{b.fatBalanceKcal.toLocaleString()} kcal fat</span>
+                  <span className="text-xs text-muted-foreground">÷ {b.pointsDenominator.toLocaleString()} kcal (70% Alpert) × 100</span>
+                  <span className="text-sm font-black text-foreground">= {entry.gain > 0 ? '+' : ''}{entry.gain} pts</span>
+                </div>
+                {(b.muscleKcal ?? 0) > 0 && (
+                  <p className="text-xs text-muted-foreground">{b.muscleKcal!.toLocaleString()} kcal came from muscle — not counted as fat, and penalized</p>
+                )}
+                {(b.deficitBeyondAlpertKcal ?? 0) > 0 && (
+                  <p className="text-xs text-amber-700">{b.deficitBeyondAlpertKcal!.toLocaleString()} kcal of deficit ran past the {b.alpertNumber?.toLocaleString()} kcal Alpert ceiling — that part is glycogen or lean tissue, not fat</p>
+                )}
+                <div className="h-1.5 bg-slate-200 rounded-full">
+                  {entry.gain > 0 && (
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, entry.gain)}%` }} />
+                  )}
+                </div>
+              </div>
+            ) : b.totalFatBurned != null && b.pointsDenominator != null ? (
               <div className="p-4 rounded-xl bg-slate-50 ring-1 ring-slate-200 space-y-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Alpert Score Math</p>
                 <div className="flex flex-wrap items-baseline gap-2">

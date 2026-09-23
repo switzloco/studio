@@ -309,6 +309,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       seedOilMeals: 0,   // not auto-tracked; user tells CFO coach
       weightKg: data.weightKg,
       bodyFatPct: data.bodyFatPct,
+      heightCm: data.heightCm,
       foodLogs: todayFoodLogs ?? undefined,
       exerciseLogs: todayExerciseLogs ?? undefined,
       fitbitActivities,
