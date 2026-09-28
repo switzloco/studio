@@ -10,11 +10,14 @@ import { Label } from '@/components/ui/label';
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
 import type { FitbitActivity } from '@/lib/health-service';
-import { runMetabolicSimulation } from '@/lib/metabolic-engine';
+import { runMetabolicSimulation, ACTIVITY_CREDIT_FRACTION } from '@/lib/metabolic-engine';
 
 interface DashboardChartsProps {
     caloriesIn: number;
+    /** Burn the VF score counts: BMR in full + ACTIVITY_CREDIT_FRACTION of device burn above it. */
     caloriesOut: number;
+    /** Raw device-reported burn, shown for reference next to the counted figure. */
+    deviceCaloriesOut?: number;
     carbsG: number;
     foodLogs?: FoodLogEntry[];
     exerciseLogs?: ExerciseLogEntry[];
@@ -284,7 +287,7 @@ function buildGlycogenCurves(
 }
 
 export function DashboardCharts({
-    caloriesIn = 0, caloriesOut = 2000, carbsG = 0,
+    caloriesIn = 0, caloriesOut = 2000, deviceCaloriesOut, carbsG = 0,
     foodLogs, exerciseLogs,
     morningGlycogenPct = 100,
     weightKg, bodyFatPct,
@@ -311,7 +314,7 @@ export function DashboardCharts({
 
     const calorieData = [
         { name: 'Intake',  value: caloriesIn,        color: '#10b981' },
-        { name: 'Burned',  value: caloriesOut,        color: '#f97316' },
+        { name: 'Counted', value: caloriesOut,        color: '#f97316' },
         { name: 'Deficit', value: Math.abs(deficit),  color: deficit > 0 ? '#ef4444' : '#3b82f6' },
     ];
 
@@ -323,6 +326,7 @@ export function DashboardCharts({
 
         return runMetabolicSimulation({
             caloriesOut,
+            exerciseCreditFraction: ACTIVITY_CREDIT_FRACTION,
             alpertNumber,
             foodLogs,
             exerciseLogs,
@@ -442,8 +446,13 @@ export function DashboardCharts({
                             <p className="text-lg font-black text-emerald-600">{caloriesIn} <span className="text-xs font-medium text-emerald-600/60">kcal</span></p>
                         </div>
                         <div className="text-center">
-                            <p className="text-[10px] font-black uppercase text-muted-foreground">Out</p>
+                            <p className="text-[10px] font-black uppercase text-muted-foreground">Out (counted)</p>
                             <p className="text-lg font-black text-orange-500">{Math.round(caloriesOut)} <span className="text-xs font-medium text-orange-500/60">kcal</span></p>
+                            {deviceCaloriesOut != null && Math.round(deviceCaloriesOut) !== Math.round(caloriesOut) && (
+                                <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">
+                                    of {Math.round(deviceCaloriesOut).toLocaleString()} measured · {Math.round(ACTIVITY_CREDIT_FRACTION * 100)}% activity credit
+                                </p>
+                            )}
                             {isDeviceVerified && connectedDevice === 'withings' && (
                                 <p className="text-[8px] font-bold text-muted-foreground/60 mt-0.5">Withings +5% adj.</p>
                             )}
