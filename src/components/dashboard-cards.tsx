@@ -15,7 +15,7 @@ import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
 import { computeAlpertPace } from '@/lib/alpert-pace';
-import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal } from '@/lib/metabolic-engine';
+import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, estimateBmrKcal, creditedCaloriesOut, ACTIVITY_CREDIT_FRACTION } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
@@ -288,7 +288,14 @@ const WithingsLogo = ({ className }: { className?: string }) => (
 
   // Alpert daily score
   const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
-  const alpertDeficit = dailyCaloriesOut - dailyCaloriesIn;
+  // The burn the score actually counts (BMR in full + ACTIVITY_CREDIT_FRACTION of
+  // device burn above it) — same inputs as calculateDailyVFScore, so every number
+  // and chart on the dashboard lines up with the score instead of the raw device figure.
+  const bmrKcal = estimateBmrKcal(data?.weightKg, data?.heightCm, prefs?.profile?.age);
+  // Past days: use the figure the stored score was computed with (pre-v3.2 entries lack it).
+  const scoredCaloriesOut = historyEntry?.breakdown?.scoredCaloriesOut
+    ?? creditedCaloriesOut(dailyCaloriesOut, bmrKcal);
+  const alpertDeficit = scoredCaloriesOut - dailyCaloriesIn;
 
   // For past days use stored score; for today run the 5-rule scoring engine.
   // Returns null when no food has been logged yet (avoid misleading estimates).
@@ -311,6 +318,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       weightKg: data.weightKg,
       bodyFatPct: data.bodyFatPct,
       heightCm: data.heightCm,
+      age: prefs?.profile?.age,
       foodLogs: todayFoodLogs ?? undefined,
       exerciseLogs: todayExerciseLogs ?? undefined,
       fitbitActivities,
@@ -318,7 +326,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     return result.score;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
-      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities]);
+      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age]);
 
   // Alpert pace — warn when today's deficit is running past the daily fat ceiling.
   // Fires on fasted days too (nothing logged); see computeAlpertPace.
@@ -338,7 +346,8 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     if (!data || dailyCaloriesOut <= 0) return null;
     const muscleMax = computeMuscleGlycogenMaxKcal(data.weightKg, data.bodyFatPct);
     return runMetabolicSimulation({
-      caloriesOut: dailyCaloriesOut,
+      caloriesOut: scoredCaloriesOut,
+      exerciseCreditFraction: ACTIVITY_CREDIT_FRACTION,
       alpertNumber,
       foodLogs: todayFoodLogs ?? [],
       exerciseLogs: todayExerciseLogs ?? [],
@@ -348,7 +357,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       morningGlycogenPct,
       hasCreatine: prefs?.profile?.hasCreatine,
     });
-  }, [data, dailyCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
+  }, [data, scoredCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
 
   const nowSlot = React.useMemo(() => {
     if (!isViewingToday) return null;
@@ -828,7 +837,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
                 <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0
                   ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}`
                   : isViewingToday && dailyCaloriesOut > 0
-                    ? `${dailyCaloriesOut.toLocaleString()} kcal deficit · no food logged`
+                    ? `${scoredCaloriesOut.toLocaleString()} kcal deficit · no food logged`
                     : 'Log food to calculate'}</span>
                 <span>Max burn: {alpertNumber.toLocaleString()} kcal</span>
               </div>
@@ -999,7 +1008,8 @@ const WithingsLogo = ({ className }: { className?: string }) => (
         {showAdvancedMetabolic && (
           <DashboardCharts
             caloriesIn={dailyCaloriesIn}
-            caloriesOut={dailyCaloriesOut}
+            caloriesOut={scoredCaloriesOut}
+            deviceCaloriesOut={dailyCaloriesOut}
             carbsG={dailyCarbsG}
             foodLogs={todayFoodLogs ?? undefined}
             exerciseLogs={todayExerciseLogs ?? undefined}
