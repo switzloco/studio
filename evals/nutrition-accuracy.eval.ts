@@ -22,8 +22,6 @@
  */
 import './load-env'; // MUST be first — loads .env.local before genkit/Phoenix init
 import { ai } from '@/ai/genkit';
-import { flushPhoenixTraces } from '@/ai/observability/phoenix';
-import { recordReasoningSpan } from '@/ai/observability/span';
 import { z } from 'genkit';
 
 /** Ground-truth macro references (per the stated portion). Edit freely. */
@@ -90,37 +88,33 @@ async function run() {
   let calErrSum = 0, proErrSum = 0;
   const rows: string[] = [];
 
-  await recordReasoningSpan('eval.nutrition_accuracy.suite', { dataset_size: DATASET.length, tolerance_pct: TOLERANCE_PCT }, async () => {
-    for (const c of DATASET) {
-      const result = await recordReasoningSpan('eval.nutrition_accuracy', { meal: c.meal, expected: c.expected }, async () => {
-        const predicted = await estimateMacros(c.meal);
-        const calOk = withinTolerance(c.expected.calories, predicted.calories);
-        const proOk = withinTolerance(c.expected.proteinG, predicted.proteinG);
-        const calErr = pctError(c.expected.calories, predicted.calories);
-        const proErr = pctError(c.expected.proteinG, predicted.proteinG);
-        return {
-          predicted,
-          passed: calOk && proOk,
-          caloriesPass: calOk,
-          proteinPass: proOk,
-          calorieErrorPct: calErr,
-          proteinErrorPct: proErr,
-        };
-      });
+  for (const c of DATASET) {
+    const predicted = await estimateMacros(c.meal);
+    const calOk = withinTolerance(c.expected.calories, predicted.calories);
+    const proOk = withinTolerance(c.expected.proteinG, predicted.proteinG);
+    const calErr = pctError(c.expected.calories, predicted.calories);
+    const proErr = pctError(c.expected.proteinG, predicted.proteinG);
+    const result = {
+      predicted,
+      passed: calOk && proOk,
+      caloriesPass: calOk,
+      proteinPass: proOk,
+      calorieErrorPct: calErr,
+      proteinErrorPct: proErr,
+    };
 
-      if (result.caloriesPass) calPass++;
-      if (result.proteinPass) proPass++;
-      if (result.passed) allPass++;
-      calErrSum += result.calorieErrorPct;
-      proErrSum += result.proteinErrorPct;
+    if (result.caloriesPass) calPass++;
+    if (result.proteinPass) proPass++;
+    if (result.passed) allPass++;
+    calErrSum += result.calorieErrorPct;
+    proErrSum += result.proteinErrorPct;
 
-      const mark = result.passed ? '✅' : '❌';
-      rows.push(
-        `${mark} ${c.meal.padEnd(38)} cal ${String(result.predicted.calories).padStart(4)} (exp ${c.expected.calories}, ${result.calorieErrorPct}% off) | ` +
-        `protein ${String(result.predicted.proteinG).padStart(4)}g (exp ${c.expected.proteinG}g, ${result.proteinErrorPct}% off)`,
-      );
-    }
-  });
+    const mark = result.passed ? '✅' : '❌';
+    rows.push(
+      `${mark} ${c.meal.padEnd(38)} cal ${String(result.predicted.calories).padStart(4)} (exp ${c.expected.calories}, ${result.calorieErrorPct}% off) | ` +
+      `protein ${String(result.predicted.proteinG).padStart(4)}g (exp ${c.expected.proteinG}g, ${result.proteinErrorPct}% off)`,
+    );
+  }
 
   const n = DATASET.length;
   // eslint-disable-next-line no-console
@@ -132,12 +126,6 @@ async function run() {
     `Calorie accuracy:  ${calPass}/${n} pass · mean abs error ${Math.round((calErrSum / n) * 10) / 10}%\n` +
     `Protein accuracy:  ${proPass}/${n} pass · mean abs error ${Math.round((proErrSum / n) * 10) / 10}%\n`,
   );
-
-  await flushPhoenixTraces();
-  if (process.env.PHOENIX_ENABLED === 'true') {
-    // eslint-disable-next-line no-console
-    console.log(`📊 Traces sent to Phoenix project "${process.env.PHOENIX_PROJECT_NAME ?? 'cfo-fitness'}" — open it to see per-case spans.\n`);
-  }
 }
 
 run().catch((err) => {

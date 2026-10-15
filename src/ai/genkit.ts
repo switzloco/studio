@@ -1,9 +1,3 @@
-// Phoenix/OpenTelemetry instrumentation must be registered before Genkit so its
-// spans flow to the configured exporter. This import is a no-op when
-// PHOENIX_ENABLED !== 'true'. (Next.js also wires it via instrumentation.ts;
-// importing here covers the Genkit dev server / standalone flow runs.)
-import '@/ai/observability/phoenix';
-
 import {genkit} from 'genkit';
 import {googleAI} from '@genkit-ai/google-genai';
 

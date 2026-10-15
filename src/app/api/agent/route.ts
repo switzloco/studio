@@ -8,8 +8,7 @@ import { CFO_MODEL } from '@/ai/genkit';
  * This is the public, server-to-server invocation surface that Vertex AI Agent
  * Builder / Agent Engine (or any A2A-style orchestrator) registers as the
  * agent's reasoning backend. It wraps the same Genkit reasoning loop the app
- * uses — Gemini 3 Flash + the full CFO tool suite, with Arize Phoenix tracing
- * when enabled — behind a stable JSON contract.
+ * uses — Gemini 3 Flash + the full CFO tool suite — behind a stable JSON contract.
  *
  *   GET  /api/agent   → the agent card (capabilities/skills) for discovery.
  *   POST /api/agent   → invoke the agent.
@@ -40,7 +39,7 @@ function agentCard() {
       'A health-and-fitness coaching agent ("the CFO") that plans and executes ' +
       'multi-step coaching tasks: logging nutrition and workouts, scoring a ' +
       "daily visceral-fat metric, and auditing its own reasoning. Built with " +
-      'Gemini 3 and instrumented with Arize Phoenix for trace-level oversight.',
+      'Gemini 3.',
     version: '1.0.0',
     model: CFO_MODEL,
     capabilities: { streaming: false, toolUse: true, stateful: true },
@@ -48,7 +47,6 @@ function agentCard() {
       { id: 'log_nutrition', name: 'Log nutrition', description: 'Parse a meal and log macros to the user ledger.' },
       { id: 'log_exercise', name: 'Log exercise', description: 'Log a workout with wearable-accuracy adjustment.' },
       { id: 'score_daily_vf', name: 'Score the day', description: 'Run the metabolic engine to produce the daily VF score.' },
-      { id: 'inspect_reasoning_trace', name: 'Audit reasoning', description: 'Pull recorded Phoenix traces and explain how a score was produced.' },
     ],
     endpoints: { invoke: '/api/agent' },
   };

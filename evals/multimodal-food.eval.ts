@@ -25,8 +25,6 @@ import './load-env'; // MUST be first — loads .env.local before genkit/Phoenix
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { ai } from '@/ai/genkit';
-import { flushPhoenixTraces } from '@/ai/observability/phoenix';
-import { recordReasoningSpan } from '@/ai/observability/span';
 import { z } from 'genkit';
 
 const FIXTURES_DIR = join(process.cwd(), 'evals', 'fixtures');
@@ -113,53 +111,40 @@ async function run() {
   let scored = 0, passed = 0;
   const rows: string[] = [];
 
-  await recordReasoningSpan('eval.multimodal_food.suite', { image_count: imageFiles.length }, async () => {
-    for (const file of imageFiles) {
-      const entry = manifestByFile.get(file);
-      const label = entry?.label ?? basename(file);
-      const dataUri = toDataUri(join(FIXTURES_DIR, file));
+  for (const file of imageFiles) {
+    const entry = manifestByFile.get(file);
+    const label = entry?.label ?? basename(file);
+    const dataUri = toDataUri(join(FIXTURES_DIR, file));
 
-      const result = await recordReasoningSpan(
-        'eval.multimodal_food',
-        { file, label, expectFood: entry?.expectFood ?? null },
-        async () => {
-          const verdict = await classifyImage(dataUri);
-          // Scored only when the manifest says what to expect.
-          const isScored = entry !== undefined;
-          const pass = isScored ? verdict.isFood === entry!.expectFood : null;
-          return { verdict, isScored, pass };
-        },
+    const verdict = await classifyImage(dataUri);
+    // Scored only when the manifest says what to expect.
+    const isScored = entry !== undefined;
+    const pass = isScored ? verdict.isFood === entry!.expectFood : null;
+    const result = { verdict, isScored, pass };
+
+    const v = result.verdict;
+    if (result.isScored) {
+      scored++;
+      if (result.pass) passed++;
+      const mark = result.pass ? '✅' : '❌';
+      rows.push(
+        `${mark} ${label.padEnd(26)} → isFood=${String(v.isFood).padEnd(5)} ` +
+        `(${v.itemName}) ${v.isFood ? `~${v.calories}cal/${v.proteinG}gP` : 'no macros'}`,
       );
-
-      const v = result.verdict;
-      if (result.isScored) {
-        scored++;
-        if (result.pass) passed++;
-        const mark = result.pass ? '✅' : '❌';
-        rows.push(
-          `${mark} ${label.padEnd(26)} → isFood=${String(v.isFood).padEnd(5)} ` +
-          `(${v.itemName}) ${v.isFood ? `~${v.calories}cal/${v.proteinG}gP` : 'no macros'}`,
-        );
-      } else {
-        // Exploratory — no expected label, just show what it said.
-        rows.push(
-          `🔎 ${label.padEnd(26)} → isFood=${String(v.isFood).padEnd(5)} ` +
-          `(${v.itemName}) ${v.isFood ? `~${v.calories}cal/${v.proteinG}gP` : 'no macros'} — "${v.note}"`,
-        );
-      }
+    } else {
+      // Exploratory — no expected label, just show what it said.
+      rows.push(
+        `🔎 ${label.padEnd(26)} → isFood=${String(v.isFood).padEnd(5)} ` +
+        `(${v.itemName}) ${v.isFood ? `~${v.calories}cal/${v.proteinG}gP` : 'no macros'} — "${v.note}"`,
+      );
     }
-  });
+  }
 
   console.log(rows.join('\n'));
   if (scored > 0) {
     console.log(`\n── Summary ───────────────────\nGuardrail/verdict accuracy: ${passed}/${scored} (${Math.round((passed / scored) * 100)}%)\n`);
   } else {
     console.log(`\n(No manifest labels — ran ${imageFiles.length} image(s) exploratory. Add manifest.json to score pass/fail.)\n`);
-  }
-
-  await flushPhoenixTraces();
-  if (process.env.PHOENIX_ENABLED === 'true') {
-    console.log(`📊 Traces sent to Phoenix project "${process.env.PHOENIX_PROJECT_NAME ?? 'cfo-fitness'}".\n`);
   }
 }
 
