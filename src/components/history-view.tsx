@@ -2,12 +2,14 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Briefcase, TrendingUp, AlertCircle, History as HistoryIcon, Dumbbell, Timer, ChevronDown, ArrowUpDown, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Briefcase, TrendingUp, AlertCircle, History as HistoryIcon, Dumbbell, Timer, ChevronDown, ArrowUpDown, Download, Trash2, Loader2 } from "lucide-react";
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 import { fetchAllLedger, ledgerToCSV, ledgerToJSON, downloadTextFile } from '@/lib/ledger-export';
-import { HealthData, HistoryEntry } from '@/lib/health-service';
+import { HealthData, HistoryEntry, healthService } from '@/lib/health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from '@/lib/food-exercise-types';
+import { useToast } from '@/hooks/use-toast';
 import { VFScoreChart } from './vf-score-chart';
 import { VFHeatmap } from './vf-heatmap';
 import { VFDayDetail } from './vf-day-detail';
@@ -84,6 +86,7 @@ function occurrenceMillis(date: string, time?: string, ts?: unknown): number {
 export function HistoryView() {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
 
   const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -91,6 +94,7 @@ export function HistoryView() {
   const [sortMode, setSortMode] = useState<SortMode>('latest');
   const [ledgerLimit, setLedgerLimit] = useState(20);
   const [exporting, setExporting] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const handleExport = async (format: 'csv' | 'json') => {
     if (!user || exporting) return;
@@ -246,6 +250,36 @@ export function HistoryView() {
 
   const toggleLedgerExpand = (id: string) => {
     setExpandedId(prev => prev === id ? null : id);
+  };
+
+  const handleRemoveLedgerEntry = async (entry: LedgerEntry) => {
+    if (!user || removingId) return;
+    setRemovingId(entry.id);
+    try {
+      const todayIso = new Date().toLocaleDateString('en-CA');
+      if (entry.type === 'food') {
+        await healthService.setFoodEntryIgnored(db, user.uid, entry.id, true);
+        if (entry.date === todayIso && foodLogs) {
+          const remaining = foodLogs.filter((f) => !f.ignored && f.id !== entry.id && f.date === todayIso);
+          await healthService.updateHealthData(db, user.uid, {
+            dailyCaloriesIn: remaining.reduce((s, f) => s + (f.calories || 0), 0),
+            dailyProteinG: remaining.reduce((s, f) => s + (f.proteinG || 0), 0),
+            dailyCarbsG: remaining.reduce((s, f) => s + (f.carbsG || 0), 0),
+          });
+        }
+      } else if (entry.type === 'exercise') {
+        await healthService.setExerciseEntryIgnored(db, user.uid, entry.id, true);
+      }
+      toast({
+        title: `Removed "${entry.name}"`,
+        description: `Entry removed from ${entry.date} ledger.`,
+      });
+    } catch (err) {
+      console.error('[handleRemoveLedgerEntry] Failed:', err);
+      toast({ variant: 'destructive', title: 'Remove Failed', description: 'Could not remove ledger entry.' });
+    } finally {
+      setRemovingId(null);
+    }
   };
 
   if (isHealthLoading || isLogsLoading) {
@@ -479,7 +513,25 @@ export function HistoryView() {
                               {(entry.alcoholDrinks ?? 0) > 0 && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{entry.alcoholDrinks} drink{entry.alcoholDrinks! > 1 ? 's' : ''}</span>}
                               {entry.hasSeedOils && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Seed oils</span>}
                             </div>
-                            <div className="flex justify-end pt-1">
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={removingId === entry.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveLedgerEntry(entry);
+                                }}
+                                className="h-7 px-2.5 text-[10px] font-bold uppercase text-red-600 hover:bg-red-50 hover:text-red-700"
+                              >
+                                {removingId === entry.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3 mr-1" />
+                                )}
+                                Remove Entry
+                              </Button>
                               <ShareMealButton foodLogIds={[entry.id]} mealName={entry.name} />
                             </div>
                           </div>
@@ -513,11 +565,31 @@ export function HistoryView() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex flex-wrap gap-2 text-[11px] font-medium text-muted-foreground">
-                              {entry.category && <span className="bg-muted/40 px-2 py-0.5 rounded-full capitalize">{entry.category}</span>}
-                              {entry.estimatedCaloriesBurned != null && <span className="bg-muted/40 px-2 py-0.5 rounded-full">~{entry.estimatedCaloriesBurned} cal burned</span>}
-                              {entry.pointsDelta != null && <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">+{entry.pointsDelta} pts</span>}
-                              {entry.notes && <span className="bg-muted/40 px-2 py-0.5 rounded-full">{entry.notes}</span>}
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
+                              <div className="flex flex-wrap gap-2">
+                                {entry.category && <span className="bg-muted/40 px-2 py-0.5 rounded-full capitalize">{entry.category}</span>}
+                                {entry.estimatedCaloriesBurned != null && <span className="bg-muted/40 px-2 py-0.5 rounded-full">~{entry.estimatedCaloriesBurned} cal burned</span>}
+                                {entry.pointsDelta != null && <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">+{entry.pointsDelta} pts</span>}
+                                {entry.notes && <span className="bg-muted/40 px-2 py-0.5 rounded-full">{entry.notes}</span>}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={removingId === entry.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveLedgerEntry(entry);
+                                }}
+                                className="h-7 px-2.5 text-[10px] font-bold uppercase text-red-600 hover:bg-red-50 hover:text-red-700"
+                              >
+                                {removingId === entry.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3 mr-1" />
+                                )}
+                                Remove Entry
+                              </Button>
                             </div>
                           </div>
                         )}

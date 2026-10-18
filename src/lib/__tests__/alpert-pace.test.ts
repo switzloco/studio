@@ -41,12 +41,48 @@ describe('computeEatRunway', () => {
     expect(slotToTimeLabel(34)).toBe('2:30 PM');
   });
 
-  it('computes Alpert floor and 100-pt target intake accurately', () => {
+  it('computes calories and time until Alpert breach plus EOD floor', () => {
+    // At 2:00 PM (14h), burned 1,200 kcal, eaten 200 kcal, Alpert limit 1,200 kcal
+    // Current deficit = 1,000 kcal -> 200 kcal until Alpert breach
+    const runway = computeEatRunway({
+      caloriesIn: 200,
+      scoredCaloriesOut: 1200,
+      alpertNumber: 1200,
+      hoursElapsed: 14,
+      proteinG: 40,
+      proteinGoal: 150,
+      bmrKcal: 1800,
+    });
+    expect(runway.currentDeficitKcal).toBe(1000);
+    expect(runway.kcalUntilAlpertBreach).toBe(200);
+    expect(runway.hoursUntilAlpertBreach).toBeGreaterThan(2);
+    expect(runway.alpertBreachTimeLabel).toBe('4:20 PM');
+    expect(runway.status).toBe('eat_soon');
+    expect(runway.proteinToGoG).toBe(110);
+  });
+
+  it('flags immediate Alpert breach when current deficit exceeds alpertNumber', () => {
+    const runway = computeEatRunway({
+      caloriesIn: 0,
+      scoredCaloriesOut: 1400,
+      alpertNumber: 1150,
+      hoursElapsed: 14.5,
+      proteinG: 0,
+      proteinGoal: 150,
+    });
+    expect(runway.kcalUntilAlpertBreach).toBe(-250);
+    expect(runway.hoursUntilAlpertBreach).toBe(0);
+    expect(runway.alpertBreachTimeLabel).toBe('Now');
+    expect(runway.status).toBe('eat_now');
+    expect(runway.headline).toContain('250');
+  });
+
+  it('computes EOD Alpert floor and 100-pt target intake accurately at end of day', () => {
     const runway = computeEatRunway({
       caloriesIn: 600,
       scoredCaloriesOut: 2500,
       alpertNumber: 1500,
-      hoursElapsed: 11,
+      hoursElapsed: 24,
       proteinG: 80,
       proteinGoal: 160,
     });
@@ -59,8 +95,8 @@ describe('computeEatRunway', () => {
 
   it('flags tight protein window when too many meals remain before 8:30 PM', () => {
     const runway = computeEatRunway({
-      caloriesIn: 500,
-      scoredCaloriesOut: 2200,
+      caloriesIn: 1200,
+      scoredCaloriesOut: 2000,
       alpertNumber: 1500,
       hoursElapsed: 16, // 4:00 PM -> 4.5h until 8:30 PM
       proteinG: 20,

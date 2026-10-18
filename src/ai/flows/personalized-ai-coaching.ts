@@ -658,6 +658,7 @@ const saveFoodNicknameTool = ai.defineTool(
       totalCarbsG: input.totalCarbsG,
       totalFatG: input.totalFatG,
       meal: input.meal,
+      lastUsedAt: Date.now(),
     };
     await healthService.updateUserPreferences(firestore, input.userId, { foodNicknames: existing });
     return `Nickname saved: "${input.nickname}" — ${input.description}. The client can now say "${input.nickname}" to quick-log this meal.`;
@@ -681,11 +682,19 @@ const recallFoodNicknameTool = ai.defineTool(
     const key = input.nickname.toLowerCase();
 
     // Try exact match first, then fuzzy
-    if (nicknames[key]) return nicknames[key];
+    if (nicknames[key]) {
+      const updated = { ...nicknames, [key]: { ...nicknames[key], lastUsedAt: Date.now() } };
+      await healthService.updateUserPreferences(firestore, input.userId, { foodNicknames: updated });
+      return updated[key];
+    }
 
     // Try partial match
     for (const [k, v] of Object.entries(nicknames)) {
-      if (k.includes(key) || key.includes(k)) return v;
+      if (k.includes(key) || key.includes(k)) {
+        const updated = { ...nicknames, [k]: { ...v, lastUsedAt: Date.now() } };
+        await healthService.updateUserPreferences(firestore, input.userId, { foodNicknames: updated });
+        return updated[k];
+      }
     }
 
     // List available nicknames if no match

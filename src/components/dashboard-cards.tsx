@@ -31,6 +31,9 @@ import {
   History,
   CheckCircle2,
   Sparkles,
+  Trash2,
+  Search,
+  X,
 } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
@@ -51,7 +54,7 @@ import {
 import { CURRENT_SCORING_RELEASE, inferScoringRelease } from '@/lib/scoring-releases';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, estimateBmrKcal, creditedCaloriesOut, ACTIVITY_CREDIT_FRACTION } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
-import { doc, collection, query, where, limit } from 'firebase/firestore';
+import { doc, collection, query, where, limit, orderBy, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
@@ -159,6 +162,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const [quickFat, setQuickFat] = React.useState('');
   const [quickMeal, setQuickMeal] = React.useState<'breakfast' | 'lunch' | 'dinner' | 'snack'>('lunch');
   const [isLoggingQuick, setIsLoggingQuick] = React.useState(false);
+  const [showAllNicknames, setShowAllNicknames] = React.useState(false);
+  const [nicknameQuery, setNicknameQuery] = React.useState('');
+  const [previewNickKey, setPreviewNickKey] = React.useState<string | null>(null);
+  const [removingFoodId, setRemovingFoodId] = React.useState<string | null>(null);
 
   // Zero-AI Score Lock state
   const [scoreLockOpen, setScoreLockOpen] = React.useState(false);
@@ -218,6 +225,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, selectedDateStr]
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
+
+  // Recent 60 food logs across all days so we can sort saved Tickers by most recently logged
+  const recentFoodLogQuery = useMemoFirebase(
+    () => user ? query(
+      collection(db, 'users', user.uid, 'food_log'),
+      orderBy('timestamp', 'desc'),
+      limit(60)
+    ) : null,
+    [db, user]
+  );
+  const { data: recentFoodLogs } = useCollection<FoodLogEntry>(recentFoodLogQuery);
 
   const exerciseLogQuery = useMemoFirebase(
     () => user ? query(
@@ -380,10 +398,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     });
   }, [data, dailyCaloriesOut, scoredCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
 
-  // 3-Signal "Should I Eat Now?" Runway
+  // 3-Signal "Should I Eat Now?" & Alpert Breach Runway
   const eatRunway = React.useMemo(() => {
     const now = new Date();
-    const hoursElapsed = isViewingToday ? (now.getHours() + now.getMinutes() / 60) : 20;
+    const hoursElapsed = isViewingToday ? (now.getHours() + now.getMinutes() / 60) : 24;
     return computeEatRunway({
       caloriesIn: dailyCaloriesIn,
       scoredCaloriesOut,
@@ -391,9 +409,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       hoursElapsed,
       proteinG: dailyProteinG,
       proteinGoal,
+      bmrKcal,
       slots: simulationResult?.slots,
     });
-  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, simulationResult?.slots]);
+  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, bmrKcal, simulationResult?.slots]);
 
   const alpertPace = React.useMemo(() => {
     if (!data || !isViewingToday) return null;
@@ -495,7 +514,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   };
 
   // Zero-AI Quick Log handlers
-  const handleQuickLogNickname = async (nick: FoodNickname) => {
+  const handleQuickLogNickname = async (nickKey: string, nick: FoodNickname) => {
     if (!user || isLoggingQuick) return;
     setIsLoggingQuick(true);
     try {
@@ -521,6 +540,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           dailyCarbsG: dailyCarbsG + (nick.totalCarbsG || 0),
         });
       }
+      if (prefs?.foodNicknames) {
+        const updatedNicknames = {
+          ...prefs.foodNicknames,
+          [nickKey]: { ...nick, lastUsedAt: Date.now() },
+        };
+        await healthService.updateUserPreferences(db, user.uid, { foodNicknames: updatedNicknames });
+      }
       toast({
         title: `Logged "${nick.nickname}" (Zero AI)`,
         description: `+${nick.totalCalories} kcal · +${nick.totalProteinG}g protein added to ${selectedDateStr}.`,
@@ -530,6 +556,35 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       toast({ variant: 'destructive', title: 'Quick Log Failed', description: 'Could not save food entry.' });
     } finally {
       setIsLoggingQuick(false);
+    }
+  };
+
+  // Zero-AI 1-Tap Food Entry Removal (for accidental clicks or duplicates)
+  const handleRemoveFoodEntry = async (entry: FoodLogEntry) => {
+    if (!user || !entry.id || removingFoodId) return;
+    setRemovingFoodId(entry.id);
+    try {
+      await healthService.setFoodEntryIgnored(db, user.uid, entry.id, true);
+      const remaining = (todayFoodLogs ?? []).filter((e) => !e.ignored && e.id !== entry.id);
+      if (isViewingToday) {
+        const newCal = remaining.reduce((s, e) => s + (e.calories || 0), 0);
+        const newProt = remaining.reduce((s, e) => s + (e.proteinG || 0), 0);
+        const newCarbs = remaining.reduce((s, e) => s + (e.carbsG || 0), 0);
+        await healthService.updateHealthData(db, user.uid, {
+          dailyCaloriesIn: newCal,
+          dailyProteinG: newProt,
+          dailyCarbsG: newCarbs,
+        });
+      }
+      toast({
+        title: `Removed "${entry.name}"`,
+        description: `-${entry.calories} kcal · -${entry.proteinG}g protein removed from ${selectedDateStr}.`,
+      });
+    } catch (err) {
+      console.error('[handleRemoveFoodEntry] Failed:', err);
+      toast({ variant: 'destructive', title: 'Remove Failed', description: 'Could not remove food entry.' });
+    } finally {
+      setRemovingFoodId(null);
     }
   };
 
@@ -721,7 +776,61 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const selectedDayVintage = inferScoringRelease(selectedHistoryEntry ?? { isoDate: selectedDateStr });
   const selectedDayNote = getEffectiveDayNote(selectedHistoryEntry ?? { isoDate: selectedDateStr });
-  const nicknameList = Object.values(prefs?.foodNicknames ?? {});
+
+  const activeTodayFoodLogs = (todayFoodLogs ?? []).filter((e) => !e.ignored);
+
+  const sortedNicknames = (() => {
+    const entries = Object.entries(prefs?.foodNicknames ?? {});
+    const recentActive = (recentFoodLogs ?? []).filter((f) => !f.ignored);
+
+    const withRecency = entries.map(([key, nick]) => {
+      let latestLogMs = nick.lastUsedAt ?? 0;
+      const nickLower = (nick.nickname || key).toLowerCase();
+      const descLower = (nick.description || '').toLowerCase();
+
+      for (const f of recentActive) {
+        const fname = (f.name || '').toLowerCase();
+        const nameMatches =
+          (nickLower && fname.includes(nickLower)) ||
+          (descLower && descLower.length >= 5 && fname.includes(descLower));
+        const macroMatches =
+          nick.totalCalories > 0 &&
+          f.calories === nick.totalCalories &&
+          f.proteinG === nick.totalProteinG;
+
+        if (nameMatches || macroMatches) {
+          const tsMs =
+            f.timestamp instanceof Timestamp
+              ? f.timestamp.toMillis()
+              : f.date
+                ? new Date(f.date).getTime()
+                : 0;
+          if (tsMs > latestLogMs) latestLogMs = tsMs;
+        }
+      }
+      return { key, nick, latestLogMs };
+    });
+
+    withRecency.sort((a, b) => {
+      if (b.latestLogMs !== a.latestLogMs) return b.latestLogMs - a.latestLogMs;
+      return (a.nick.nickname || a.key).localeCompare(b.nick.nickname || b.key);
+    });
+
+    const q = nicknameQuery.trim().toLowerCase();
+    if (!q) return withRecency;
+    return withRecency.filter(({ key, nick }) => {
+      const nMatch = (nick.nickname || key).toLowerCase().includes(q);
+      const dMatch = (nick.description || '').toLowerCase().includes(q);
+      const iMatch = nick.items?.some((it) => it.toLowerCase().includes(q));
+      return nMatch || dMatch || iMatch;
+    });
+  })();
+
+  const RECENT_TICKER_LIMIT = 8;
+  const visibleNicknames =
+    showAllNicknames || nicknameQuery.trim().length > 0
+      ? sortedNicknames
+      : sortedNicknames.slice(0, RECENT_TICKER_LIMIT);
 
   const handleConnectFitbit = async () => {
     if (!user) return;
@@ -1136,40 +1245,45 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
             {/* 3-Signal Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Signal 1: Intraday Fuel Tank / Muscle Clock */}
+              {/* Signal 1: Direct Alpert Breach Clock (Calories & Time Until Breach) */}
               <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
-                    1. Intraday Fuel Tank
+                    1. Until Alpert Breach
                   </span>
                   <Clock className="w-3.5 h-3.5 text-emerald-600" />
                 </div>
                 <p className="text-sm font-black text-foreground">
-                  {eatRunway.muscleBurnStartTimeLabel
-                    ? `Muscle risk @ ${eatRunway.muscleBurnStartTimeLabel}`
-                    : 'Protected all day'}
+                  {eatRunway.kcalUntilAlpertBreach <= 0
+                    ? `${Math.abs(eatRunway.kcalUntilAlpertBreach).toLocaleString()} kcal OVER — Eat Now`
+                    : eatRunway.alpertBreachTimeLabel
+                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal · ~${eatRunway.hoursUntilAlpertBreach}h left`
+                      : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer ✓`}
                 </p>
                 <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
-                  Liver buffer: {eatRunway.liverKcalRemaining} kcal
-                  {eatRunway.hoursUntilMuscleBurn !== null ? ` · ~${eatRunway.hoursUntilMuscleBurn}h left` : ''}
+                  {eatRunway.kcalUntilAlpertBreach <= 0
+                    ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
+                    : eatRunway.alpertBreachTimeLabel
+                      ? `Eat by ${eatRunway.alpertBreachTimeLabel} (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
+                      : `Safe past midnight (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`}
                 </p>
               </div>
 
-              {/* Signal 2: Alpert Calorie Floor & 100-Pt Intake Target */}
+              {/* Signal 2: Rest-of-Day Alpert Calorie Floor & 100-Pt Target */}
               <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
-                    2. Alpert Floor & 100-Pt
+                    2. Daily Calorie Plan
                   </span>
                   <Flame className="w-3.5 h-3.5 text-orange-600" />
                 </div>
                 <p className="text-sm font-black text-foreground">
                   {eatRunway.kcalToAlpertFloor > 0
-                    ? `Eat ≥${eatRunway.kcalToAlpertFloor.toLocaleString()} kcal more`
-                    : `Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) cleared ✓`}
+                    ? `Eat ≥${eatRunway.kcalToAlpertFloor.toLocaleString()} kcal before bed`
+                    : `EOD Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) Hit ✓`}
                 </p>
                 <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
-                  100-pt intake: {eatRunway.target100PtIntakeKcal.toLocaleString()} kcal (
+                  100-pt target: {eatRunway.target100PtIntakeKcal.toLocaleString()} kcal (
                   {eatRunway.kcalLeftFor100Pts >= 0
                     ? `${eatRunway.kcalLeftFor100Pts.toLocaleString()} left`
                     : `${Math.abs(eatRunway.kcalLeftFor100Pts).toLocaleString()} over`}
@@ -1211,48 +1325,187 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </Card>
       </div>
 
-      {/* ── ROW 2: Zero-AI Quick Log Bar (Ticker Book + Custom Food Entry, 0 Gemini Calls) ── */}
+      {/* ── ROW 2: Zero-AI Quick Log Bar (Recent Tickers w/ Descriptions + Today's Logged Items w/ Undo) ── */}
       <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
-        <CardContent className="p-3 sm:p-4 space-y-3">
+        <CardContent className="p-4 sm:p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest">
                 Zero-AI Quick Log
               </span>
               <span className="text-[11px] font-bold text-muted-foreground">
-                Log saved Ticker meals or macros directly to Firestore without spending Gemini tokens
+                Recent saved Tickers (tap card to inspect ingredients · tap <span className="text-emerald-700 font-black">+ Log</span> to add)
               </span>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setQuickFoodOpen((v) => !v)}
-              className="h-7 px-2.5 text-[10px] font-black uppercase tracking-wider"
-            >
-              <Plus className="w-3 h-3 mr-1" />
-              {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Macro'}
-            </Button>
+            <div className="flex items-center gap-2">
+              {Object.keys(prefs?.foodNicknames ?? {}).length > RECENT_TICKER_LIMIT && (
+                <div className="relative">
+                  <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Filter tickers..."
+                    value={nicknameQuery}
+                    onChange={(e) => setNicknameQuery(e.target.value)}
+                    className="h-7 pl-7 pr-6 w-36 sm:w-44 text-[11px]"
+                  />
+                  {nicknameQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setNicknameQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setQuickFoodOpen((v) => !v)}
+                className="h-7 px-2.5 text-[10px] font-black uppercase tracking-wider"
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Macro'}
+              </Button>
+            </div>
           </div>
 
-          {nicknameList.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {nicknameList.map((nick) => (
-                <Button
-                  key={nick.nickname}
-                  size="sm"
-                  variant="secondary"
-                  disabled={isLoggingQuick}
-                  onClick={() => handleQuickLogNickname(nick)}
-                  className="h-7 px-2.5 text-[10px] font-bold rounded-lg bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200"
-                  title={`${nick.description}: ${nick.totalCalories} kcal, ${nick.totalProteinG}g P`}
-                >
-                  <Sparkles className="w-3 h-3 mr-1 text-emerald-600" />
-                  {nick.nickname}
-                  <span className="ml-1 opacity-60 text-[9px]">
-                    ({nick.totalCalories} kcal · {nick.totalProteinG}g P)
-                  </span>
-                </Button>
-              ))}
+          {/* Logged Today Strip — allows 1-tap removal of accidental entries like Atlantic Acquisition */}
+          {activeTodayFoodLogs.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[9px] font-black uppercase tracking-wider text-slate-600">
+                  Logged on {isViewingToday ? 'Today' : selectedDateStr} ({activeTodayFoodLogs.length})
+                </span>
+                <span className="text-[9px] font-medium text-muted-foreground">
+                  Tap <Trash2 className="w-2.5 h-2.5 inline mx-0.5" /> to remove accidental entries
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {activeTodayFoodLogs.map((entry) => {
+                  const isRemoving = removingFoodId === entry.id;
+                  return (
+                    <div
+                      key={entry.id}
+                      className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-[10px] shadow-2xs"
+                    >
+                      <span className="font-bold text-slate-800 truncate max-w-[180px] sm:max-w-[240px]">
+                        {entry.name}
+                      </span>
+                      <span className="text-slate-500 font-semibold whitespace-nowrap">
+                        {entry.calories} kcal · {entry.proteinG}g P
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isRemoving}
+                        onClick={() => handleRemoveFoodEntry(entry)}
+                        title={`Remove ${entry.name}`}
+                        className="ml-0.5 p-0.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                      >
+                        {isRemoving ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Top 8 Most Recent Tickers with Descriptions & Explicit + Log Button */}
+          {visibleNicknames.length > 0 && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {visibleNicknames.map(({ key, nick }) => {
+                  const isPreviewing = previewNickKey === key;
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => setPreviewNickKey(isPreviewing ? null : key)}
+                      className={`rounded-xl border p-2.5 transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                        isPreviewing
+                          ? 'bg-emerald-50/70 border-emerald-300 ring-1 ring-emerald-200'
+                          : 'bg-slate-50/70 hover:bg-slate-100/80 border-slate-200/80'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Sparkles className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <p className="text-xs font-black text-foreground truncate">
+                              {nick.nickname || key}
+                            </p>
+                          </div>
+                          {nick.description && (
+                            <p className="text-[10px] font-medium text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
+                              {nick.description}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isLoggingQuick}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickLogNickname(key, nick);
+                          }}
+                          className="h-6 px-2 text-[9px] font-black uppercase bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 rounded-md"
+                        >
+                          + Log
+                        </Button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-bold pt-1 border-t border-black/5">
+                        <span className="text-slate-700">
+                          {nick.totalCalories} kcal · <span className="text-emerald-700">{nick.totalProteinG}g P</span>
+                        </span>
+                        <span className="text-[9px] uppercase text-muted-foreground">
+                          {nick.totalCarbsG || 0}C · {nick.totalFatG || 0}F
+                        </span>
+                      </div>
+
+                      {isPreviewing && nick.items && nick.items.length > 0 && (
+                        <div className="pt-1.5 border-t border-emerald-200/60 flex flex-wrap gap-1">
+                          {nick.items.map((item, idx) => (
+                            <span
+                              key={idx}
+                              className="px-1.5 py-0.5 rounded bg-white text-[9px] font-medium text-slate-700 border border-emerald-200"
+                            >
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {sortedNicknames.length > RECENT_TICKER_LIMIT && !nicknameQuery.trim() && (
+                <div className="flex justify-center pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAllNicknames((v) => !v)}
+                    className="h-6 px-3 text-[10px] font-black uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                  >
+                    {showAllNicknames ? (
+                      <>
+                        <ChevronUp className="w-3 h-3 mr-1" /> Show Top {RECENT_TICKER_LIMIT} Most Recent
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3 h-3 mr-1" /> Show All {sortedNicknames.length} Saved Tickers
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 

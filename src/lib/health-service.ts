@@ -161,6 +161,8 @@ export interface FoodNickname {
   totalCarbsG: number;
   totalFatG: number;
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  /** Unix ms timestamp when this ticker was last logged or created. */
+  lastUsedAt?: number;
 }
 
 export interface TemporaryContext {
@@ -405,6 +407,11 @@ export const healthService = {
       .filter(e => !e.ignored);
   },
 
+  async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'food_log', entryId);
+    await setDoc(docRef, { ignored }, { merge: true });
+  },
+
   // --- Structured Exercise Log ---
 
   async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
@@ -429,6 +436,11 @@ export const healthService = {
     return snapshot.docs
       .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
       .filter(e => !e.ignored);
+  },
+
+  async setExerciseEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<void> {
+    const docRef = doc(db, 'users', userId, 'exercise_log', entryId);
+    await setDoc(docRef, { ignored }, { merge: true });
   },
 
 };
