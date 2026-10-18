@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sheet,
   SheetContent,
@@ -8,9 +8,15 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
-import { Progress } from '@/components/ui/progress';
-import type { HistoryEntry, VFBreakdown } from '@/lib/health-service';
-import { Check, X, Minus, Moon, Flame, Wine, Droplets, Beef, Zap } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { healthService, type HistoryEntry, type HealthData } from '@/lib/health-service';
+import { inferScoringRelease } from '@/lib/scoring-releases';
+import { getEffectiveDayNote } from '@/lib/level-tracker';
+import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { doc } from 'firebase/firestore';
+import { useToast } from '@/hooks/use-toast';
+import { Moon, Flame, Wine, Droplets, Beef, Zap, StickyNote, Save, Loader2, Cpu } from 'lucide-react';
 
 interface VFDayDetailProps {
   entry: HistoryEntry | null;
@@ -48,25 +54,73 @@ function RuleRow({
 }
 
 export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
+  const { user } = useUser();
+  const db = useFirestore();
+  const { toast } = useToast();
+
+  const userDocRef = useMemoFirebase(() => (user ? doc(db, 'users', user.uid) : null), [db, user]);
+  const { data: healthData } = useDoc<HealthData>(userDocRef);
+
+  const [noteText, setNoteText] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+
+  useEffect(() => {
+    if (entry) {
+      setNoteText(getEffectiveDayNote(entry) ?? '');
+    }
+  }, [entry]);
+
   if (!entry) return null;
 
   const b = entry.breakdown;
   const hasBreakdown = !!b;
+  const release = inferScoringRelease(entry);
+
+  const handleSaveNote = async () => {
+    if (!user || !healthData?.history) return;
+    setIsSavingNote(true);
+    try {
+      const updatedHistory = healthData.history.map((h) => {
+        const match = (entry.isoDate && h.isoDate === entry.isoDate) || (!entry.isoDate && h.date === entry.date);
+        if (!match) return h;
+        return {
+          ...h,
+          dayNote: noteText.trim(),
+        };
+      });
+      await healthService.updateHealthData(db, user.uid, { history: updatedHistory });
+      toast({
+        title: 'Day Note Saved',
+        description: `Updated note for ${entry.isoDate || entry.date} (0 AI tokens).`,
+      });
+    } catch (err) {
+      console.error('[VFDayDetail] Failed to save note:', err);
+      toast({ variant: 'destructive', title: 'Save Failed', description: 'Could not save day note.' });
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader className="pb-4">
-          <SheetTitle className="text-2xl font-black italic tracking-tighter uppercase">
-            {entry.date}
-          </SheetTitle>
+          <div className="flex items-center justify-between gap-2">
+            <SheetTitle className="text-2xl font-black italic tracking-tighter uppercase">
+              {entry.date}
+            </SheetTitle>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-900 text-emerald-400">
+              <Cpu className="w-3 h-3" />
+              v{release.version} {release.codename}
+            </span>
+          </div>
           <SheetDescription className="text-xs font-bold uppercase tracking-widest">
             {entry.isoDate || 'Daily Audit Report'}
           </SheetDescription>
         </SheetHeader>
 
         {/* Score hero */}
-        <div className={`p-6 rounded-2xl text-center mb-6 ${entry.gain >= 50 ? 'bg-emerald-50 ring-1 ring-emerald-200' : entry.gain >= 0 ? 'bg-blue-50 ring-1 ring-blue-200' : 'bg-red-50 ring-1 ring-red-200'}`}>
+        <div className={`p-6 rounded-2xl text-center mb-4 ${entry.gain >= 50 ? 'bg-emerald-50 ring-1 ring-emerald-200' : entry.gain >= 0 ? 'bg-blue-50 ring-1 ring-blue-200' : 'bg-red-50 ring-1 ring-red-200'}`}>
           <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">Daily VF Score</p>
           <p className={`text-5xl font-black italic ${entry.gain >= 50 ? 'text-emerald-600' : entry.gain >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
             {entry.gain > 0 ? '+' : ''}{entry.gain}
@@ -78,6 +132,42 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
             <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${entry.status === 'Bullish' ? 'bg-emerald-200 text-emerald-800' : entry.status === 'Correction' ? 'bg-red-200 text-red-800' : 'bg-gray-200 text-gray-800'}`}>
               {entry.status}
             </span>
+          </div>
+        </div>
+
+        {/* Engine Vintage Context Box */}
+        <div className="mb-4 p-3 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+            Engine Vintage: v{release.version} “{release.codename}”
+          </p>
+          <p className="text-[11px] text-slate-600 mt-0.5 italic">{release.tagline}</p>
+        </div>
+
+        {/* Editable Day Note (Google Sheet Notes Column) */}
+        <div className="mb-5 p-3.5 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-amber-900">
+              <StickyNote className="w-3.5 h-3.5 text-amber-600" />
+              Day Note (Spreadsheet Notes)
+            </label>
+            <span className="text-[9px] font-bold text-amber-700/70">Zero AI</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Add note (e.g. Date night, 19h fast + hoops)..."
+              className="h-8 text-xs bg-white border-amber-200"
+            />
+            <Button
+              size="sm"
+              onClick={handleSaveNote}
+              disabled={isSavingNote}
+              className="h-8 px-3 text-[10px] font-black uppercase bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+            >
+              {isSavingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+              Save
+            </Button>
           </div>
         </div>
 

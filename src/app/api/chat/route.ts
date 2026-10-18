@@ -6,6 +6,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { adminHealthService } from '@/lib/health-service-admin';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
+import { fetchSlimUserContext } from '@/lib/user-context';
 
 /**
  * Cap on how many prior messages we feed back into the model each turn. We
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { message, chatHistory, currentHealth, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates } = body;
+    const { message, chatHistory, currentHealth, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates, modelTier } = body;
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
     const [yr, mo, dy] = resolvedDate.split('-').map(Number);
@@ -79,6 +80,18 @@ export async function POST(req: Request) {
       ? chatHistory.slice(-MAX_SENT_HISTORY)
       : chatHistory;
 
+    // Preload slim user context on the opening turn so the LLM skips the extra
+    // get_user_context tool round-trip (cuts an entire input+output turn of tokens).
+    let preloadedContext: string | undefined;
+    if (!trimmedHistory || trimmedHistory.length <= 2) {
+      try {
+        const ctx = await fetchSlimUserContext(getAdminFirestore(), uid, resolvedDate);
+        preloadedContext = JSON.stringify(ctx);
+      } catch (e) {
+        console.warn('[ChatRoute] preloadedContext fetch skipped:', e);
+      }
+    }
+
     const input: PersonalizedAICoachingInput = {
       userId: uid,
       userName,
@@ -86,6 +99,7 @@ export async function POST(req: Request) {
       currentDay,
       localDate: resolvedDate,
       localTime: localTime || new Date().toLocaleTimeString('en-US'),
+      preloadedContext,
       chatHistory: trimmedHistory,
       currentHealth: sanitizedHealth,
       photoDataUris: Array.isArray(photoDataUris)
@@ -95,12 +109,19 @@ export async function POST(req: Request) {
       photoDates,
     };
 
+    const selectedModel = modelTier === 'flash-lite'
+      ? 'googleai/gemini-2.5-flash-lite'
+      : undefined;
+
     // Creates the model stream with a fallback model. Kept inside the ALS scope
     // (see below) so any tool calls that fire during generation can record a
     // share offer for this turn.
     const openStream = async () => {
       try {
-        const result = await cfoChatPrompt.stream(input, { maxTurns: 8 });
+        const result = await cfoChatPrompt.stream(input, {
+          ...(selectedModel ? { model: selectedModel } : {}),
+          maxTurns: 8,
+        });
         return result.stream;
       } catch (err: any) {
         const msg = String(err?.message ?? err ?? '').toLowerCase();

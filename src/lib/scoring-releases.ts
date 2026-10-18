@@ -129,3 +129,69 @@ export function releaseBriefing(): string {
   }
   return lines.join('\n');
 }
+
+export interface ScoreVintageProbe {
+  isoDate?: string;
+  scoringVersion?: string;
+  breakdown?: {
+    fatBalanceKcal?: number;
+    scoredCaloriesOut?: number;
+    alcoholAcutePenalty?: number;
+    alcoholSuppressionHours?: number;
+    alcoholPausePenalty?: number;
+    consecutiveAlcoholPenalty?: number;
+    totalFatBurned?: number;
+    pointsDenominator?: number;
+  };
+}
+
+export function getReleaseByVersion(version: string): ScoringRelease {
+  return (
+    SCORING_RELEASES.find((r) => r.version === version) ??
+    CURRENT_SCORING_RELEASE
+  );
+}
+
+/**
+ * Resolves which scoring engine release produced a given HistoryEntry.
+ * Checks explicit `scoringVersion` first, then signature fields on `breakdown`,
+ * and falls back to the 2026 release cutover dates.
+ */
+export function inferScoringRelease(entry?: ScoreVintageProbe | null): ScoringRelease {
+  if (!entry) return CURRENT_SCORING_RELEASE;
+  if (entry.scoringVersion) {
+    const found = SCORING_RELEASES.find((r) => r.version === entry.scoringVersion);
+    if (found) return found;
+  }
+
+  const b = entry.breakdown;
+  if (b) {
+    if (b.fatBalanceKcal !== undefined || b.scoredCaloriesOut !== undefined) {
+      return getReleaseByVersion('3.2');
+    }
+    if (b.alcoholAcutePenalty !== undefined || b.alcoholSuppressionHours !== undefined) {
+      return getReleaseByVersion('3.1');
+    }
+  }
+
+  if (entry.isoDate) {
+    if (entry.isoDate < '2026-03-19') return getReleaseByVersion('1.0');
+    if (entry.isoDate < '2026-06-03') return getReleaseByVersion('2.0');
+    if (entry.isoDate < '2026-07-20') return getReleaseByVersion('3.0');
+    if (entry.isoDate < '2026-10-18') return getReleaseByVersion('3.1');
+    return getReleaseByVersion('3.2');
+  }
+
+  if (b) {
+    if (b.alcoholPausePenalty !== undefined || b.consecutiveAlcoholPenalty !== undefined) {
+      return getReleaseByVersion('3.0');
+    }
+    if (b.totalFatBurned !== undefined || b.pointsDenominator !== undefined) {
+      return getReleaseByVersion('2.0');
+    }
+    return getReleaseByVersion('1.0');
+  }
+
+  return CURRENT_SCORING_RELEASE;
+}
+

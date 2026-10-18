@@ -16,6 +16,8 @@ import { ChatHistoryLog } from './chat-history-log';
 import { ProteinChart } from './protein-chart';
 import { ShareMealButton } from './share-meal-button';
 import { MySharesSection } from './my-shares-section';
+import { inferScoringRelease } from '@/lib/scoring-releases';
+import { getEffectiveDayNote } from '@/lib/level-tracker';
 
 type SortMode = 'latest' | 'calories';
 
@@ -295,6 +297,78 @@ export function HistoryView() {
 
       {/* VF Heatmap Calendar */}
       <VFHeatmap history={history} onDayClick={handleDayClick} />
+
+      {/* Daily VF Score & Sheet Notes Log (Google Sheet View) */}
+      {history.length > 0 && (
+        <Card className="border-none shadow-md bg-white/80 backdrop-blur-sm ring-1 ring-primary/5">
+          <CardContent className="p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-[0.15em] text-foreground">
+                  Daily VF Score & Sheet Notes Log
+                </h3>
+                <p className="text-[10px] text-muted-foreground font-medium">
+                  Click any day to inspect full math, engine vintage, or edit its spreadsheet note
+                </p>
+              </div>
+              <span className="text-[10px] font-black uppercase text-muted-foreground">
+                {history.filter((h) => h.detail !== 'Account Created').length} days
+              </span>
+            </div>
+            <div className="max-h-72 overflow-y-auto border rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100 border-b text-[9px] font-black uppercase text-slate-600">
+                  <tr>
+                    <th className="py-2 px-3">Date</th>
+                    <th className="py-2 px-3">VF Score</th>
+                    <th className="py-2 px-3">Cumu</th>
+                    <th className="py-2 px-3">Engine</th>
+                    <th className="py-2 px-3">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {[...history]
+                    .filter((h) => h.detail !== 'Account Created')
+                    .reverse()
+                    .map((h, idx) => {
+                      const rel = inferScoringRelease(h);
+                      const note = getEffectiveDayNote(h);
+                      return (
+                        <tr
+                          key={`${h.isoDate || h.date}-${idx}`}
+                          onClick={() => handleDayClick(h)}
+                          className="hover:bg-slate-50 cursor-pointer transition-colors"
+                        >
+                          <td className="py-2 px-3 font-bold whitespace-nowrap">
+                            {h.isoDate || h.date}
+                          </td>
+                          <td className={`py-2 px-3 font-black whitespace-nowrap ${h.gain >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {h.gain > 0 ? `+${h.gain}` : h.gain}
+                          </td>
+                          <td className="py-2 px-3 font-semibold text-muted-foreground whitespace-nowrap">
+                            {h.equity.toLocaleString()}
+                          </td>
+                          <td className="py-2 px-3 whitespace-nowrap">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-black text-slate-700">
+                              v{rel.version}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-muted-foreground truncate max-w-[260px]">
+                            {note ? (
+                              <span className="font-semibold text-amber-800">{note}</span>
+                            ) : (
+                              <span className="opacity-60">{h.detail}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Audit Log (Transactions) */}
       <div className="space-y-6">

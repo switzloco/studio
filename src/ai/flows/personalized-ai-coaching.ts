@@ -530,6 +530,7 @@ const scoreDailyVFTool = ai.defineTool(
         detail: result.summary,
         equity: history[existingIdx].equity + delta,
         breakdown,
+        scoringVersion: CURRENT_SCORING_RELEASE.version,
       };
       // Bump cumulative equity for this entry and every entry after it.
       for (let i = existingIdx + 1; i < history.length; i++) {
@@ -548,6 +549,7 @@ const scoreDailyVFTool = ai.defineTool(
         detail: result.summary,
         equity: newEquity,
         breakdown,
+        scoringVersion: CURRENT_SCORING_RELEASE.version,
       });
     }
 

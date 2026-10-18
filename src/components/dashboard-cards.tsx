@@ -1,23 +1,57 @@
-
 'use client';
 
 import React from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Zap, DollarSign, Briefcase, Loader2, ShieldAlert, CloudLightning, ShieldCheck, Scale, Ruler, RefreshCw, Unplug, CalendarIcon, RotateCcw, AlertTriangle, Activity, TrendingUp } from "lucide-react";
-import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, healthService } from '@/lib/health-service';
+import { Input } from "@/components/ui/input";
+import {
+  Target,
+  Zap,
+  Briefcase,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+  Scale,
+  RefreshCw,
+  Unplug,
+  CalendarIcon,
+  RotateCcw,
+  AlertTriangle,
+  Activity,
+  TrendingUp,
+  Clock,
+  Utensils,
+  Flame,
+  Trophy,
+  Plus,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  History,
+  CheckCircle2,
+  Sparkles,
+} from "lucide-react";
+import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
 import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
 import { syncOuraData, disconnectOura, getOuraAuthUrl, OuraSyncResult } from '@/app/actions/oura';
-import { syncWithingsData, disconnectWithings, getWithingsAuthUrl, WithingsSyncResult } from '@/app/actions/withings';
+import { syncWithingsData, disconnectWithings, getWithingsAuthUrl } from '@/app/actions/withings';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
-import { computeAlpertPace } from '@/lib/alpert-pace';
+import { computeAlpertPace, computeEatRunway } from '@/lib/alpert-pace';
+import {
+  computeLevelProgress,
+  DEFAULT_ACTIVE_LEVEL,
+  DEFAULT_LEVEL_HISTORY,
+  getEffectiveDayNote,
+  type LevelConfig,
+} from '@/lib/level-tracker';
+import { CURRENT_SCORING_RELEASE, inferScoringRelease } from '@/lib/scoring-releases';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, estimateBmrKcal, creditedCaloriesOut, ACTIVITY_CREDIT_FRACTION } from '@/lib/metabolic-engine';
 import { useToast } from '@/hooks/use-toast';
-import { doc, collection, query, where, limit, Timestamp } from 'firebase/firestore';
+import { doc, collection, query, where, limit } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
@@ -38,18 +72,6 @@ interface DashboardCardsProps {
   isLoading?: boolean;
 }
 
-export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
-  const { user } = useUser();
-  const db = useFirestore();
-  const { toast } = useToast();
-
-  // Read targets from user preferences instead of hardcoding
-  const prefsRef = useMemoFirebase(
-    () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
-    [db, user]
-  );
-  const { data: prefs } = useDoc<UserPreferences>(prefsRef);
-
 const OuraLogo = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="currentColor">
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
@@ -57,13 +79,8 @@ const OuraLogo = ({ className }: { className?: string }) => (
   </svg>
 );
 
-/**
- * Fitbit wordmark-style logo using the official teal/cyan brand colour.
- * Rendered as an inline SVG so it works without any external assets.
- */
 const FitbitLogo = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="currentColor">
-    {/* Diamond of dots — standard Fitbit brand mark */}
     <circle cx="12" cy="12" r="2" />
     <circle cx="17" cy="12" r="2" />
     <circle cx="22" cy="12" r="2" />
@@ -85,40 +102,73 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   </svg>
 );
 
-  // Read Fitbit credentials to show lastSyncedAt in the UI.
+export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
+  const { user } = useUser();
+  const db = useFirestore();
+  const { toast } = useToast();
+
+  const prefsRef = useMemoFirebase(
+    () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
+    [db, user]
+  );
+  const { data: prefs } = useDoc<UserPreferences>(prefsRef);
+
   const fitbitTokensRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'fitbit_tokens') : null,
     [db, user]
   );
   const { data: fitbitCreds } = useDoc<FitbitCredentials>(fitbitTokensRef);
 
-  // Read Oura credentials to show lastSyncedAt in the UI.
   const ouraTokensRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'oura_tokens') : null,
     [db, user]
   );
   const { data: ouraCreds } = useDoc<OuraCredentials>(ouraTokensRef);
 
-  // Read Withings credentials to show lastSyncedAt in the UI.
   const withingsTokensRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'withings_tokens') : null,
     [db, user]
   );
   const { data: withingsCreds } = useDoc<any>(withingsTokensRef);
 
-  // Today's date string (YYYY-MM-DD)
   const todayStr = React.useMemo(() => {
     const now = new Date();
     return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
   }, []);
 
-  // Selected date for viewing (defaults to today)
   const [selectedDateStr, setSelectedDateStr] = React.useState<string>(todayStr);
   const [calendarOpen, setCalendarOpen] = React.useState(false);
+  const [chartsExpanded, setChartsExpanded] = React.useState(false);
+
+  // Level editor & archive state
+  const [levelEditorOpen, setLevelEditorOpen] = React.useState(false);
+  const [pastLevelsOpen, setPastLevelsOpen] = React.useState(false);
+  const [editLevelName, setEditLevelName] = React.useState('');
+  const [editLevelStart, setEditLevelStart] = React.useState('');
+  const [editLevelTarget, setEditLevelTarget] = React.useState('1000');
+  const [editLevelDeadline, setEditLevelDeadline] = React.useState('');
+  const [editLevelOffset, setEditLevelOffset] = React.useState('0');
+  const [editLevelNotes, setEditLevelNotes] = React.useState('');
+
+  // Zero-AI Quick Log state
+  const [quickFoodOpen, setQuickFoodOpen] = React.useState(false);
+  const [quickItemName, setQuickItemName] = React.useState('');
+  const [quickCalories, setQuickCalories] = React.useState('');
+  const [quickProtein, setQuickProtein] = React.useState('');
+  const [quickCarbs, setQuickCarbs] = React.useState('');
+  const [quickFat, setQuickFat] = React.useState('');
+  const [quickMeal, setQuickMeal] = React.useState<'breakfast' | 'lunch' | 'dinner' | 'snack'>('lunch');
+  const [isLoggingQuick, setIsLoggingQuick] = React.useState(false);
+
+  // Zero-AI Score Lock state
+  const [scoreLockOpen, setScoreLockOpen] = React.useState(false);
+  const [lockFastingHours, setLockFastingHours] = React.useState('0');
+  const [lockAlcoholDrinks, setLockAlcoholDrinks] = React.useState('0');
+  const [lockDayNote, setLockDayNote] = React.useState('');
+  const [isLockingScore, setIsLockingScore] = React.useState(false);
 
   const isViewingToday = selectedDateStr === todayStr;
 
-  // Previous day ISO string — used to query yesterday's logs for glycogen carry-over
   const prevDateStr = React.useMemo(() => {
     const [y, m, d] = selectedDateStr.split('-').map(Number);
     const prev = new Date(y, m - 1, d - 1);
@@ -139,13 +189,26 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     setCalendarOpen(false);
   };
 
-  // History entry for the selected date (used to get calories out on past days)
-  const historyEntry = React.useMemo(() => {
-    if (!data?.history || isViewingToday) return null;
+  // History entry for the selected date (including today if already scored)
+  const selectedHistoryEntry = React.useMemo(() => {
+    if (!data?.history) return null;
     return data.history.find(h => (h.isoDate || h.date) === selectedDateStr) ?? null;
-  }, [data?.history, selectedDateStr, isViewingToday]);
+  }, [data?.history, selectedDateStr]);
 
-  // Compute protein/calorie totals from the food log for the selected date
+  const historyEntry = !isViewingToday ? selectedHistoryEntry : null;
+
+  React.useEffect(() => {
+    const note = getEffectiveDayNote(selectedHistoryEntry ?? { isoDate: selectedDateStr }) ?? '';
+    setLockDayNote(note);
+    if (selectedHistoryEntry?.breakdown) {
+      setLockFastingHours(String(selectedHistoryEntry.breakdown.fastingHours ?? 0));
+      setLockAlcoholDrinks(String(selectedHistoryEntry.breakdown.alcoholDrinks ?? 0));
+    } else {
+      setLockFastingHours('0');
+      setLockAlcoholDrinks('0');
+    }
+  }, [selectedDateStr, selectedHistoryEntry]);
+
   const foodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
@@ -156,7 +219,6 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
 
-  // Exercise logs for the selected date (used for intraday glycogen timing)
   const exerciseLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'exercise_log'),
@@ -167,7 +229,6 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   );
   const { data: todayExerciseLogs } = useCollection<ExerciseLogEntry>(exerciseLogQuery);
 
-  // Previous day logs — needed for accurate muscle glycogen carry-over
   const prevFoodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
@@ -188,41 +249,33 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   );
   const { data: prevExerciseLogs } = useCollection<ExerciseLogEntry>(prevExerciseLogQuery);
 
-  // Morning muscle glycogen % — chains from previous day's end-of-day state.
-  // Uses actual exercise + food logs from prev day when available; falls back to
-  // history breakdown aggregate only if logs haven't loaded yet.
   const morningGlycogenPct = React.useMemo(() => {
     const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
     const muscleMax = Math.max(400, totalMax - LIVER_MAX_KCAL);
 
-    // Tier → fraction of exercise calories that depletes muscle glycogen
     const MUSCLE_FRACTION: Record<string, number> = {
-      tier1_walking:    0.40,  // mostly fat oxidation
+      tier1_walking:    0.40,
       tier2_steady_state: 0.65,
-      tier3_anaerobic:  0.85,  // high glycolytic demand (basketball, HIIT, weights)
+      tier3_anaerobic:  0.85,
     };
 
-    // --- Use actual prev-day logs when available (most accurate) ---
     if (prevFoodLogs !== undefined && prevExerciseLogs !== undefined) {
       const activePrevFood = (prevFoodLogs ?? []).filter(e => !e.ignored);
       const activePrevEx   = (prevExerciseLogs ?? []).filter(e => !e.ignored);
 
-      // Carb replenishment: total carbs → liver priority 30g (120 kcal) → rest to muscle
       const prevCarbKcal = activePrevFood.reduce((s, e) => s + ((e.carbsG || 0) * 4), 0);
       const muscleCarbs  = Math.max(0, prevCarbKcal - 120);
 
-      // Exercise glycogen burn: per-exercise tier × adjusted calories
       const activeBurn = activePrevEx.reduce((s, e) => {
         const frac = e.activityTier ? (MUSCLE_FRACTION[e.activityTier] ?? 0.65) : 0.65;
         return s + ((e.adjustedCalories || 0) * frac);
       }, 0);
 
-      const prevMuscleKcal = muscleMax; // yesterday morning assumed full
+      const prevMuscleKcal = muscleMax;
       const endMuscleKcal  = Math.max(0, Math.min(muscleMax, prevMuscleKcal - activeBurn + muscleCarbs));
       return Math.round((endMuscleKcal / muscleMax) * 100);
     }
 
-    // --- Fallback: use history entry breakdown aggregate ---
     const history = data?.history;
     if (!history || history.length === 0) return 100;
     const prevEntry = history.find(h => (h.isoDate || h.date) === prevDateStr);
@@ -236,7 +289,6 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     return Math.round((endMuscleKcal / muscleMax) * 100);
   }, [prevFoodLogs, prevExerciseLogs, data?.history, data?.weightKg, data?.bodyFatPct, prevDateStr]);
 
-  // Sum from non-ignored entries
   const computedTotals = React.useMemo(() => {
     if (!todayFoodLogs) return null;
     const active = todayFoodLogs.filter(e => !e.ignored);
@@ -251,70 +303,53 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const [isOuraSyncing, setIsOuraSyncing] = React.useState(false);
   const [isWithingsSyncing, setIsWithingsSyncing] = React.useState(false);
 
-  // For past dates, read the stored Fitbit snapshot so steps/HRV show historical values.
   const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
-
   const isLegacyFitbit = fitbitCreds?.provider === 'fitbit';
 
-  // Use computed totals from food_log (accurate) or fall back to user doc counter
-  const dailyProteinG = computedTotals?.proteinG ?? (data?.dailyProteinG || 0);
-  const dailyCaloriesIn = computedTotals?.caloriesIn ?? (data?.dailyCaloriesIn || 0);
+  const dailyProteinG = computedTotals?.proteinG ?? (isViewingToday ? (data?.dailyProteinG || 0) : (historyEntry?.breakdown?.proteinG || 0));
+  const dailyCaloriesIn = computedTotals?.caloriesIn ?? (isViewingToday ? (data?.dailyCaloriesIn || 0) : (historyEntry?.breakdown?.caloriesIn || 0));
   const dailyCarbsG = computedTotals?.carbsG ?? (data?.dailyCarbsG || 0);
-  // For past dates, prefer the history breakdown, then the Fitbit/Oura snapshot, then current doc value.
   const dailyCaloriesOut = isViewingToday
     ? (data?.dailyCaloriesOut || 2000)
     : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data?.dailyCaloriesOut || 2000);
 
-  // Fitbit auto-detected activities — used as glycogen fallback when no manual exercise is logged.
-  // For today, use the live snapshot that was written on the last Fitbit sync.
   const fitbitActivities = isViewingToday
     ? data?.fitbitByDate?.[new Date().toLocaleDateString('en-CA')]?.activities
     : fitbitForDate?.activities;
 
   const visceralFatPoints = data?.visceralFatPoints || 0;
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
-  const fatPointsGoal = prefs?.targets?.fatPointsGoal ?? 3000;
   const plantGoalG = prefs?.targets?.plantGoalG ?? 800;
   const dailyPlantG = data?.dailyPlantG ?? 0;
   const plantProgress = Math.min(100, (dailyPlantG / plantGoalG) * 100);
 
-  // Display toggles — undefined defaults to "on" for legacy users; plant matter
-  // opts in by default so existing dashboards don't grow a card unannounced.
   const showAdvancedMetabolic = prefs?.display?.showAdvancedMetabolic ?? true;
   const showProtein = prefs?.display?.showProtein ?? true;
   const showPlantMatter = prefs?.display?.showPlantMatter ?? false;
   const showRecovery = prefs?.display?.showRecovery ?? true;
   const showVfScore = prefs?.display?.showVfScore ?? true;
 
-  // Alpert daily score
   const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
-  // The burn the score actually counts (BMR in full + ACTIVITY_CREDIT_FRACTION of
-  // device burn above it) — same inputs as calculateDailyVFScore, so every number
-  // and chart on the dashboard lines up with the score instead of the raw device figure.
   const bmrKcal = estimateBmrKcal(data?.weightKg, data?.heightCm, prefs?.profile?.age);
-  // Past days: use the figure the stored score was computed with (pre-v3.2 entries lack it).
   const scoredCaloriesOut = historyEntry?.breakdown?.scoredCaloriesOut
     ?? creditedCaloriesOut(dailyCaloriesOut, bmrKcal);
   const alpertDeficit = scoredCaloriesOut - dailyCaloriesIn;
 
-  // For past days use stored score; for today run the 5-rule scoring engine.
-  // Returns null when no food has been logged yet (avoid misleading estimates).
   const dailyAlpertScore = React.useMemo(() => {
     if (!data) return null;
     if (!isViewingToday && historyEntry) return historyEntry.gain;
+    if (isViewingToday && selectedHistoryEntry && dailyCaloriesIn <= 0) return selectedHistoryEntry.gain;
     if (dailyCaloriesOut <= 0) return null;
-    // Don't show a score before the user has logged any food — caloriesIn=0 with
-    // no explicit fasting hours would produce a wildly optimistic estimate.
     if (isViewingToday && dailyCaloriesIn <= 0) return null;
     const result = calculateDailyVFScore({
       caloriesIn: dailyCaloriesIn,
       caloriesOut: dailyCaloriesOut,
       proteinG: dailyProteinG,
       proteinGoal,
-      fastingHours: 0,   // not auto-tracked; user tells CFO coach
-      alcoholDrinks: 0,  // not auto-tracked; user tells CFO coach
+      fastingHours: Number(lockFastingHours) || 0,
+      alcoholDrinks: Number(lockAlcoholDrinks) || 0,
       sleepHours: data.sleepHours ?? 7,
-      seedOilMeals: 0,   // not auto-tracked; user tells CFO coach
+      seedOilMeals: 0,
       weightKg: data.weightKg,
       bodyFatPct: data.bodyFatPct,
       heightCm: data.heightCm,
@@ -325,23 +360,9 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     });
     return result.score;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, isViewingToday, historyEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
-      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age]);
+  }, [data, isViewingToday, historyEntry, selectedHistoryEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
+      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age, lockFastingHours, lockAlcoholDrinks]);
 
-  // Alpert pace — warn when today's deficit is running past the daily fat ceiling.
-  // Fires on fasted days too (nothing logged); see computeAlpertPace.
-  const alpertPace = React.useMemo(() => {
-    if (!data || !isViewingToday) return null;
-    const now = new Date();
-    return computeAlpertPace({
-      caloriesIn: dailyCaloriesIn,
-      caloriesOut: dailyCaloriesOut,
-      alpertNumber,
-      hoursElapsed: now.getHours() + now.getMinutes() / 60,
-    });
-  }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertNumber]);
-
-  // Run the metabolic simulation for the selected day
   const simulationResult = React.useMemo(() => {
     if (!data || dailyCaloriesOut <= 0) return null;
     const muscleMax = computeMuscleGlycogenMaxKcal(data.weightKg, data.bodyFatPct);
@@ -357,32 +378,314 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       morningGlycogenPct,
       hasCreatine: prefs?.profile?.hasCreatine,
     });
-  }, [data, scoredCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
+  }, [data, dailyCaloriesOut, scoredCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
+
+  // 3-Signal "Should I Eat Now?" Runway
+  const eatRunway = React.useMemo(() => {
+    const now = new Date();
+    const hoursElapsed = isViewingToday ? (now.getHours() + now.getMinutes() / 60) : 20;
+    return computeEatRunway({
+      caloriesIn: dailyCaloriesIn,
+      scoredCaloriesOut,
+      alpertNumber,
+      hoursElapsed,
+      proteinG: dailyProteinG,
+      proteinGoal,
+      slots: simulationResult?.slots,
+    });
+  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, simulationResult?.slots]);
+
+  const alpertPace = React.useMemo(() => {
+    if (!data || !isViewingToday) return null;
+    const now = new Date();
+    return computeAlpertPace({
+      caloriesIn: dailyCaloriesIn,
+      caloriesOut: dailyCaloriesOut,
+      alpertNumber,
+      hoursElapsed: now.getHours() + now.getMinutes() / 60,
+    });
+  }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertNumber]);
+
+  // Active Level & Level History (Replaces Google Sheet right-side tracker)
+  const activeLevel: LevelConfig = prefs?.activeLevel ?? DEFAULT_ACTIVE_LEVEL;
+  const levelHistory: LevelConfig[] = prefs?.levelHistory ?? DEFAULT_LEVEL_HISTORY;
+
+  const levelProgress = React.useMemo(
+    () =>
+      computeLevelProgress(activeLevel, data?.history ?? [], {
+        todayGain: isViewingToday ? dailyAlpertScore : null,
+        todayIso: todayStr,
+      }),
+    [activeLevel, data?.history, isViewingToday, dailyAlpertScore, todayStr]
+  );
+
+  const openLevelEditor = (lvl: LevelConfig) => {
+    setEditLevelName(lvl.name);
+    setEditLevelStart(lvl.startDate);
+    setEditLevelTarget(String(lvl.targetPoints));
+    setEditLevelDeadline(lvl.targetDate ?? '');
+    setEditLevelOffset(String(lvl.startingPointsOffset ?? 0));
+    setEditLevelNotes(lvl.notes ?? '');
+    setLevelEditorOpen(true);
+  };
+
+  const handleSaveActiveLevel = async () => {
+    if (!user) return;
+    const updated: LevelConfig = {
+      ...activeLevel,
+      name: editLevelName.trim() || 'Active Level',
+      startDate: editLevelStart || todayStr,
+      targetPoints: Math.max(50, Number(editLevelTarget) || 1000),
+      targetDate: editLevelDeadline.trim() || undefined,
+      startingPointsOffset: Number(editLevelOffset) || 0,
+      notes: editLevelNotes.trim() || undefined,
+      status: 'active',
+    };
+    await healthService.updateUserPreferences(db, user.uid, { activeLevel: updated });
+    setLevelEditorOpen(false);
+    toast({ title: 'Level Updated', description: `${updated.name} (Target: ${updated.targetPoints.toLocaleString()} pts from ${updated.startDate})` });
+  };
+
+  const handleArchiveAndStartNewLevel = async (preset?: Partial<LevelConfig>) => {
+    if (!user) return;
+    const archivedCurrent: LevelConfig = {
+      ...activeLevel,
+      endDate: todayStr,
+      status: levelProgress.isTargetMet ? 'completed' : 'retry',
+      snapshotTotalPoints: levelProgress.totalPoints,
+      snapshotDays: Math.max(1, levelProgress.daysScored),
+      engineEra: `v${CURRENT_SCORING_RELEASE.version} ${CURRENT_SCORING_RELEASE.codename}`,
+    };
+    const nextHistory = [
+      ...levelHistory.filter((l) => l.id !== archivedCurrent.id),
+      archivedCurrent,
+    ];
+    const nextLevel: LevelConfig = {
+      id: `level-${Date.now()}`,
+      name: preset?.name || editLevelName.trim() || 'New Lock-In Block',
+      startDate: preset?.startDate || todayStr,
+      targetPoints: preset?.targetPoints ?? (Math.max(50, Number(editLevelTarget) || 1000)),
+      targetDate: preset?.targetDate || editLevelDeadline.trim() || undefined,
+      startingPointsOffset: preset?.startingPointsOffset ?? 0,
+      status: 'active',
+      engineEra: `v${CURRENT_SCORING_RELEASE.version} ${CURRENT_SCORING_RELEASE.codename}`,
+      notes: preset?.notes || editLevelNotes.trim() || undefined,
+    };
+    await healthService.updateUserPreferences(db, user.uid, {
+      activeLevel: nextLevel,
+      levelHistory: nextHistory,
+    });
+    setLevelEditorOpen(false);
+    toast({
+      title: 'New Level Started',
+      description: `Archived "${archivedCurrent.name}" (${archivedCurrent.snapshotTotalPoints} pts) and started "${nextLevel.name}".`,
+    });
+  };
+
+  const handleSwitchPresetLevel = async (preset: LevelConfig) => {
+    if (!user) return;
+    await healthService.updateUserPreferences(db, user.uid, {
+      activeLevel: { ...preset, status: 'active', endDate: undefined },
+    });
+    setLevelEditorOpen(false);
+    toast({
+      title: `Switched to ${preset.name}`,
+      description: `Tracking from ${preset.startDate} toward ${preset.targetPoints.toLocaleString()} pts.`,
+    });
+  };
+
+  // Zero-AI Quick Log handlers
+  const handleQuickLogNickname = async (nick: FoodNickname) => {
+    if (!user || isLoggingQuick) return;
+    setIsLoggingQuick(true);
+    try {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      await healthService.logFood(db, user.uid, {
+        date: selectedDateStr,
+        meal: nick.meal || 'snack',
+        name: `${nick.nickname}${nick.description ? ` (${nick.description})` : ''}`,
+        portionG: 300,
+        calories: nick.totalCalories,
+        proteinG: nick.totalProteinG,
+        carbsG: nick.totalCarbsG || 0,
+        fatG: nick.totalFatG || 0,
+        fiberG: 0,
+        source: 'user_estimate',
+        consumedAt: hhmm,
+      });
+      if (isViewingToday) {
+        await healthService.updateHealthData(db, user.uid, {
+          dailyCaloriesIn: dailyCaloriesIn + nick.totalCalories,
+          dailyProteinG: dailyProteinG + nick.totalProteinG,
+          dailyCarbsG: dailyCarbsG + (nick.totalCarbsG || 0),
+        });
+      }
+      toast({
+        title: `Logged "${nick.nickname}" (Zero AI)`,
+        description: `+${nick.totalCalories} kcal · +${nick.totalProteinG}g protein added to ${selectedDateStr}.`,
+      });
+    } catch (err) {
+      console.error('[handleQuickLogNickname] Failed:', err);
+      toast({ variant: 'destructive', title: 'Quick Log Failed', description: 'Could not save food entry.' });
+    } finally {
+      setIsLoggingQuick(false);
+    }
+  };
+
+  const handleQuickCustomFoodSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || isLoggingQuick) return;
+    const kcal = Math.max(0, Number(quickCalories) || 0);
+    const prot = Math.max(0, Number(quickProtein) || 0);
+    const carbs = Math.max(0, Number(quickCarbs) || 0);
+    const fat = Math.max(0, Number(quickFat) || 0);
+    const name = quickItemName.trim() || 'Quick Entry';
+    if (kcal === 0 && prot === 0) return;
+
+    setIsLoggingQuick(true);
+    try {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      await healthService.logFood(db, user.uid, {
+        date: selectedDateStr,
+        meal: quickMeal,
+        name,
+        portionG: 250,
+        calories: kcal,
+        proteinG: prot,
+        carbsG: carbs,
+        fatG: fat,
+        fiberG: 0,
+        source: 'user_estimate',
+        consumedAt: hhmm,
+      });
+      if (isViewingToday) {
+        await healthService.updateHealthData(db, user.uid, {
+          dailyCaloriesIn: dailyCaloriesIn + kcal,
+          dailyProteinG: dailyProteinG + prot,
+          dailyCarbsG: dailyCarbsG + carbs,
+        });
+      }
+      setQuickItemName('');
+      setQuickCalories('');
+      setQuickProtein('');
+      setQuickCarbs('');
+      setQuickFat('');
+      setQuickFoodOpen(false);
+      toast({
+        title: `Logged ${name} (Zero AI)`,
+        description: `+${kcal} kcal · +${prot}g protein recorded directly to Ledger.`,
+      });
+    } catch (err) {
+      console.error('[handleQuickCustomFoodSubmit] Failed:', err);
+      toast({ variant: 'destructive', title: 'Log Failed', description: 'Could not write to food log.' });
+    } finally {
+      setIsLoggingQuick(false);
+    }
+  };
+
+  // Zero-AI Deterministic Score & Day Note Saver
+  const handleLockDayScore = async () => {
+    if (!user || !data || isLockingScore) return;
+    setIsLockingScore(true);
+    try {
+      const fastingH = Math.max(0, Number(lockFastingHours) || 0);
+      const drinks = Math.max(0, Number(lockAlcoholDrinks) || 0);
+      const sleepH = data.sleepHours ?? 7;
+      const calc = calculateDailyVFScore({
+        caloriesIn: dailyCaloriesIn,
+        caloriesOut: dailyCaloriesOut,
+        proteinG: dailyProteinG,
+        proteinGoal,
+        fastingHours: fastingH,
+        alcoholDrinks: drinks,
+        sleepHours: sleepH,
+        seedOilMeals: 0,
+        weightKg: data.weightKg,
+        bodyFatPct: data.bodyFatPct,
+        heightCm: data.heightCm,
+        age: prefs?.profile?.age,
+        foodLogs: todayFoodLogs ?? undefined,
+        exerciseLogs: todayExerciseLogs ?? undefined,
+        fitbitActivities,
+      });
+
+      const [yr, mo, dy] = selectedDateStr.split('-').map(Number);
+      const displayDate = new Date(yr, (mo || 1) - 1, dy || 1).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      });
+
+      const existingHistory = [...(data.history ?? [])];
+      const existingIdx = existingHistory.findIndex((h) => (h.isoDate || h.date) === selectedDateStr);
+      const prevGain = existingIdx >= 0 ? existingHistory[existingIdx].gain : 0;
+      const newEquity = (data.visceralFatPoints || 0) - prevGain + calc.score;
+
+      const updatedEntry: HistoryEntry = {
+        date: displayDate,
+        isoDate: selectedDateStr,
+        gain: calc.score,
+        status: calc.score >= 0 ? 'Bullish' : 'Correction',
+        detail: calc.summary,
+        equity: existingIdx >= 0 ? existingHistory[existingIdx].equity - prevGain + calc.score : newEquity,
+        breakdown: {
+          caloriesIn: dailyCaloriesIn,
+          caloriesOut: dailyCaloriesOut,
+          proteinG: dailyProteinG,
+          proteinGoal,
+          fastingHours: fastingH,
+          sleepHours: sleepH,
+          ...calc.breakdown,
+        },
+        scoringVersion: CURRENT_SCORING_RELEASE.version,
+        dayNote: lockDayNote.trim() || undefined,
+      };
+
+      if (existingIdx >= 0) {
+        existingHistory[existingIdx] = updatedEntry;
+      } else {
+        existingHistory.push(updatedEntry);
+      }
+
+      await healthService.updateHealthData(db, user.uid, {
+        visceralFatPoints: newEquity,
+        history: existingHistory,
+      });
+
+      setScoreLockOpen(false);
+      toast({
+        title: `Scored ${selectedDateStr}: ${calc.score >= 0 ? '+' : ''}${calc.score} pts`,
+        description: `Saved to Ledger with v${CURRENT_SCORING_RELEASE.version} (${CURRENT_SCORING_RELEASE.codename}) — 0 Gemini tokens used.`,
+      });
+    } catch (err) {
+      console.error('[handleLockDayScore] Failed:', err);
+      toast({ variant: 'destructive', title: 'Score Save Failed', description: 'Could not update ledger.' });
+    } finally {
+      setIsLockingScore(false);
+    }
+  };
 
   const nowSlot = React.useMemo(() => {
     if (!isViewingToday) return null;
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
-    return Math.max(0, Math.min(96 - 1, Math.round((nowMin - 6 * 60) / 15)));
+    return Math.max(0, Math.min(72, Math.round((nowMin - 6 * 60) / 15)));
   }, [isViewingToday]);
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-full space-y-6 p-6 md:p-12 lg:p-16 bg-background">
+      <div className="flex flex-col h-full space-y-6 p-6 md:p-10 bg-background">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-widest italic">Live Market Audit</h2>
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-widest italic">Daily Cockpit</h2>
           <div className="flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
             <span className="text-[12px] font-bold text-muted-foreground uppercase">Syncing Ledger...</span>
           </div>
         </div>
-        <div className="space-y-6">
-          <div className="h-32 bg-muted/50 animate-pulse rounded-2xl" />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="h-40 bg-muted/50 animate-pulse rounded-2xl" />
-            <div className="h-40 bg-muted/50 animate-pulse rounded-2xl" />
-            <div className="h-40 bg-muted/50 animate-pulse rounded-2xl hidden lg:block" />
-          </div>
+        <div className="space-y-4">
+          <div className="h-44 bg-muted/50 animate-pulse rounded-2xl" />
+          <div className="h-36 bg-muted/50 animate-pulse rounded-2xl" />
           <div className="h-40 bg-muted/50 animate-pulse rounded-2xl" />
         </div>
       </div>
@@ -409,40 +712,31 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     );
   }
 
-
   const proteinProgress = Math.min(100, (dailyProteinG / proteinGoal) * 100);
-  const fatProgress = Math.min(100, (visceralFatPoints / fatPointsGoal) * 100);
-
   const scoreHasFoodPending = isViewingToday && dailyCaloriesIn === 0;
   const scoreHasDevicePending = isViewingToday && (data && !data.isDeviceVerified);
-
-  // A stored past-day score is provisional when its calorie burn wasn't a
-  // finalised full-day device reading: either it was BMR-estimated (no device
-  // data), or the snapshot was captured mid-day (capturedOnDate is that same
-  // day, so caloriesOut is partial). Pressing "Sync Date" finalises it.
   const pastScoreProvisional = !isViewingToday && !!data.isDeviceVerified && !!historyEntry && (
     (!!fitbitForDate?.capturedOnDate && fitbitForDate.capturedOnDate <= selectedDateStr)
   );
 
+  const selectedDayVintage = inferScoringRelease(selectedHistoryEntry ?? { isoDate: selectedDateStr });
+  const selectedDayNote = getEffectiveDayNote(selectedHistoryEntry ?? { isoDate: selectedDateStr });
+  const nicknameList = Object.values(prefs?.foodNicknames ?? {});
+
   const handleConnectFitbit = async () => {
     if (!user) return;
-
     const provider = 'google' as const;
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_HEALTH_CLIENT_ID || process.env.NEXT_PUBLIC_FITBIT_CLIENT_ID;
     const providerLabel = 'Google Health';
 
     if (!clientId) {
-      // Never fabricate device data — a missing client ID is a configuration
-      // fault, so surface it instead of writing a verified-looking snapshot.
-      console.error(`[${provider}] Missing OAuth client ID — cannot start device link.`);
       toast({
         variant: 'destructive',
         title: `${providerLabel} Unavailable`,
-        description: `${providerLabel} linking is temporarily unavailable. Please try again later or connect a different device.`,
+        description: `${providerLabel} linking is temporarily unavailable.`,
       });
       return;
     }
-
     window.location.href = fitbitService.getAuthUrl(user.uid, provider);
   };
 
@@ -454,10 +748,8 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       const tzOffset = new Date().getTimezoneOffset();
       if (isViewingToday) {
         const localDate = new Date().toLocaleDateString('en-CA');
-        const tz = new Date().getTimezoneOffset();
-        result = await syncFitbitData(user.uid, localDate, tz);
+        result = await syncFitbitData(user.uid, localDate, tzOffset);
       } else {
-        // Viewing a past date — sync that date's snapshot only, never clobber today's live metrics.
         result = await syncFitbitSnapshot(user.uid, selectedDateStr, tzOffset);
       }
     } catch (e) {
@@ -466,40 +758,14 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       setIsSyncing(false);
     }
     if (!result) {
-      toast({ 
-        variant: 'destructive', 
-        title: 'Sync Failed', 
-        description: 'The server did not respond. Check your internet connection or server status.' 
-      });
+      toast({ variant: 'destructive', title: 'Sync Failed', description: 'The server did not respond.' });
     } else if (result.success) {
       toast({
         title: 'Sync Complete',
-        description: isViewingToday
-          ? 'Device data refreshed successfully.'
-          : `${selectedDateStr} data refreshed from your device.`,
+        description: isViewingToday ? 'Device data refreshed.' : `${selectedDateStr} refreshed from device.`,
       });
     } else {
-      const descriptions: Record<string, string> = {
-        no_credentials: 'Security handshake missing. Please reconnect your device.',
-        token_refresh_failed: 'Device access has expired. Re-authenticate to restore sync.',
-        api_failed: 'Health API returned an error.',
-        write_failed: 'Data retrieved but database update failed. Your progress is safe but unrecorded.',
-      };
-
-      let finalDesc = descriptions[result.reason] ?? 'An unexpected error occurred during sync.';
-      if (result.details) {
-        const { httpStatus, endpoint, body, message } = result.details;
-        finalDesc += `\n\nDetails: ${message || ''}`;
-        if (httpStatus) finalDesc += ` (Status: ${httpStatus})`;
-        if (endpoint) finalDesc += ` on ${endpoint}`;
-        if (body) finalDesc += `\nRaw: ${body}`;
-      }
-
-      toast({ 
-        variant: 'destructive', 
-        title: 'Sync Failed', 
-        description: finalDesc
-      });
+      toast({ variant: 'destructive', title: 'Sync Failed', description: result.details?.message || 'Could not sync device.' });
     }
   };
 
@@ -507,39 +773,17 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     if (!user) return;
     const result = await disconnectFitbit(user.uid);
     if (result.ok) {
-      toast({ title: 'Fitbit Disconnected', description: 'Your device connection has been removed.' });
-    } else {
-      console.error('[Fitbit Disconnect] Server action failed:', result.error);
-      toast({
-        variant: 'destructive',
-        title: 'Disconnect Failed',
-        description: result.error || 'Could not remove Fitbit connection.',
-      });
+      toast({ title: 'Device Disconnected', description: 'Your device connection has been removed.' });
     }
   };
 
   const handleConnectOura = async () => {
     if (!user) return;
-
     const result = await getOuraAuthUrl(user.uid, window.location.origin);
-
-    if ('error' in result) {
-      toast({ variant: 'destructive', title: 'Connection Failed', description: result.error });
+    if ('error' in result || 'mock' in result) {
+      toast({ variant: 'destructive', title: 'Oura Unavailable', description: 'Oura linking is currently unavailable.' });
       return;
     }
-
-    if ('mock' in result) {
-      // Never fabricate device data — a missing client ID is a configuration
-      // fault, so surface it instead of writing a verified-looking snapshot.
-      console.error('[Oura] Missing OAuth client ID — cannot start device link.');
-      toast({
-        variant: 'destructive',
-        title: 'Oura Unavailable',
-        description: 'Oura linking is temporarily unavailable. Please try again later or connect a different device.',
-      });
-      return;
-    }
-
     window.location.href = result.url;
   };
 
@@ -551,46 +795,21 @@ const WithingsLogo = ({ className }: { className?: string }) => (
       const localDate = new Date().toLocaleDateString('en-CA');
       result = await syncOuraData(user.uid, localDate);
     } catch (e) {
-      console.error('[handleResyncOura] syncOuraData threw:', e);
+      console.error('[handleResyncOura] threw:', e);
     } finally {
       setIsOuraSyncing(false);
     }
-    if (!result) {
-      toast({ 
-        variant: 'destructive', 
-        title: 'Sync Failed', 
-        description: 'Oura server did not respond. Check your ring connection or internet.' 
-      });
-    } else if (result.success) {
-      toast({ title: 'Sync Complete', description: 'Oura data refreshed from your ring.' });
+    if (result?.success) {
+      toast({ title: 'Sync Complete', description: 'Oura data refreshed.' });
     } else {
-      const descriptions: Record<string, string> = {
-        no_credentials: 'Oura credentials missing. Please reconnect your Oura Ring.',
-        token_refresh_failed: 'Oura Ring session expired. Re-authentication is required.',
-        api_failed: 'Oura API error. The service may be briefly down.',
-        write_failed: 'Sync pulled data but could not save to your ledger.',
-      };
-      toast({
-        variant: 'destructive',
-        title: 'Sync Failed',
-        description: descriptions[result.reason] ?? 'Oura sync failed unexpectedly.',
-      });
+      toast({ variant: 'destructive', title: 'Oura Sync Failed', description: 'Could not refresh Oura data.' });
     }
   };
 
   const handleDisconnectOura = async () => {
     if (!user) return;
     const result = await disconnectOura(user.uid);
-    if (result.ok) {
-      toast({ title: 'Oura Ring Disconnected', description: 'Your device connection has been removed.' });
-    } else {
-      console.error('[Oura Disconnect] Server action failed:', result.error);
-      toast({
-        variant: 'destructive',
-        title: 'Disconnect Failed',
-        description: result.error || 'Could not remove Oura connection.',
-      });
-    }
+    if (result.ok) toast({ title: 'Oura Disconnected' });
   };
 
   const handleConnectWithings = async () => {
@@ -609,14 +828,7 @@ const WithingsLogo = ({ className }: { className?: string }) => (
     try {
       const localDate = new Date().toLocaleDateString('en-CA');
       const result = await syncWithingsData(user.uid, localDate);
-      if (result.success) {
-        toast({ title: 'Withings Sync Complete', description: 'Calorie data refreshed from Withings.' });
-      } else {
-        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not sync Withings data.' });
-      }
-    } catch (e) {
-      console.error('[handleResyncWithings] Failed:', e);
-      toast({ variant: 'destructive', title: 'Sync Error', description: 'An unexpected error occurred.' });
+      if (result.success) toast({ title: 'Withings Sync Complete' });
     } finally {
       setIsWithingsSyncing(false);
     }
@@ -625,455 +837,917 @@ const WithingsLogo = ({ className }: { className?: string }) => (
   const handleDisconnectWithings = async () => {
     if (!user) return;
     const result = await disconnectWithings(user.uid);
-    if (result.ok) {
-      toast({ title: 'Withings Disconnected', description: 'Withings connection removed.' });
-    } else {
-      toast({ variant: 'destructive', title: 'Disconnect Failed', description: 'Could not disconnect Withings.' });
-    }
+    if (result.ok) toast({ title: 'Withings Disconnected' });
   };
 
+  const runwayStyles = {
+    clear: {
+      bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950',
+      badge: 'bg-emerald-600 text-white',
+      label: 'RUNWAY CLEAR',
+    },
+    eat_soon: {
+      bg: 'bg-amber-500/10 border-amber-500/30 text-amber-950',
+      badge: 'bg-amber-500 text-white',
+      label: 'FEED WINDOW APPROACHING',
+    },
+    eat_now: {
+      bg: 'bg-red-500/10 border-red-500/30 text-red-950',
+      badge: 'bg-red-600 text-white',
+      label: 'EAT NOW — PROTECT MUSCLE',
+    },
+  }[eatRunway.status];
+
   return (
-    <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
-      <div className="space-y-6">
-        <div className="flex items-center justify-between px-1">
-          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] italic">
-            {isViewingToday ? 'Live Market Audit' : 'Historical Audit'}
+    <div className="flex flex-col gap-6 p-4 sm:p-6 md:p-10 pb-24 bg-background h-full overflow-y-auto">
+      {/* ── Compact Top Bar: Date Picker + Slim Device Sync Pill ── */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2">
+          <h2 className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em] italic">
+            {isViewingToday ? 'Daily Cockpit' : `Historical Cockpit · ${selectedDateStr}`}
           </h2>
-          <div className="flex items-center gap-2">
-            {!isViewingToday && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
-                onClick={() => setSelectedDateStr(todayStr)}
-              >
-                <RotateCcw className="w-3 h-3 mr-1" />
-                Today
-              </Button>
-            )}
-            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-3 text-[10px] font-black uppercase tracking-widest gap-1.5"
-                >
-                  <CalendarIcon className="w-3 h-3" />
-                  {isViewingToday ? 'Today' : selectedDateStr}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  mode="single"
-                  selected={selectedDateObj}
-                  onSelect={handleDateSelect}
-                  disabled={(date) => date > new Date()}
-                  autoFocus
-                />
-              </PopoverContent>
-            </Popover>
-            {isViewingToday ? (
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                <span className="text-[12px] font-bold text-emerald-600 uppercase">Active Session</span>
-              </div>
-            ) : (
-              <span className="text-[12px] font-bold text-muted-foreground uppercase">Historical</span>
-            )}
-          </div>
+          <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">
+            v{selectedDayVintage.version} {selectedDayVintage.codename}
+          </span>
         </div>
 
-        {data.isDeviceVerified && (data.connectedDevice === 'oura' || (!data.connectedDevice && ouraCreds)) ? (
-          // Oura Ring connected
-          <Card className="border-none bg-violet-50 ring-1 ring-violet-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-violet-100 rounded-lg">
-                  <OuraLogo className="w-5 h-5 text-violet-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-tight text-violet-800">Oura Ring Connected</p>
-                  <p className="text-[10px] font-bold text-violet-700/70">
-                    {ouraCreds?.lastSyncedAt
-                      ? `Last synced ${formatTimeAgo(ouraCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
-                      : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={handleDisconnectOura} className="text-violet-800 border-violet-200 hover:bg-violet-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
-                  <Unplug className="w-3 h-3 mr-1.5" />
-                  Reset
-                </Button>
-                <Button size="sm" onClick={handleResyncOura} disabled={isOuraSyncing} className="bg-violet-600 hover:bg-violet-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                  {isOuraSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                  Sync Now
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : data.isDeviceVerified && data.connectedDevice === 'withings' ? (
-          // Withings connected
-          <Card className="border-none bg-blue-50 ring-1 ring-blue-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <WithingsLogo className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-tight text-blue-800">Withings Connected</p>
-                  <p className="text-[10px] font-bold text-blue-700/70">
-                    {withingsCreds?.lastSyncedAt
-                      ? `Last synced ${formatTimeAgo(withingsCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
-                      : 'Device-verified calorie tracking enabled.'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={handleDisconnectWithings} className="text-blue-800 border-blue-200 hover:bg-blue-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
-                  <Unplug className="w-3 h-3 mr-1.5" />
-                  Reset
-                </Button>
-                <Button size="sm" onClick={handleResyncWithings} disabled={isWithingsSyncing} className="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                  {isWithingsSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                  Sync Now
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : data.isDeviceVerified ? (
-          // Fitbit connected (catch-all for legacy users with no connectedDevice field)
-          <div className="space-y-4">
-            <Card className="border-none bg-emerald-50 ring-1 ring-emerald-200 shadow-sm overflow-hidden">
-              <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-100 rounded-lg shrink-0 flex items-center gap-1.5">
-                    <FitbitLogo className="w-5 h-5 text-emerald-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-tight text-emerald-800">
-                      {isLegacyFitbit ? 'Fitbit Connected' : 'Google Health Connected'}
-                    </p>
-                    <p className="text-[10px] font-bold text-emerald-700/70">
-                      {fitbitCreds?.lastSyncedAt
-                        ? `Last synced ${formatTimeAgo(fitbitCreds.lastSyncedAt)}. Auto-refreshes every 6h.`
-                        : 'Device-verified steps, sleep, and HRV. Auto-refreshes every 6h.'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Button size="sm" variant="outline" onClick={handleDisconnectFitbit} className="flex-1 sm:flex-none text-emerald-800 border-emerald-200 hover:bg-emerald-100 uppercase font-black text-[10px] h-8 px-3 rounded-lg">
-                    <Unplug className="w-3 h-3 mr-1.5" />
-                    Reset
-                  </Button>
-                  <Button size="sm" onClick={handleResync} disabled={isSyncing} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase h-8 px-4 rounded-lg">
-                    {isSyncing ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <RefreshCw className="w-3 h-3 mr-2" />}
-                    {isViewingToday ? 'Sync Now' : 'Sync Date'}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          // No device connected — offer both options
-          <Card className="border-none bg-orange-50 ring-1 ring-orange-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-100 rounded-lg">
-                  <ShieldAlert className="w-5 h-5 text-orange-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-tight text-orange-800">Self-Reported Data</p>
-                  <p className="text-[10px] font-bold text-orange-700/70">Connect a device for verified steps, sleep, and calories.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={handleConnectOura} className="bg-white border border-violet-200 hover:bg-violet-50 text-violet-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
-                  <OuraLogo className="w-3.5 h-3.5 mr-2" />
-                  Oura
-                </Button>
-                
-                <Button size="sm" onClick={handleConnectFitbit} className="bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
-                  <FitbitLogo className="w-3.5 h-3.5 mr-2 text-emerald-600" />
-                  Google Health
-                </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!isViewingToday && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              onClick={() => setSelectedDateStr(todayStr)}
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />
+              Today
+            </Button>
+          )}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-[10px] font-black uppercase tracking-widest gap-1.5"
+              >
+                <CalendarIcon className="w-3 h-3" />
+                {isViewingToday ? 'Today' : selectedDateStr}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={selectedDateObj}
+                onSelect={handleDateSelect}
+                disabled={(date) => date > new Date()}
+                autoFocus
+              />
+            </PopoverContent>
+          </Popover>
 
-                <Button size="sm" onClick={handleConnectWithings} className="bg-white border border-blue-200 hover:bg-blue-50 text-blue-700 font-black text-[10px] uppercase h-8 px-4 rounded-lg shadow-sm">
-                  <WithingsLogo className="w-3.5 h-3.5 mr-2" />
-                  Withings
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+          {/* Compact Device Sync Pill */}
+          {data.isDeviceVerified && (data.connectedDevice === 'oura' || (!data.connectedDevice && ouraCreds)) ? (
+            <div className="flex items-center gap-1 bg-violet-50 border border-violet-200 rounded-lg px-2 py-0.5">
+              <OuraLogo className="w-3.5 h-3.5 text-violet-600" />
+              <span className="text-[9px] font-black uppercase text-violet-800 hidden sm:inline">
+                {ouraCreds?.lastSyncedAt ? formatTimeAgo(ouraCreds.lastSyncedAt) : 'Oura'}
+              </span>
+              <Button size="sm" variant="ghost" onClick={handleResyncOura} disabled={isOuraSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-violet-700 hover:bg-violet-100">
+                {isOuraSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDisconnectOura} className="h-5 px-1 text-violet-500 hover:text-violet-800" title="Disconnect Oura">
+                <Unplug className="w-2.5 h-2.5" />
+              </Button>
+            </div>
+          ) : data.isDeviceVerified && data.connectedDevice === 'withings' ? (
+            <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-0.5">
+              <WithingsLogo className="w-3.5 h-3.5 text-blue-600" />
+              <span className="text-[9px] font-black uppercase text-blue-800 hidden sm:inline">
+                {withingsCreds?.lastSyncedAt ? formatTimeAgo(withingsCreds.lastSyncedAt) : 'Withings'}
+              </span>
+              <Button size="sm" variant="ghost" onClick={handleResyncWithings} disabled={isWithingsSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-blue-700 hover:bg-blue-100">
+                {isWithingsSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDisconnectWithings} className="h-5 px-1 text-blue-500 hover:text-blue-800" title="Disconnect Withings">
+                <Unplug className="w-2.5 h-2.5" />
+              </Button>
+            </div>
+          ) : data.isDeviceVerified ? (
+            <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-0.5">
+              <FitbitLogo className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-[9px] font-black uppercase text-emerald-800">
+                {fitbitCreds?.lastSyncedAt ? formatTimeAgo(fitbitCreds.lastSyncedAt) : (isLegacyFitbit ? 'Fitbit' : 'Health')}
+              </span>
+              <Button size="sm" variant="ghost" onClick={handleResync} disabled={isSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-emerald-700 hover:bg-emerald-100">
+                {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                {isViewingToday ? 'Sync' : 'Sync Date'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDisconnectFitbit} className="h-5 px-1 text-emerald-500 hover:text-emerald-800" title="Disconnect Device">
+                <Unplug className="w-2.5 h-2.5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="outline" onClick={handleConnectFitbit} className="h-7 px-2 text-[9px] font-black uppercase border-emerald-200 text-emerald-700">
+                <FitbitLogo className="w-3 h-3 mr-1" /> Connect Health
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleConnectOura} className="h-7 px-2 text-[9px] font-black uppercase border-violet-200 text-violet-700">
+                <OuraLogo className="w-3 h-3 mr-1" /> Oura
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
 
-        {/* Alpert Daily Score */}
-        <Card className="border-none shadow-xl overflow-hidden">
-          <CardContent className="p-0">
-            <div className={`p-6 ${dailyAlpertScore !== null && dailyAlpertScore >= 0 ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : dailyAlpertScore !== null ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-slate-600 to-slate-800'} text-white`}>
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.25em] opacity-70">{isViewingToday ? "Today's Score" : "Day's Score"}</p>
-                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest mt-0.5">Fat Burn Index</p>
+      {/* ── ROW 1: Daily Cockpit (VF Score + Calories + 3-Signal "Should I Eat Now?" & Protein To Go) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Left 5 cols: Today's VF Score + Explicit Calories In / Out / Deficit */}
+        <Card className="lg:col-span-5 border-none shadow-lg overflow-hidden flex flex-col justify-between">
+          <div
+            className={`p-5 sm:p-6 flex-1 flex flex-col justify-between ${
+              dailyAlpertScore !== null && dailyAlpertScore >= 0
+                ? 'bg-gradient-to-br from-emerald-600 to-emerald-800'
+                : dailyAlpertScore !== null
+                  ? 'bg-gradient-to-br from-red-600 to-red-800'
+                  : 'bg-gradient-to-br from-slate-700 to-slate-900'
+            } text-white`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">
+                    {isViewingToday ? "Today's VF Score" : `${selectedDateStr} Score`}
+                  </p>
+                  <span className="px-1.5 py-0.5 rounded bg-white/15 text-[9px] font-black uppercase tracking-wider">
+                    v{selectedDayVintage.version}
+                  </span>
                 </div>
-                <div className="p-2.5 bg-white/15 rounded-xl">
-                  <Zap className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="flex items-end gap-3 mb-4">
-                <div className="text-6xl font-black italic tracking-tighter">
-                  {dailyAlpertScore !== null ? (
-                    <>{dailyAlpertScore > 0 ? '+' : ''}{dailyAlpertScore}{(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && <span className="text-2xl opacity-60">*</span>}</>
-                  ) : '—'}
-                </div>
-                <div className="text-sm font-bold opacity-60 mb-2">pts</div>
-              </div>
-              <div className="h-1.5 bg-white/20 rounded-full mb-4">
-                {dailyAlpertScore !== null && dailyAlpertScore > 0 && (
-                  <div className="h-full bg-white rounded-full transition-all duration-500" style={{ width: `${Math.min(100, dailyAlpertScore)}%` }} />
+                {selectedDayNote && (
+                  <p className="text-[11px] font-bold text-amber-200 mt-1 line-clamp-1 italic">
+                    “{selectedDayNote}”
+                  </p>
                 )}
               </div>
-              <div className="flex items-center justify-between text-[10px] font-bold opacity-60 uppercase tracking-wider">
-                <span>{dailyCaloriesOut > 0 && dailyCaloriesIn > 0
-                  ? `${Math.abs(alpertDeficit).toLocaleString()} kcal ${alpertDeficit >= 0 ? 'deficit' : 'surplus'}`
-                  : isViewingToday && dailyCaloriesOut > 0
-                    ? `${scoredCaloriesOut.toLocaleString()} kcal deficit · no food logged`
-                    : 'Log food to calculate'}</span>
-                <span>Max burn: {alpertNumber.toLocaleString()} kcal</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setScoreLockOpen((v) => !v)}
+                className="h-7 px-2.5 text-[9px] font-black uppercase tracking-wider bg-white/15 hover:bg-white/25 text-white border-none shrink-0"
+              >
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                {selectedHistoryEntry ? 'Update Score / Note' : 'Lock Score'}
+              </Button>
+            </div>
+
+            <div className="my-4 flex items-baseline justify-between gap-4">
+              <div className="flex items-baseline gap-2">
+                <span className="text-5xl sm:text-6xl font-black italic tracking-tighter">
+                  {dailyAlpertScore !== null ? (
+                    <>
+                      {dailyAlpertScore > 0 ? '+' : ''}
+                      {dailyAlpertScore}
+                      {(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && (
+                        <span className="text-2xl opacity-60">*</span>
+                      )}
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </span>
+                <span className="text-xs font-black uppercase opacity-70">pts</span>
+              </div>
+
+              {/* Protein To Go Pill right inside the hero card for instant glanceability */}
+              {showProtein && (
+                <div className="text-right bg-black/20 rounded-xl px-3 py-2 backdrop-blur-sm">
+                  <p className="text-[9px] font-black uppercase tracking-wider opacity-75">Protein To Go</p>
+                  <p className="text-xl sm:text-2xl font-black italic tracking-tight text-amber-300">
+                    {eatRunway.proteinToGoG > 0 ? `${eatRunway.proteinToGoG}g` : 'HIT ✓'}
+                  </p>
+                  <p className="text-[9px] font-bold opacity-75">
+                    {dailyProteinG}g / {proteinGoal}g
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Explicit 3-Column Calorie Ledger */}
+            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/15 text-left">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">Calories In</p>
+                <p className="text-base sm:text-lg font-black">{dailyCaloriesIn.toLocaleString()}</p>
+                <p className="text-[9px] opacity-60">{dailyCarbsG}g carbs</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">Counted Burn</p>
+                <p className="text-base sm:text-lg font-black">{scoredCaloriesOut.toLocaleString()}</p>
+                <p className="text-[9px] opacity-60">Watch: {dailyCaloriesOut.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">
+                  {alpertDeficit >= 0 ? 'Net Deficit' : 'Net Surplus'}
+                </p>
+                <p className="text-base sm:text-lg font-black">
+                  {alpertDeficit >= 0 ? `-${alpertDeficit.toLocaleString()}` : `+${Math.abs(alpertDeficit).toLocaleString()}`}
+                </p>
+                <p className="text-[9px] opacity-60">Cap: {alpertNumber.toLocaleString()}</p>
               </div>
             </div>
-            {(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && (
-              <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2">
-                <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
-                  {pastScoreProvisional ? 'Provisional — burn estimated. Press “Sync Date” to finalize.' :
-                   scoreHasFoodPending && scoreHasDevicePending ? 'Pending food log + device sync' :
-                   scoreHasFoodPending ? 'Pending food log' : 'Pending device sync — burn estimated'}
+          </div>
+
+          {/* Inline Zero-AI Score / Day Note Drawer */}
+          {scoreLockOpen && (
+            <div className="p-4 bg-slate-900 text-white border-t border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                  Zero-AI Score & Sheet Note ({selectedDateStr})
+                </p>
+                <span className="text-[9px] text-slate-400">0 Gemini calls</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] font-bold uppercase text-slate-400">Fasting Hours</label>
+                  <Input
+                    type="number"
+                    value={lockFastingHours}
+                    onChange={(e) => setLockFastingHours(e.target.value)}
+                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold uppercase text-slate-400">Alcohol Drinks</label>
+                  <Input
+                    type="number"
+                    value={lockAlcoholDrinks}
+                    onChange={(e) => setLockAlcoholDrinks(e.target.value)}
+                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-bold uppercase text-slate-400">Day Note (Sheet Notes Column)</label>
+                <Input
+                  type="text"
+                  placeholder="e.g. Hoops + 19h fast, or Date night wine..."
+                  value={lockDayNote}
+                  onChange={(e) => setLockDayNote(e.target.value)}
+                  className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setScoreLockOpen(false)} className="h-7 text-[10px] text-slate-300">
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleLockDayScore}
+                  disabled={isLockingScore}
+                  className="h-7 px-3 text-[10px] font-black uppercase bg-emerald-500 hover:bg-emerald-600 text-white"
+                >
+                  {isLockingScore ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  Save to Ledger
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Right 7 cols: Smarter 3-Signal Alpert "Should I Eat Now?" & Protein Pacing Runway */}
+        <Card className={`lg:col-span-7 border shadow-md overflow-hidden ${runwayStyles.bg}`}>
+          <CardContent className="p-5 sm:p-6 flex flex-col justify-between h-full gap-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${runwayStyles.badge}`}>
+                    {runwayStyles.label}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
+                    Alpert & Glycogen Timing Engine
+                  </span>
+                </div>
+                <h3 className="text-lg sm:text-xl font-black tracking-tight">
+                  {eatRunway.headline}
+                </h3>
+                <p className="text-xs font-medium opacity-80 leading-relaxed">
+                  {eatRunway.subline}
                 </p>
               </div>
-            )}
-            {alpertPace && (
-              <div className="px-4 py-2.5 bg-red-50 border-t border-red-200 flex items-start gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] font-black text-red-700 uppercase tracking-wide">
-                    {alpertPace.fasted ? 'Fasted Past Max Fat Burn — Muscle Loss Risk' : 'Pace Breach — Muscle Loss Risk'}
+            </div>
+
+            {/* 3-Signal Metrics Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Signal 1: Intraday Fuel Tank / Muscle Clock */}
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                    1. Intraday Fuel Tank
+                  </span>
+                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <p className="text-sm font-black text-foreground">
+                  {eatRunway.muscleBurnStartTimeLabel
+                    ? `Muscle risk @ ${eatRunway.muscleBurnStartTimeLabel}`
+                    : 'Protected all day'}
+                </p>
+                <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
+                  Liver buffer: {eatRunway.liverKcalRemaining} kcal
+                  {eatRunway.hoursUntilMuscleBurn !== null ? ` · ~${eatRunway.hoursUntilMuscleBurn}h left` : ''}
+                </p>
+              </div>
+
+              {/* Signal 2: Alpert Calorie Floor & 100-Pt Intake Target */}
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                    2. Alpert Floor & 100-Pt
+                  </span>
+                  <Flame className="w-3.5 h-3.5 text-orange-600" />
+                </div>
+                <p className="text-sm font-black text-foreground">
+                  {eatRunway.kcalToAlpertFloor > 0
+                    ? `Eat ≥${eatRunway.kcalToAlpertFloor.toLocaleString()} kcal more`
+                    : `Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) cleared ✓`}
+                </p>
+                <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
+                  100-pt intake: {eatRunway.target100PtIntakeKcal.toLocaleString()} kcal (
+                  {eatRunway.kcalLeftFor100Pts >= 0
+                    ? `${eatRunway.kcalLeftFor100Pts.toLocaleString()} left`
+                    : `${Math.abs(eatRunway.kcalLeftFor100Pts).toLocaleString()} over`}
+                  )
+                </p>
+              </div>
+
+              {/* Signal 3: Protein Pacing Window */}
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                    3. Protein Window
+                  </span>
+                  <Utensils className="w-3.5 h-3.5 text-purple-600" />
+                </div>
+                <p className="text-sm font-black text-foreground">
+                  {eatRunway.proteinToGoG > 0
+                    ? `${eatRunway.proteinToGoG}g to go (${eatRunway.mealsNeededForProtein} meal${eatRunway.mealsNeededForProtein === 1 ? '' : 's'})`
+                    : `${proteinGoal}g Target Hit ✓`}
+                </p>
+                <div className="mt-1.5">
+                  <Progress value={proteinProgress} className="h-1.5 bg-purple-100" />
+                  <p className="text-[9px] font-bold text-muted-foreground mt-1">
+                    {dailyProteinG}g / {proteinGoal}g · {eatRunway.hoursUntilKitchenClose}h to 8:30 PM
                   </p>
-                  {alpertPace.fasted ? (
-                    <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
-                      No food logged today. Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit vs {alpertNumber.toLocaleString()} kcal max fat burn
-                      — about {alpertPace.projectedBeyondAlpert.toLocaleString()} kcal has to come from glycogen or muscle.
-                      Keep movement easy (walking, not intervals) and break the fast protein-first (~40 g).
-                      Eaten already? Log it — this assumes zero intake.
-                    </p>
-                  ) : (
-                    <p className="text-[9px] font-bold text-red-600/80 mt-0.5 leading-relaxed">
-                      Burning at {alpertPace.currentHourlyRate} kcal/hr vs {alpertPace.hourlyBudget} kcal/hr ceiling.
-                      Projected {alpertPace.projectedDaily.toLocaleString()} kcal deficit exceeds max burn of {alpertNumber.toLocaleString()} kcal — eat to protect lean assets.
-                    </p>
+                </div>
+              </div>
+            </div>
+
+            {alpertPace && eatRunway.status === 'clear' && (
+              <div className="flex items-center gap-2 text-[10px] font-bold text-amber-800 bg-amber-100/70 px-3 py-1.5 rounded-lg">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Raw watch deficit is high ({alpertPace.projectedDaily.toLocaleString()} kcal proj), buffered by liver glycogen until {eatRunway.muscleBurnStartTimeLabel ?? 'evening'}.
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── ROW 2: Zero-AI Quick Log Bar (Ticker Book + Custom Food Entry, 0 Gemini Calls) ── */}
+      <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+        <CardContent className="p-3 sm:p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest">
+                Zero-AI Quick Log
+              </span>
+              <span className="text-[11px] font-bold text-muted-foreground">
+                Log saved Ticker meals or macros directly to Firestore without spending Gemini tokens
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setQuickFoodOpen((v) => !v)}
+              className="h-7 px-2.5 text-[10px] font-black uppercase tracking-wider"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Macro'}
+            </Button>
+          </div>
+
+          {nicknameList.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {nicknameList.map((nick) => (
+                <Button
+                  key={nick.nickname}
+                  size="sm"
+                  variant="secondary"
+                  disabled={isLoggingQuick}
+                  onClick={() => handleQuickLogNickname(nick)}
+                  className="h-7 px-2.5 text-[10px] font-bold rounded-lg bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200"
+                  title={`${nick.description}: ${nick.totalCalories} kcal, ${nick.totalProteinG}g P`}
+                >
+                  <Sparkles className="w-3 h-3 mr-1 text-emerald-600" />
+                  {nick.nickname}
+                  <span className="ml-1 opacity-60 text-[9px]">
+                    ({nick.totalCalories} kcal · {nick.totalProteinG}g P)
+                  </span>
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {quickFoodOpen && (
+            <form onSubmit={handleQuickCustomFoodSubmit} className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-2 border-t">
+              <Input
+                placeholder="Item name (e.g. Greek Yogurt)"
+                value={quickItemName}
+                onChange={(e) => setQuickItemName(e.target.value)}
+                className="h-8 text-xs sm:col-span-2"
+              />
+              <Input
+                type="number"
+                placeholder="Calories"
+                value={quickCalories}
+                onChange={(e) => setQuickCalories(e.target.value)}
+                className="h-8 text-xs"
+                required
+              />
+              <Input
+                type="number"
+                placeholder="Protein (g)"
+                value={quickProtein}
+                onChange={(e) => setQuickProtein(e.target.value)}
+                className="h-8 text-xs"
+              />
+              <select
+                value={quickMeal}
+                onChange={(e) => setQuickMeal(e.target.value as any)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium"
+              >
+                <option value="breakfast">Breakfast</option>
+                <option value="lunch">Lunch</option>
+                <option value="dinner">Dinner</option>
+                <option value="snack">Snack</option>
+              </select>
+              <Button type="submit" size="sm" disabled={isLoggingQuick} className="h-8 text-[10px] font-black uppercase">
+                {isLoggingQuick ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Plus className="w-3 h-3 mr-1" />}
+                Log Item
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── ROW 3: Flexible Level / Sprint Tracker (Replaces Google Sheet Right-Side Blocks) ── */}
+      {showVfScore && (
+        <Card className="border-none shadow-xl overflow-hidden bg-slate-900 text-white">
+          <CardContent className="p-5 sm:p-7 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 bg-emerald-500/20 rounded-2xl border border-emerald-500/30">
+                  <Trophy className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
+                      Active Level Sprint
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-white/10 text-[9px] font-bold text-slate-300">
+                      Since {activeLevel.startDate}
+                    </span>
+                    {activeLevel.engineEra && (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-[9px] font-bold text-emerald-300">
+                        {activeLevel.engineEra}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-2xl sm:text-3xl font-black italic tracking-tight mt-0.5">
+                    {activeLevel.name}
+                  </h3>
+                  {activeLevel.notes && (
+                    <p className="text-xs text-slate-400 mt-0.5">{activeLevel.notes}</p>
                   )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => openLevelEditor(activeLevel)}
+                  className="h-8 px-3 text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
+                >
+                  <Settings2 className="w-3.5 h-3.5 mr-1.5" />
+                  Edit / New Level
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPastLevelsOpen((v) => !v)}
+                  className="h-8 px-3 text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
+                >
+                  <History className="w-3.5 h-3.5 mr-1.5" />
+                  Sheet Levels ({levelHistory.length})
+                </Button>
+              </div>
+            </div>
+
+            {/* Google Sheet Columns: Total Points | Points per Day | Target | Points to Target | Days to Target | Fin Date */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total Points</p>
+                <p className="text-2xl font-black italic text-emerald-400 mt-0.5">
+                  {levelProgress.totalPoints.toLocaleString()}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  {levelProgress.daysScored} day{levelProgress.daysScored === 1 ? '' : 's'} scored
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Points per Day</p>
+                <p className="text-2xl font-black italic text-white mt-0.5">
+                  {levelProgress.pointsPerDay}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  7d pace: {levelProgress.rolling7dPointsPerDay}/d
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Target</p>
+                <p className="text-2xl font-black italic text-white mt-0.5">
+                  {levelProgress.targetPoints.toLocaleString()}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  {levelProgress.progressPct}% complete
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Points to Target</p>
+                <p className={`text-2xl font-black italic mt-0.5 ${levelProgress.pointsToTarget <= 0 ? 'text-emerald-400' : 'text-amber-300'}`}>
+                  {levelProgress.pointsToTarget.toLocaleString()}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  {levelProgress.pointsToTarget <= 0 ? 'Target beaten ✓' : 'Remaining'}
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Days to Target</p>
+                <p className="text-2xl font-black italic text-white mt-0.5">
+                  {levelProgress.daysToTarget !== null ? `${levelProgress.daysToTarget}d` : '—'}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  {levelProgress.requiredPointsPerDay !== null
+                    ? `Req: ${levelProgress.requiredPointsPerDay} pts/d`
+                    : 'At current pace'}
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Fin Date</p>
+                <p className="text-lg sm:text-xl font-black italic text-emerald-300 mt-1">
+                  {levelProgress.projectedFinishDate ?? '—'}
+                </p>
+                <p className="text-[9px] font-bold text-slate-400">
+                  All-Time: {visceralFatPoints.toLocaleString()} pts
+                </p>
+              </div>
+            </div>
+
+            <Progress value={Math.min(100, levelProgress.progressPct)} className="h-2 bg-white/10" />
+
+            {/* Inline Level Editor & Preset Switcher */}
+            {levelEditorOpen && (
+              <div className="p-4 rounded-xl bg-slate-800/90 border border-white/10 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                    Configure Active Level or Start Fresh Sprint
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 mr-1">Quick Presets:</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        handleSwitchPresetLevel({
+                          id: 'level-3-lock-in-2026',
+                          name: 'Level 3 - Lock-In (v3.2)',
+                          startDate: '2026-10-18',
+                          targetPoints: 1000,
+                          status: 'active',
+                          engineEra: 'v3.2 Taylor–Joule',
+                          notes: 'Fresh lock-in block starting Oct 18',
+                        })
+                      }
+                      className="h-6 px-2 text-[9px] font-black uppercase bg-slate-700 border-slate-600 text-white hover:bg-slate-600"
+                    >
+                      Oct 18 Lock-In (1,000 pts)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        handleSwitchPresetLevel({
+                          id: 'level-3-2026-cont',
+                          name: 'Level 3 (Continued)',
+                          startDate: '2026-07-20',
+                          targetPoints: 2000,
+                          status: 'active',
+                          engineEra: 'v3.1 / v3.2',
+                          notes: 'Continuing Level 3 from 7/20 toward 2,000 pts',
+                        })
+                      }
+                      className="h-6 px-2 text-[9px] font-black uppercase bg-slate-700 border-slate-600 text-white hover:bg-slate-600"
+                    >
+                      Continue Level 3 (7/20 · 2,000 pts)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        handleSwitchPresetLevel({
+                          id: 'level-3-retry-2026',
+                          name: 'Level 3 - Retry',
+                          startDate: '2026-10-11',
+                          targetPoints: 500,
+                          status: 'active',
+                          engineEra: 'v3.1 / v3.2',
+                          notes: '500-pt sprint from 10/11',
+                        })
+                      }
+                      className="h-6 px-2 text-[9px] font-black uppercase bg-slate-700 border-slate-600 text-white hover:bg-slate-600"
+                    >
+                      Level 3 Retry (10/11 · 500 pts)
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Level Name</label>
+                    <Input
+                      value={editLevelName}
+                      onChange={(e) => setEditLevelName(e.target.value)}
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Start Date</label>
+                    <Input
+                      type="date"
+                      value={editLevelStart}
+                      onChange={(e) => setEditLevelStart(e.target.value)}
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Target Points</label>
+                    <Input
+                      type="number"
+                      value={editLevelTarget}
+                      onChange={(e) => setEditLevelTarget(e.target.value)}
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Target Date (Opt)</label>
+                    <Input
+                      type="date"
+                      value={editLevelDeadline}
+                      onChange={(e) => setEditLevelDeadline(e.target.value)}
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Notes</label>
+                    <Input
+                      value={editLevelNotes}
+                      onChange={(e) => setEditLevelNotes(e.target.value)}
+                      placeholder="Optional sprint focus..."
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400">Carryover Offset Pts</label>
+                    <Input
+                      type="number"
+                      value={editLevelOffset}
+                      onChange={(e) => setEditLevelOffset(e.target.value)}
+                      className="h-8 text-xs bg-slate-900 border-slate-700 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                  <Button size="sm" variant="ghost" onClick={() => setLevelEditorOpen(false)} className="h-8 text-xs text-slate-300">
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleArchiveAndStartNewLevel()}
+                    className="h-8 text-xs font-black uppercase bg-amber-500/20 border-amber-500/40 text-amber-200 hover:bg-amber-500/30"
+                  >
+                    Archive Current & Start New Today
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveActiveLevel}
+                    className="h-8 text-xs font-black uppercase bg-emerald-500 hover:bg-emerald-600 text-white"
+                  >
+                    Save Level Settings
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Archived Google Sheet Levels Table */}
+            {pastLevelsOpen && (
+              <div className="p-4 rounded-xl bg-slate-800/80 border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-black uppercase tracking-wider text-slate-300">
+                    2026 Level History (Imported from Google Sheet)
+                  </p>
+                  <span className="text-[10px] text-slate-400">Click any level to make it active</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-white/10 text-[9px] font-black uppercase text-slate-400">
+                        <th className="py-2 pr-3">Level</th>
+                        <th className="py-2 pr-3">Dates</th>
+                        <th className="py-2 pr-3">Total Pts</th>
+                        <th className="py-2 pr-3">Target</th>
+                        <th className="py-2 pr-3">Pts/Day</th>
+                        <th className="py-2 pr-3">Engine Vintage</th>
+                        <th className="py-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {levelHistory.map((lvl) => {
+                        const p = computeLevelProgress(lvl, data.history ?? [], { todayIso: todayStr });
+                        return (
+                          <tr key={lvl.id} className="hover:bg-white/5">
+                            <td className="py-2 pr-3 font-black text-white">{lvl.name}</td>
+                            <td className="py-2 pr-3 text-slate-300">
+                              {lvl.startDate} → {lvl.endDate ?? 'Present'}
+                            </td>
+                            <td className={`py-2 pr-3 font-black ${p.totalPoints >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {p.totalPoints.toLocaleString()}
+                            </td>
+                            <td className="py-2 pr-3 text-slate-300">{lvl.targetPoints.toLocaleString()}</td>
+                            <td className="py-2 pr-3 text-slate-300">{p.pointsPerDay}/d</td>
+                            <td className="py-2 pr-3">
+                              <span className="px-1.5 py-0.5 rounded bg-white/10 text-[9px] font-bold text-slate-300">
+                                {lvl.engineEra ?? 'v2.0'}
+                              </span>
+                            </td>
+                            <td className="py-2 text-right">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleSwitchPresetLevel(lvl)}
+                                className="h-6 px-2 text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300"
+                              >
+                                Activate
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
           </CardContent>
         </Card>
+      )}
 
-        {showProtein && (
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10 flex items-center gap-8">
-              <div className="p-6 bg-purple-100 rounded-2xl shrink-0 shadow-sm">
-                <DollarSign className="w-10 h-10 text-accent" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-end mb-1">
-                  <p className="text-base font-black text-foreground uppercase tracking-tight">Protein Liquidity</p>
-                  <span className="text-sm font-black text-muted-foreground">{dailyProteinG}g <span className="opacity-50">/</span> {proteinGoal}g</span>
-                </div>
-                <p className="text-[10px] font-medium text-muted-foreground mb-3">Daily protein intake toward your goal. Tell the CFO what you ate to log it.</p>
-                <Progress value={proteinProgress} className="h-4 bg-purple-50" />
-                <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Solvency Status: {proteinProgress >= 100 ? 'BULLISH' : 'PENDING DEPOSIT'}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {showPlantMatter && (
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10 flex items-center gap-8">
-              <div className="p-6 bg-green-100 rounded-2xl shrink-0 shadow-sm">
-                <Activity className="w-10 h-10 text-green-700" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-end mb-1">
-                  <p className="text-base font-black text-foreground uppercase tracking-tight">Plant Matter</p>
-                  <span className="text-sm font-black text-muted-foreground">{Math.round(dailyPlantG)}g <span className="opacity-50">/</span> {plantGoalG}g</span>
-                </div>
-                <p className="text-[10px] font-medium text-muted-foreground mb-3">Raw weight of fruits + vegetables (Starrett 800g protocol). Tell the CFO what you ate so plant grams get tagged.</p>
-                <Progress value={plantProgress} className="h-4 bg-green-50" />
-                <p className="mt-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">Fiber Position: {plantProgress >= 100 ? 'FULLY ALLOCATED' : 'ACCUMULATING'}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10">
-              <div className="flex justify-between items-start mb-4">
-                <div className="p-3 bg-orange-100 rounded-xl shadow-sm">
-                  <Zap className="w-6 h-6 text-orange-600" />
-                </div>
-                {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
-              </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Steps Inventory</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Daily steps from {
-                data.connectedDevice === 'oura' ? 'Oura Ring'
-                  : data.connectedDevice === 'withings' ? 'Withings'
-                  : 'Fitbit'
-              }</p>
-              <h4 className="text-4xl font-black italic">
+      {/* ── ROW 4: Compact Vitals Strip (Steps, Recovery, Weight, MPS, + Optional Plant Matter) ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">Steps</p>
+              <h4 className="text-2xl font-black italic mt-0.5">
                 {isViewingToday
                   ? (data.steps || 0).toLocaleString()
                   : fitbitForDate?.steps != null ? fitbitForDate.steps.toLocaleString() : 'N/A'}
               </h4>
-              <div className="mt-4 h-1 w-12 bg-orange-200 rounded-full" />
-            </CardContent>
-          </Card>
+            </div>
+            <div className="p-2.5 bg-orange-100 rounded-xl">
+              <Zap className="w-5 h-5 text-orange-600" />
+            </div>
+          </CardContent>
+        </Card>
 
-          {showRecovery && (
-            <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-              <CardContent className="p-6 sm:p-10">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 bg-blue-100 rounded-xl shadow-sm">
-                    <Target className="w-6 h-6 text-blue-600" />
-                  </div>
-                  {data.isDeviceVerified && <ShieldCheck className="w-4 h-4 text-emerald-500" />}
-                </div>
-                <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Recovery Audit</p>
-                <p className="text-[10px] font-medium text-muted-foreground mb-2">
-                  Based on HRV ({isViewingToday
-                    ? (data.hrv > 0 ? `${data.hrv}ms` : 'no reading')
-                    : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : 'no reading')})
+        {showRecovery && (
+          <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                  Recovery ({isViewingToday ? (data.hrv > 0 ? `${data.hrv}ms` : '—') : (fitbitForDate?.hrv ? `${fitbitForDate.hrv}ms` : '—')})
                 </p>
-                <h4 className="text-4xl font-black italic uppercase tracking-tighter">
+                <h4 className="text-2xl font-black italic uppercase mt-0.5">
                   {isViewingToday
                     ? (data.hrv > 0 ? (data.recoveryStatus || 'MEDIUM') : 'N/A')
                     : (fitbitForDate?.recoveryStatus?.toUpperCase() ?? 'N/A')}
                 </h4>
-                <div className="mt-4 h-1 w-12 bg-blue-200 rounded-full" />
-              </CardContent>
-            </Card>
+              </div>
+              <div className="p-2.5 bg-blue-100 rounded-xl">
+                <Target className="w-5 h-5 text-blue-600" />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">Weight</p>
+              <h4 className="text-2xl font-black italic mt-0.5">
+                {data.weightKg ? `${data.weightKg}kg` : 'N/A'}
+              </h4>
+            </div>
+            <div className="p-2.5 bg-emerald-100 rounded-xl">
+              <Scale className="w-5 h-5 text-emerald-600" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">Anabolic MPS</p>
+              <h4 className="text-2xl font-black italic mt-0.5">
+                {simulationResult
+                  ? `${Math.round(simulationResult.slots[nowSlot || simulationResult.slots.length - 1].anabolicSignal * 100)}%`
+                  : 'N/A'}
+              </h4>
+            </div>
+            <div className="p-2.5 bg-red-100 rounded-xl">
+              <Activity className="w-5 h-5 text-red-600" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {showPlantMatter && (
+        <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-3 bg-green-100 rounded-xl shrink-0">
+              <Activity className="w-5 h-5 text-green-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between items-end mb-1">
+                <p className="text-xs font-black text-foreground uppercase">Plant Matter (Starrett 800g)</p>
+                <span className="text-xs font-black text-muted-foreground">{Math.round(dailyPlantG)}g / {plantGoalG}g</span>
+              </div>
+              <Progress value={plantProgress} className="h-2 bg-green-50" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── ROW 5: Collapsible Deep-Dive Metabolic Charts (Collapsed by default to declutter) ── */}
+      {showAdvancedMetabolic && (
+        <div className="space-y-3">
+          <Button
+            variant="outline"
+            onClick={() => setChartsExpanded((v) => !v)}
+            className="w-full justify-between h-10 px-4 text-xs font-black uppercase tracking-widest bg-white/70 hover:bg-white"
+          >
+            <span>Deep-Dive Metabolic Charts (15-Min Glycogen, Fat Faucet & Lab)</span>
+            {chartsExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </Button>
+          {chartsExpanded && (
+            <DashboardCharts
+              caloriesIn={dailyCaloriesIn}
+              caloriesOut={scoredCaloriesOut}
+              deviceCaloriesOut={dailyCaloriesOut}
+              carbsG={dailyCarbsG}
+              foodLogs={todayFoodLogs ?? undefined}
+              exerciseLogs={todayExerciseLogs ?? undefined}
+              morningGlycogenPct={morningGlycogenPct}
+              weightKg={data.weightKg}
+              bodyFatPct={data.bodyFatPct}
+              isDeviceVerified={data.isDeviceVerified}
+              connectedDevice={data.connectedDevice}
+              isViewingToday={isViewingToday}
+              alpertNumber={alpertNumber}
+              fitbitActivities={fitbitActivities}
+              hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
+              hasCreatine={prefs?.profile?.hasCreatine}
+            />
           )}
-
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10">
-              <div className="p-3 bg-emerald-100 rounded-xl w-fit mb-4 shadow-sm">
-                <Scale className="w-6 h-6 text-emerald-600" />
-              </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Portfolio Weight</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Body weight</p>
-              <h4 className="text-4xl font-black italic uppercase tracking-tighter">{data.weightKg ? `${data.weightKg}kg` : 'N/A'}</h4>
-              <div className="mt-4 h-1 w-12 bg-emerald-200 rounded-full" />
-            </CardContent>
-          </Card>
-
-          <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5 hover:ring-primary/20 transition-all duration-300">
-            <CardContent className="p-6 sm:p-10">
-              <div className="flex justify-between items-start mb-4">
-                <div className="p-3 bg-red-100 rounded-xl shadow-sm">
-                  <Activity className="w-6 h-6 text-red-600" />
-                </div>
-                {simulationResult && simulationResult.slots[nowSlot || simulationResult.slots.length-1]?.anabolicSignal > 0.5 && (
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
-                )}
-              </div>
-              <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.1em] mb-1">Performance Audit</p>
-              <p className="text-[10px] font-medium text-muted-foreground mb-2">Anabolic Signal (MPS Potential)</p>
-              <div className="flex items-end gap-2">
-                <h4 className="text-4xl font-black italic uppercase tracking-tighter">
-                  {simulationResult 
-                    ? `${Math.round(simulationResult.slots[nowSlot || simulationResult.slots.length-1].anabolicSignal * 100)}%` 
-                    : 'N/A'}
-                </h4>
-                <span className="text-[10px] font-black uppercase text-muted-foreground mb-1.5 opacity-60 tracking-widest">Growth</span>
-              </div>
-              <div className="mt-4 h-1 w-12 bg-red-200 rounded-full" />
-            </CardContent>
-          </Card>
-
         </div>
-
-        {/* Advanced metabolic teaching — glycogen + fat-burn-vs-lean charts.
-            Off by default for the "Basic" preset, on by default for legacy users. */}
-        {showAdvancedMetabolic && (
-          <DashboardCharts
-            caloriesIn={dailyCaloriesIn}
-            caloriesOut={scoredCaloriesOut}
-            deviceCaloriesOut={dailyCaloriesOut}
-            carbsG={dailyCarbsG}
-            foodLogs={todayFoodLogs ?? undefined}
-            exerciseLogs={todayExerciseLogs ?? undefined}
-            morningGlycogenPct={morningGlycogenPct}
-            weightKg={data.weightKg}
-            bodyFatPct={data.bodyFatPct}
-            isDeviceVerified={data.isDeviceVerified}
-            connectedDevice={data.connectedDevice}
-            isViewingToday={isViewingToday}
-            alpertNumber={alpertNumber}
-            fitbitActivities={fitbitActivities}
-            hrv={isViewingToday ? data.hrv : fitbitForDate?.hrv}
-            hasCreatine={prefs?.profile?.hasCreatine}
-          />
-        )}
-      </div>
-
-      {showVfScore && (
-      <div className="space-y-4">
-        <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-1 italic">Long-Term Portfolio</h2>
-        {visceralFatPoints === 0 ? (
-          <Card className="border-none shadow-xl overflow-hidden bg-primary text-white cursor-default">
-            <CardContent className="p-8 md:p-12 flex flex-col gap-6">
-              <div className="flex items-center gap-5">
-                <div className="p-5 bg-white/10 rounded-2xl shrink-0">
-                  <Briefcase className="w-10 h-10 text-white" />
-                </div>
-                <div>
-                  <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Your Scoring System</p>
-                  <p className="text-base font-black">Coming online after your first session</p>
-                </div>
-              </div>
-              <div className="space-y-3 text-sm font-medium opacity-80 leading-relaxed">
-                <p>The CFO builds a <span className="font-black text-white">custom daily point system</span> tuned to your goals. Every workout, protein target hit, and good night of sleep earns points.</p>
-                <p>The score compounds over time — turning the fuzzy question <span className="italic">&ldquo;am I actually making progress?&rdquo;</span> into a number you can track and beat.</p>
-                <p className="opacity-60 text-[11px] uppercase tracking-widest font-black">Chat with the CFO to calibrate your system →</p>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className="border-none shadow-xl overflow-hidden bg-primary text-white group cursor-default">
-            <CardContent className="p-8 md:p-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-              <div className="flex items-center gap-6 min-w-0">
-                <div className="p-5 bg-white/10 rounded-2xl shrink-0 group-hover:bg-white/20 transition-colors">
-                  <Briefcase className="w-10 h-10 text-white" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[12px] font-black uppercase tracking-widest opacity-80 mb-1">Equity Score (VF Points)</p>
-                  <p className="text-[10px] font-medium opacity-50 mb-2">Visceral fat reduction progress. Grows as you hit protein, activity, and sleep goals.</p>
-                  <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter truncate">
-                    {(visceralFatPoints).toLocaleString()}
-                    <span className="text-sm font-normal opacity-60 ml-4">/ {fatPointsGoal.toLocaleString()}</span>
-                  </h3>
-                </div>
-              </div>
-              <div className="text-right shrink-0 bg-white/10 p-4 px-8 rounded-2xl backdrop-blur-md">
-                <p className="text-3xl font-black text-emerald-300 italic">{fatProgress.toFixed(1)}%</p>
-                <p className="text-[10px] font-black uppercase opacity-60">Audit Completion</p>
-              </div>
-            </CardContent>
-            <Progress value={fatProgress} className="h-2.5 rounded-none bg-white/10" />
-          </Card>
-        )}
-      </div>
       )}
     </div>
   );

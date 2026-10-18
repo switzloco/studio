@@ -67,6 +67,8 @@ export interface HistoryEntry {
   detail: string;
   equity: number;
   breakdown?: VFBreakdown;   // full scoring breakdown for day-detail view
+  scoringVersion?: string;   // e.g. "3.2" (inferred when absent on older entries)
+  dayNote?: string;          // user's handwritten note for the day (Google Sheet Notes column)
 }
 
 export interface HealthLog {
@@ -183,6 +185,8 @@ export interface DisplayPreferences {
   showVfScore?: boolean;
 }
 
+import type { LevelConfig } from './level-tracker';
+
 export interface UserPreferences {
   weeklySchedule: string;
   equipment: string[];
@@ -195,11 +199,17 @@ export interface UserPreferences {
   profile: UserProfile;
   foodNicknames?: Record<string, FoodNickname>; // keyed by lowercase nickname
   temporaryContext?: TemporaryContext;           // short-term schedule/situation override
-  autoChatEnabled?: boolean;                    // auto-start chat on Coach tab mount (default true)
+  autoChatEnabled?: boolean;                    // auto-start chat on Coach tab mount (default false to save API calls)
   /** When false, the AI coach stops volunteering commentary on alcohol and
    *  desserts. Default true (= classic CFO behavior). */
   preachyMode?: boolean;
   display?: DisplayPreferences;
+  /** Current active Level / Sprint configuration (replaces Google Sheet block). */
+  activeLevel?: LevelConfig;
+  /** Completed or retried Levels archived for historical reference. */
+  levelHistory?: LevelConfig[];
+  /** Gemini model tier preference for chat ('flash' default or 'flash-lite' economy). */
+  aiModelTier?: 'flash' | 'flash-lite';
 }
 
 /** A cached, generated Daily Brief — one per calendar day, doc ID == isoDate. */
@@ -301,7 +311,7 @@ export const healthService = {
       equipment: [],
       targets: { proteinGoal: 150, fatPointsGoal: 3000 },
       profile: {},
-      autoChatEnabled: true,
+      autoChatEnabled: false,
     };
     await setDoc(docRef, defaultPrefs, { merge: true });
     return defaultPrefs;

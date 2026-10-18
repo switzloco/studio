@@ -165,8 +165,8 @@ export function ChatInterface() {
   const prefsDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
   const { data: prefs, isLoading: prefsLoading } = useDoc<UserPreferences>(prefsDocRef);
 
-  // undefined (prefs not yet loaded or no doc) treated as true so new users auto-start
-  const autoChatEnabled = prefs?.autoChatEnabled ?? true;
+  // Default to false so opening the Coach tab never triggers an unprompted paid Gemini call
+  const autoChatEnabled = prefs?.autoChatEnabled ?? false;
 
   useEffect(() => {
     // Wait until auth and Firestore data are both ready
@@ -211,6 +211,7 @@ export function ChatInterface() {
           userName: user.displayName || undefined,
           localDate: today,
           localTime: now.toLocaleTimeString('en-US'),
+          modelTier: prefs?.aiModelTier ?? 'flash',
         };
 
         const res = await fetch('/api/chat', {
@@ -415,6 +416,7 @@ export function ChatInterface() {
         photoDataUris: photos.map(p => p.dataUri),
         photoTimestamps,
         photoDates,
+        modelTier: prefs?.aiModelTier ?? 'flash',
       };
 
       const res = await fetch('/api/chat', {

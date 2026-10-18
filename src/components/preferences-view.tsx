@@ -465,12 +465,27 @@ export function PreferencesView() {
                 <div className="space-y-1">
                   <p className="text-sm font-black uppercase tracking-tight text-foreground">Auto-Brief</p>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
-                    Start coaching session automatically when you open the Coach tab
+                    Start coaching session automatically when you open the Coach tab (Off by default to save Gemini API calls)
                   </p>
                 </div>
                 <Switch
-                  checked={prefs.autoChatEnabled ?? true}
+                  checked={prefs.autoChatEnabled ?? false}
                   onCheckedChange={(checked) => setPrefs({ ...prefs, autoChatEnabled: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-black uppercase tracking-tight text-foreground">Economy AI Model (Flash-Lite)</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                    Use Gemini 2.5 Flash-Lite for chat (~75% lower API token cost per message)
+                  </p>
+                </div>
+                <Switch
+                  checked={(prefs.aiModelTier ?? 'flash') === 'flash-lite'}
+                  onCheckedChange={(checked) =>
+                    setPrefs({ ...prefs, aiModelTier: checked ? 'flash-lite' : 'flash' })
+                  }
                 />
               </div>
 
