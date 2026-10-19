@@ -971,24 +971,24 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     <div className="flex flex-col gap-6 p-4 sm:p-6 md:p-10 pb-24 bg-background h-full overflow-y-auto">
       {/* ── Compact Top Bar: Date Picker + Slim Device Sync Pill ── */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-2">
-          <h2 className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em] italic">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-xs sm:text-sm font-black text-muted-foreground uppercase tracking-[0.2em] italic">
             {isViewingToday ? 'Daily Cockpit' : `Historical Cockpit · ${selectedDateStr}`}
           </h2>
-          <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">
+          <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-slate-100 text-slate-700">
             v{selectedDayVintage.version} {selectedDayVintage.codename}
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           {!isViewingToday && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              className="h-8 px-2.5 text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
               onClick={() => setSelectedDateStr(todayStr)}
             >
-              <RotateCcw className="w-3 h-3 mr-1" />
+              <RotateCcw className="w-3.5 h-3.5 mr-1" />
               Today
             </Button>
           )}
@@ -997,9 +997,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2.5 text-[10px] font-black uppercase tracking-widest gap-1.5"
+                className="h-8 px-3 text-xs font-black uppercase tracking-widest gap-1.5"
               >
-                <CalendarIcon className="w-3 h-3" />
+                <CalendarIcon className="w-3.5 h-3.5" />
                 {isViewingToday ? 'Today' : selectedDateStr}
               </Button>
             </PopoverTrigger>
@@ -1016,52 +1016,52 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
           {/* Compact Device Sync Pill */}
           {data.isDeviceVerified && (data.connectedDevice === 'oura' || (!data.connectedDevice && ouraCreds)) ? (
-            <div className="flex items-center gap-1 bg-violet-50 border border-violet-200 rounded-lg px-2 py-0.5">
-              <OuraLogo className="w-3.5 h-3.5 text-violet-600" />
-              <span className="text-[9px] font-black uppercase text-violet-800 hidden sm:inline">
+            <div className="flex items-center gap-1.5 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1">
+              <OuraLogo className="w-4 h-4 text-violet-600" />
+              <span className="text-xs font-black uppercase text-violet-800 hidden sm:inline">
                 {ouraCreds?.lastSyncedAt ? formatTimeAgo(ouraCreds.lastSyncedAt) : 'Oura'}
               </span>
-              <Button size="sm" variant="ghost" onClick={handleResyncOura} disabled={isOuraSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-violet-700 hover:bg-violet-100">
-                {isOuraSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              <Button size="sm" variant="ghost" onClick={handleResyncOura} disabled={isOuraSyncing} className="h-6 px-1.5 text-xs font-black uppercase text-violet-700 hover:bg-violet-100">
+                {isOuraSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               </Button>
-              <Button size="sm" variant="ghost" onClick={handleDisconnectOura} className="h-5 px-1 text-violet-500 hover:text-violet-800" title="Disconnect Oura">
-                <Unplug className="w-2.5 h-2.5" />
+              <Button size="sm" variant="ghost" onClick={handleDisconnectOura} className="h-6 px-1 text-violet-500 hover:text-violet-800" title="Disconnect Oura">
+                <Unplug className="w-3 h-3" />
               </Button>
             </div>
           ) : data.isDeviceVerified && data.connectedDevice === 'withings' ? (
-            <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-0.5">
-              <WithingsLogo className="w-3.5 h-3.5 text-blue-600" />
-              <span className="text-[9px] font-black uppercase text-blue-800 hidden sm:inline">
+            <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1">
+              <WithingsLogo className="w-4 h-4 text-blue-600" />
+              <span className="text-xs font-black uppercase text-blue-800 hidden sm:inline">
                 {withingsCreds?.lastSyncedAt ? formatTimeAgo(withingsCreds.lastSyncedAt) : 'Withings'}
               </span>
-              <Button size="sm" variant="ghost" onClick={handleResyncWithings} disabled={isWithingsSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-blue-700 hover:bg-blue-100">
-                {isWithingsSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              <Button size="sm" variant="ghost" onClick={handleResyncWithings} disabled={isWithingsSyncing} className="h-6 px-1.5 text-xs font-black uppercase text-blue-700 hover:bg-blue-100">
+                {isWithingsSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               </Button>
-              <Button size="sm" variant="ghost" onClick={handleDisconnectWithings} className="h-5 px-1 text-blue-500 hover:text-blue-800" title="Disconnect Withings">
-                <Unplug className="w-2.5 h-2.5" />
+              <Button size="sm" variant="ghost" onClick={handleDisconnectWithings} className="h-6 px-1 text-blue-500 hover:text-blue-800" title="Disconnect Withings">
+                <Unplug className="w-3 h-3" />
               </Button>
             </div>
           ) : data.isDeviceVerified ? (
-            <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-0.5">
-              <FitbitLogo className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="text-[9px] font-black uppercase text-emerald-800">
+            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1">
+              <FitbitLogo className="w-4 h-4 text-emerald-600" />
+              <span className="text-xs font-black uppercase text-emerald-800">
                 {fitbitCreds?.lastSyncedAt ? formatTimeAgo(fitbitCreds.lastSyncedAt) : (isLegacyFitbit ? 'Fitbit' : 'Health')}
               </span>
-              <Button size="sm" variant="ghost" onClick={handleResync} disabled={isSyncing} className="h-5 px-1.5 text-[9px] font-black uppercase text-emerald-700 hover:bg-emerald-100">
-                {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+              <Button size="sm" variant="ghost" onClick={handleResync} disabled={isSyncing} className="h-6 px-2 text-xs font-black uppercase text-emerald-700 hover:bg-emerald-100">
+                {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
                 {isViewingToday ? 'Sync' : 'Sync Date'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={handleDisconnectFitbit} className="h-5 px-1 text-emerald-500 hover:text-emerald-800" title="Disconnect Device">
-                <Unplug className="w-2.5 h-2.5" />
+              <Button size="sm" variant="ghost" onClick={handleDisconnectFitbit} className="h-6 px-1 text-emerald-500 hover:text-emerald-800" title="Disconnect Device">
+                <Unplug className="w-3 h-3" />
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="outline" onClick={handleConnectFitbit} className="h-7 px-2 text-[9px] font-black uppercase border-emerald-200 text-emerald-700">
-                <FitbitLogo className="w-3 h-3 mr-1" /> Connect Health
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant="outline" onClick={handleConnectFitbit} className="h-8 px-2.5 text-xs font-black uppercase border-emerald-200 text-emerald-700">
+                <FitbitLogo className="w-3.5 h-3.5 mr-1" /> Connect Health
               </Button>
-              <Button size="sm" variant="outline" onClick={handleConnectOura} className="h-7 px-2 text-[9px] font-black uppercase border-violet-200 text-violet-700">
-                <OuraLogo className="w-3 h-3 mr-1" /> Oura
+              <Button size="sm" variant="outline" onClick={handleConnectOura} className="h-8 px-2.5 text-xs font-black uppercase border-violet-200 text-violet-700">
+                <OuraLogo className="w-3.5 h-3.5 mr-1" /> Oura
               </Button>
             </div>
           )}
@@ -1084,15 +1084,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">
+                  <p className="text-xs sm:text-sm font-black uppercase tracking-[0.18em] opacity-90">
                     {isViewingToday ? "Today's VF Score" : `${selectedDateStr} Score`}
                   </p>
-                  <span className="px-1.5 py-0.5 rounded bg-white/15 text-[9px] font-black uppercase tracking-wider">
+                  <span className="px-2 py-0.5 rounded bg-white/15 text-xs font-black uppercase tracking-wider">
                     v{selectedDayVintage.version}
                   </span>
                 </div>
                 {selectedDayNote && (
-                  <p className="text-[11px] font-bold text-amber-200 mt-1 line-clamp-1 italic">
+                  <p className="text-xs sm:text-sm font-bold text-amber-200 mt-1 line-clamp-1 italic">
                     “{selectedDayNote}”
                   </p>
                 )}
@@ -1101,39 +1101,39 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 size="sm"
                 variant="secondary"
                 onClick={() => setScoreLockOpen((v) => !v)}
-                className="h-7 px-2.5 text-[9px] font-black uppercase tracking-wider bg-white/15 hover:bg-white/25 text-white border-none shrink-0"
+                className="h-8 px-3 text-xs font-black uppercase tracking-wider bg-white/15 hover:bg-white/25 text-white border-none shrink-0"
               >
-                <CheckCircle2 className="w-3 h-3 mr-1" />
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
                 {selectedHistoryEntry ? 'Update Score / Note' : 'Lock Score'}
               </Button>
             </div>
 
-            <div className="my-4 flex items-baseline justify-between gap-4">
-              <div className="flex items-baseline gap-2">
-                <span className="text-5xl sm:text-6xl font-black italic tracking-tighter">
+            <div className="my-5 flex items-baseline justify-between gap-4">
+              <div className="flex items-baseline gap-2.5">
+                <span className="text-6xl sm:text-7xl font-black italic tracking-tighter">
                   {dailyAlpertScore !== null ? (
                     <>
                       {dailyAlpertScore > 0 ? '+' : ''}
                       {dailyAlpertScore}
                       {(scoreHasFoodPending || scoreHasDevicePending || pastScoreProvisional) && (
-                        <span className="text-2xl opacity-60">*</span>
+                        <span className="text-3xl opacity-60">*</span>
                       )}
                     </>
                   ) : (
                     '—'
                   )}
                 </span>
-                <span className="text-xs font-black uppercase opacity-70">pts</span>
+                <span className="text-sm sm:text-base font-black uppercase opacity-80">pts</span>
               </div>
 
               {/* Protein To Go Pill right inside the hero card for instant glanceability */}
               {showProtein && (
-                <div className="text-right bg-black/20 rounded-xl px-3 py-2 backdrop-blur-sm">
-                  <p className="text-[9px] font-black uppercase tracking-wider opacity-75">Protein To Go</p>
-                  <p className="text-xl sm:text-2xl font-black italic tracking-tight text-amber-300">
+                <div className="text-right bg-black/25 rounded-xl px-4 py-2.5 backdrop-blur-sm">
+                  <p className="text-xs font-black uppercase tracking-wider opacity-85">Protein To Go</p>
+                  <p className="text-2xl sm:text-3xl font-black italic tracking-tight text-amber-300">
                     {eatRunway.proteinToGoG > 0 ? `${eatRunway.proteinToGoG}g` : 'HIT ✓'}
                   </p>
-                  <p className="text-[9px] font-bold opacity-75">
+                  <p className="text-xs font-bold opacity-85">
                     {dailyProteinG}g / {proteinGoal}g
                   </p>
                 </div>
@@ -1141,25 +1141,25 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </div>
 
             {/* Explicit 3-Column Calorie Ledger */}
-            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/15 text-left">
+            <div className="grid grid-cols-3 gap-3 pt-4 border-t border-white/15 text-left">
               <div>
-                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">Calories In</p>
-                <p className="text-base sm:text-lg font-black">{dailyCaloriesIn.toLocaleString()}</p>
-                <p className="text-[9px] opacity-60">{dailyCarbsG}g carbs</p>
+                <p className="text-xs font-black uppercase tracking-wider opacity-75">Calories In</p>
+                <p className="text-xl sm:text-2xl font-black mt-0.5">{dailyCaloriesIn.toLocaleString()}</p>
+                <p className="text-xs font-semibold opacity-75">{dailyCarbsG}g carbs</p>
               </div>
               <div>
-                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">Counted Burn</p>
-                <p className="text-base sm:text-lg font-black">{scoredCaloriesOut.toLocaleString()}</p>
-                <p className="text-[9px] opacity-60">Watch: {dailyCaloriesOut.toLocaleString()}</p>
+                <p className="text-xs font-black uppercase tracking-wider opacity-75">Counted Burn</p>
+                <p className="text-xl sm:text-2xl font-black mt-0.5">{scoredCaloriesOut.toLocaleString()}</p>
+                <p className="text-xs font-semibold opacity-75">Watch: {dailyCaloriesOut.toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-[9px] font-black uppercase tracking-wider opacity-60">
+                <p className="text-xs font-black uppercase tracking-wider opacity-75">
                   {alpertDeficit >= 0 ? 'Net Deficit' : 'Net Surplus'}
                 </p>
-                <p className="text-base sm:text-lg font-black">
+                <p className="text-xl sm:text-2xl font-black mt-0.5">
                   {alpertDeficit >= 0 ? `-${alpertDeficit.toLocaleString()}` : `+${Math.abs(alpertDeficit).toLocaleString()}`}
                 </p>
-                <p className="text-[9px] opacity-60">Cap: {alpertNumber.toLocaleString()}</p>
+                <p className="text-xs font-semibold opacity-75">Cap: {alpertNumber.toLocaleString()}</p>
               </div>
             </div>
           </div>
@@ -1168,52 +1168,52 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           {scoreLockOpen && (
             <div className="p-4 bg-slate-900 text-white border-t border-white/10 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                <p className="text-xs font-black uppercase tracking-widest text-emerald-400">
                   Zero-AI Score & Sheet Note ({selectedDateStr})
                 </p>
-                <span className="text-[9px] text-slate-400">0 Gemini calls</span>
+                <span className="text-xs text-slate-400">0 Gemini calls</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[9px] font-bold uppercase text-slate-400">Fasting Hours</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Fasting Hours</label>
                   <Input
                     type="number"
                     value={lockFastingHours}
                     onChange={(e) => setLockFastingHours(e.target.value)}
-                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                    className="h-8 text-sm bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
                 <div>
-                  <label className="text-[9px] font-bold uppercase text-slate-400">Alcohol Drinks</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Alcohol Drinks</label>
                   <Input
                     type="number"
                     value={lockAlcoholDrinks}
                     onChange={(e) => setLockAlcoholDrinks(e.target.value)}
-                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                    className="h-8 text-sm bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="text-[9px] font-bold uppercase text-slate-400">Day Note (Sheet Notes Column)</label>
+                <label className="text-xs font-bold uppercase text-slate-400">Day Note (Sheet Notes Column)</label>
                 <Input
                   type="text"
                   placeholder="e.g. Hoops + 19h fast, or Date night wine..."
                   value={lockDayNote}
                   onChange={(e) => setLockDayNote(e.target.value)}
-                  className="h-7 text-xs bg-slate-800 border-slate-700 text-white"
+                  className="h-8 text-sm bg-slate-800 border-slate-700 text-white"
                 />
               </div>
               <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setScoreLockOpen(false)} className="h-7 text-[10px] text-slate-300">
+                <Button size="sm" variant="ghost" onClick={() => setScoreLockOpen(false)} className="h-8 text-xs text-slate-300">
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   onClick={handleLockDayScore}
                   disabled={isLockingScore}
-                  className="h-7 px-3 text-[10px] font-black uppercase bg-emerald-500 hover:bg-emerald-600 text-white"
+                  className="h-8 px-3.5 text-xs font-black uppercase bg-emerald-500 hover:bg-emerald-600 text-white"
                 >
-                  {isLockingScore ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  {isLockingScore ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
                   Save to Ledger
                 </Button>
               </div>
@@ -1225,19 +1225,19 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         <Card className={`lg:col-span-7 border shadow-md overflow-hidden ${runwayStyles.bg}`}>
           <CardContent className="p-5 sm:p-6 flex flex-col justify-between h-full gap-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${runwayStyles.badge}`}>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2.5">
+                  <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase tracking-widest ${runwayStyles.badge}`}>
                     {runwayStyles.label}
                   </span>
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
+                  <span className="text-xs font-black uppercase tracking-wider opacity-70">
                     Alpert & Glycogen Timing Engine
                   </span>
                 </div>
-                <h3 className="text-lg sm:text-xl font-black tracking-tight">
+                <h3 className="text-xl sm:text-2xl font-black tracking-tight">
                   {eatRunway.headline}
                 </h3>
-                <p className="text-xs font-medium opacity-80 leading-relaxed">
+                <p className="text-sm sm:text-base font-medium opacity-85 leading-relaxed">
                   {eatRunway.subline}
                 </p>
               </div>
@@ -1246,21 +1246,21 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             {/* 3-Signal Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Signal 1: Direct Alpert Breach Clock (Calories & Time Until Breach) */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+              <div className="bg-white/85 backdrop-blur-sm rounded-xl p-3.5 border border-black/5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">
                     1. Until Alpert Breach
                   </span>
-                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                  <Clock className="w-4 h-4 text-emerald-600" />
                 </div>
-                <p className="text-sm font-black text-foreground">
+                <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `${Math.abs(eatRunway.kcalUntilAlpertBreach).toLocaleString()} kcal OVER — Eat Now`
                     : eatRunway.alpertBreachTimeLabel
                       ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal · ~${eatRunway.hoursUntilAlpertBreach}h left`
                       : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer ✓`}
                 </p>
-                <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
+                <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
                     : eatRunway.alpertBreachTimeLabel
@@ -1270,19 +1270,19 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
 
               {/* Signal 2: Rest-of-Day Alpert Calorie Floor & 100-Pt Target */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+              <div className="bg-white/85 backdrop-blur-sm rounded-xl p-3.5 border border-black/5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">
                     2. Daily Calorie Plan
                   </span>
-                  <Flame className="w-3.5 h-3.5 text-orange-600" />
+                  <Flame className="w-4 h-4 text-orange-600" />
                 </div>
-                <p className="text-sm font-black text-foreground">
+                <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.kcalToAlpertFloor > 0
                     ? `Eat ≥${eatRunway.kcalToAlpertFloor.toLocaleString()} kcal before bed`
                     : `EOD Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) Hit ✓`}
                 </p>
-                <p className="text-[10px] font-bold text-muted-foreground mt-0.5">
+                <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   100-pt target: {eatRunway.target100PtIntakeKcal.toLocaleString()} kcal (
                   {eatRunway.kcalLeftFor100Pts >= 0
                     ? `${eatRunway.kcalLeftFor100Pts.toLocaleString()} left`
@@ -1292,21 +1292,21 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </div>
 
               {/* Signal 3: Protein Pacing Window */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 border border-black/5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+              <div className="bg-white/85 backdrop-blur-sm rounded-xl p-3.5 border border-black/5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">
                     3. Protein Window
                   </span>
-                  <Utensils className="w-3.5 h-3.5 text-purple-600" />
+                  <Utensils className="w-4 h-4 text-purple-600" />
                 </div>
-                <p className="text-sm font-black text-foreground">
+                <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.proteinToGoG > 0
                     ? `${eatRunway.proteinToGoG}g to go (${eatRunway.mealsNeededForProtein} meal${eatRunway.mealsNeededForProtein === 1 ? '' : 's'})`
                     : `${proteinGoal}g Target Hit ✓`}
                 </p>
-                <div className="mt-1.5">
-                  <Progress value={proteinProgress} className="h-1.5 bg-purple-100" />
-                  <p className="text-[9px] font-bold text-muted-foreground mt-1">
+                <div className="mt-2">
+                  <Progress value={proteinProgress} className="h-2 bg-purple-100" />
+                  <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                     {dailyProteinG}g / {proteinGoal}g · {eatRunway.hoursUntilKitchenClose}h to 8:30 PM
                   </p>
                 </div>
@@ -1314,8 +1314,8 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </div>
 
             {alpertPace && eatRunway.status === 'clear' && (
-              <div className="flex items-center gap-2 text-[10px] font-bold text-amber-800 bg-amber-100/70 px-3 py-1.5 rounded-lg">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-amber-800 bg-amber-100/70 px-3.5 py-2 rounded-lg">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>
                   Raw watch deficit is high ({alpertPace.projectedDaily.toLocaleString()} kcal proj), buffered by liver glycogen until {eatRunway.muscleBurnStartTimeLabel ?? 'evening'}.
                 </span>
@@ -1327,25 +1327,25 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
       {/* ── ROW 2: Zero-AI Quick Log Bar (Recent Tickers w/ Descriptions + Today's Logged Items w/ Undo) ── */}
       <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
-        <CardContent className="p-4 sm:p-5 space-y-4">
+        <CardContent className="p-4 sm:p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest">
+            <div className="flex items-center gap-2.5">
+              <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-black uppercase tracking-widest">
                 Zero-AI Quick Log
               </span>
-              <span className="text-[11px] font-bold text-muted-foreground">
+              <span className="text-xs sm:text-sm font-bold text-muted-foreground">
                 Recent saved Tickers (tap card to inspect ingredients · tap <span className="text-emerald-700 font-black">+ Log</span> to add)
               </span>
             </div>
             <div className="flex items-center gap-2">
               {Object.keys(prefs?.foodNicknames ?? {}).length > RECENT_TICKER_LIMIT && (
                 <div className="relative">
-                  <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     placeholder="Filter tickers..."
                     value={nicknameQuery}
                     onChange={(e) => setNicknameQuery(e.target.value)}
-                    className="h-7 pl-7 pr-6 w-36 sm:w-44 text-[11px]"
+                    className="h-8 pl-8 pr-7 w-40 sm:w-52 text-xs sm:text-sm"
                   />
                   {nicknameQuery && (
                     <button
@@ -1353,7 +1353,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                       onClick={() => setNicknameQuery('')}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
@@ -1362,9 +1362,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 size="sm"
                 variant="outline"
                 onClick={() => setQuickFoodOpen((v) => !v)}
-                className="h-7 px-2.5 text-[10px] font-black uppercase tracking-wider"
+                className="h-8 px-3 text-xs font-black uppercase tracking-wider"
               >
-                <Plus className="w-3 h-3 mr-1" />
+                <Plus className="w-3.5 h-3.5 mr-1" />
                 {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Macro'}
               </Button>
             </div>
@@ -1372,24 +1372,24 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
           {/* Logged Today Strip — allows 1-tap removal of accidental entries like Atlantic Acquisition */}
           {activeTodayFoodLogs.length > 0 && (
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-1.5">
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between px-1">
-                <span className="text-[9px] font-black uppercase tracking-wider text-slate-600">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-600">
                   Logged on {isViewingToday ? 'Today' : selectedDateStr} ({activeTodayFoodLogs.length})
                 </span>
-                <span className="text-[9px] font-medium text-muted-foreground">
-                  Tap <Trash2 className="w-2.5 h-2.5 inline mx-0.5" /> to remove accidental entries
+                <span className="text-xs font-medium text-muted-foreground">
+                  Tap <Trash2 className="w-3 h-3 inline mx-0.5" /> to remove accidental entries
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
                 {activeTodayFoodLogs.map((entry) => {
                   const isRemoving = removingFoodId === entry.id;
                   return (
                     <div
                       key={entry.id}
-                      className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-[10px] shadow-2xs"
+                      className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs sm:text-sm shadow-2xs"
                     >
-                      <span className="font-bold text-slate-800 truncate max-w-[180px] sm:max-w-[240px]">
+                      <span className="font-bold text-slate-800 truncate max-w-[200px] sm:max-w-[260px]">
                         {entry.name}
                       </span>
                       <span className="text-slate-500 font-semibold whitespace-nowrap">
@@ -1400,12 +1400,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                         disabled={isRemoving}
                         onClick={() => handleRemoveFoodEntry(entry)}
                         title={`Remove ${entry.name}`}
-                        className="ml-0.5 p-0.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                        className="ml-0.5 p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
                       >
                         {isRemoving ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         )}
                       </button>
                     </div>
@@ -1417,15 +1417,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
           {/* Top 8 Most Recent Tickers with Descriptions & Explicit + Log Button */}
           {visibleNicknames.length > 0 && (
-            <div className="space-y-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                 {visibleNicknames.map(({ key, nick }) => {
                   const isPreviewing = previewNickKey === key;
                   return (
                     <div
                       key={key}
                       onClick={() => setPreviewNickKey(isPreviewing ? null : key)}
-                      className={`rounded-xl border p-2.5 transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                      className={`rounded-xl border p-3 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
                         isPreviewing
                           ? 'bg-emerald-50/70 border-emerald-300 ring-1 ring-emerald-200'
                           : 'bg-slate-50/70 hover:bg-slate-100/80 border-slate-200/80'
@@ -1434,13 +1434,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <Sparkles className="w-3 h-3 text-emerald-600 shrink-0" />
-                            <p className="text-xs font-black text-foreground truncate">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <p className="text-sm font-black text-foreground truncate">
                               {nick.nickname || key}
                             </p>
                           </div>
                           {nick.description && (
-                            <p className="text-[10px] font-medium text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
+                            <p className="text-xs font-medium text-muted-foreground line-clamp-2 mt-1 leading-snug">
                               {nick.description}
                             </p>
                           )}
@@ -1453,27 +1453,27 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                             e.stopPropagation();
                             handleQuickLogNickname(key, nick);
                           }}
-                          className="h-6 px-2 text-[9px] font-black uppercase bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 rounded-md"
+                          className="h-7 px-2.5 text-xs font-black uppercase bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 rounded-md"
                         >
                           + Log
                         </Button>
                       </div>
 
-                      <div className="flex items-center justify-between text-[10px] font-bold pt-1 border-t border-black/5">
+                      <div className="flex items-center justify-between text-xs font-bold pt-1.5 border-t border-black/5">
                         <span className="text-slate-700">
                           {nick.totalCalories} kcal · <span className="text-emerald-700">{nick.totalProteinG}g P</span>
                         </span>
-                        <span className="text-[9px] uppercase text-muted-foreground">
+                        <span className="text-xs uppercase text-muted-foreground">
                           {nick.totalCarbsG || 0}C · {nick.totalFatG || 0}F
                         </span>
                       </div>
 
                       {isPreviewing && nick.items && nick.items.length > 0 && (
-                        <div className="pt-1.5 border-t border-emerald-200/60 flex flex-wrap gap-1">
+                        <div className="pt-2 border-t border-emerald-200/60 flex flex-wrap gap-1.5">
                           {nick.items.map((item, idx) => (
                             <span
                               key={idx}
-                              className="px-1.5 py-0.5 rounded bg-white text-[9px] font-medium text-slate-700 border border-emerald-200"
+                              className="px-2 py-0.5 rounded bg-white text-xs font-medium text-slate-700 border border-emerald-200"
                             >
                               {item}
                             </span>
@@ -1492,15 +1492,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowAllNicknames((v) => !v)}
-                    className="h-6 px-3 text-[10px] font-black uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    className="h-7 px-3 text-xs font-black uppercase tracking-wider text-muted-foreground hover:text-foreground"
                   >
                     {showAllNicknames ? (
                       <>
-                        <ChevronUp className="w-3 h-3 mr-1" /> Show Top {RECENT_TICKER_LIMIT} Most Recent
+                        <ChevronUp className="w-3.5 h-3.5 mr-1" /> Show Top {RECENT_TICKER_LIMIT} Most Recent
                       </>
                     ) : (
                       <>
-                        <ChevronDown className="w-3 h-3 mr-1" /> Show All {sortedNicknames.length} Saved Tickers
+                        <ChevronDown className="w-3.5 h-3.5 mr-1" /> Show All {sortedNicknames.length} Saved Tickers
                       </>
                     )}
                   </Button>
@@ -1515,14 +1515,14 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 placeholder="Item name (e.g. Greek Yogurt)"
                 value={quickItemName}
                 onChange={(e) => setQuickItemName(e.target.value)}
-                className="h-8 text-xs sm:col-span-2"
+                className="h-9 text-sm sm:col-span-2"
               />
               <Input
                 type="number"
                 placeholder="Calories"
                 value={quickCalories}
                 onChange={(e) => setQuickCalories(e.target.value)}
-                className="h-8 text-xs"
+                className="h-9 text-sm"
                 required
               />
               <Input
@@ -1530,20 +1530,20 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 placeholder="Protein (g)"
                 value={quickProtein}
                 onChange={(e) => setQuickProtein(e.target.value)}
-                className="h-8 text-xs"
+                className="h-9 text-sm"
               />
               <select
                 value={quickMeal}
                 onChange={(e) => setQuickMeal(e.target.value as any)}
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm font-medium"
               >
                 <option value="breakfast">Breakfast</option>
                 <option value="lunch">Lunch</option>
                 <option value="dinner">Dinner</option>
                 <option value="snack">Snack</option>
               </select>
-              <Button type="submit" size="sm" disabled={isLoggingQuick} className="h-8 text-[10px] font-black uppercase">
-                {isLoggingQuick ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Plus className="w-3 h-3 mr-1" />}
+              <Button type="submit" size="sm" disabled={isLoggingQuick} className="h-9 text-xs font-black uppercase">
+                {isLoggingQuick ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
                 Log Item
               </Button>
             </form>
@@ -1562,14 +1562,14 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 </div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
+                    <span className="text-xs font-black uppercase tracking-[0.2em] text-emerald-400">
                       Active Level Sprint
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-white/10 text-[9px] font-bold text-slate-300">
+                    <span className="px-2 py-0.5 rounded bg-white/10 text-xs font-bold text-slate-300">
                       Since {activeLevel.startDate}
                     </span>
                     {activeLevel.engineEra && (
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-[9px] font-bold text-emerald-300">
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-xs font-bold text-emerald-300">
                         {activeLevel.engineEra}
                       </span>
                     )}
@@ -1578,7 +1578,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                     {activeLevel.name}
                   </h3>
                   {activeLevel.notes && (
-                    <p className="text-xs text-slate-400 mt-0.5">{activeLevel.notes}</p>
+                    <p className="text-sm text-slate-400 mt-0.5">{activeLevel.notes}</p>
                   )}
                 </div>
               </div>
@@ -1588,7 +1588,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   size="sm"
                   variant="secondary"
                   onClick={() => openLevelEditor(activeLevel)}
-                  className="h-8 px-3 text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
+                  className="h-8 px-3 text-xs font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
                 >
                   <Settings2 className="w-3.5 h-3.5 mr-1.5" />
                   Edit / New Level
@@ -1597,7 +1597,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   size="sm"
                   variant="secondary"
                   onClick={() => setPastLevelsOpen((v) => !v)}
-                  className="h-8 px-3 text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
+                  className="h-8 px-3 text-xs font-black uppercase tracking-wider bg-white/10 hover:bg-white/20 text-white border-none"
                 >
                   <History className="w-3.5 h-3.5 mr-1.5" />
                   Sheet Levels ({levelHistory.length})
@@ -1607,64 +1607,64 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
             {/* Google Sheet Columns: Total Points | Points per Day | Target | Points to Target | Days to Target | Fin Date */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total Points</p>
-                <p className="text-2xl font-black italic text-emerald-400 mt-0.5">
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Total Points</p>
+                <p className="text-2xl sm:text-3xl font-black italic text-emerald-400 mt-0.5">
                   {levelProgress.totalPoints.toLocaleString()}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   {levelProgress.daysScored} day{levelProgress.daysScored === 1 ? '' : 's'} scored
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Points per Day</p>
-                <p className="text-2xl font-black italic text-white mt-0.5">
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Points per Day</p>
+                <p className="text-2xl sm:text-3xl font-black italic text-white mt-0.5">
                   {levelProgress.pointsPerDay}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   7d pace: {levelProgress.rolling7dPointsPerDay}/d
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Target</p>
-                <p className="text-2xl font-black italic text-white mt-0.5">
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Target</p>
+                <p className="text-2xl sm:text-3xl font-black italic text-white mt-0.5">
                   {levelProgress.targetPoints.toLocaleString()}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   {levelProgress.progressPct}% complete
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Points to Target</p>
-                <p className={`text-2xl font-black italic mt-0.5 ${levelProgress.pointsToTarget <= 0 ? 'text-emerald-400' : 'text-amber-300'}`}>
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Points to Target</p>
+                <p className={`text-2xl sm:text-3xl font-black italic mt-0.5 ${levelProgress.pointsToTarget <= 0 ? 'text-emerald-400' : 'text-amber-300'}`}>
                   {levelProgress.pointsToTarget.toLocaleString()}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   {levelProgress.pointsToTarget <= 0 ? 'Target beaten ✓' : 'Remaining'}
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Days to Target</p>
-                <p className="text-2xl font-black italic text-white mt-0.5">
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Days to Target</p>
+                <p className="text-2xl sm:text-3xl font-black italic text-white mt-0.5">
                   {levelProgress.daysToTarget !== null ? `${levelProgress.daysToTarget}d` : '—'}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   {levelProgress.requiredPointsPerDay !== null
                     ? `Req: ${levelProgress.requiredPointsPerDay} pts/d`
                     : 'At current pace'}
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Fin Date</p>
-                <p className="text-lg sm:text-xl font-black italic text-emerald-300 mt-1">
+              <div className="bg-white/5 rounded-xl p-3.5 border border-white/10">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">Fin Date</p>
+                <p className="text-xl sm:text-2xl font-black italic text-emerald-300 mt-1">
                   {levelProgress.projectedFinishDate ?? '—'}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400">
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
                   All-Time: {visceralFatPoints.toLocaleString()} pts
                 </p>
               </div>
