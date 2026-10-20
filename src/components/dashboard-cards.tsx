@@ -1353,10 +1353,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
                     : eatRunway.overnightCarryoverKcal > 0
-                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left (incl. ${eatRunway.overnightCarryoverKcal.toLocaleString()} kcal overnight fast)`
+                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left (incl. ${eatRunway.overnightCarryoverKcal.toLocaleString()} kcal net overnight fast)`
                       : eatRunway.safeThrough8amTomorrow
                         ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer · +${eatRunway.kcalBufferAt8amTomorrow.toLocaleString()} kcal at 8 AM wake ✓`
                         : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left · Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`}
+                </p>
+                <p className="text-[11px] font-semibold text-emerald-800/80 mt-0.5">
+                  Fat faucet: {eatRunway.fatFaucetPerMinKcal} kcal/min ({eatRunway.fatFaucetHourlyKcal}/hr) · Sleep net drain: ~{eatRunway.overnightNetDrainHourlyKcal} kcal/hr
                 </p>
               </div>
 

@@ -62,19 +62,22 @@ describe('computeEatRunway', () => {
     expect(runway.proteinToGoG).toBe(110);
   });
 
-  it('projects expected breach time into tomorrow morning and stays continuous at 8:00 AM wake-up', () => {
-    // Tonight at 8:41 PM (20.69h): 1,348 kcal in, 1,966 counted burn, 1,732 Alpert cap, 1,767 BMR
-    const tonightRunway = computeEatRunway({
-      caloriesIn: 1348,
-      scoredCaloriesOut: 1966,
+  it('keeps a 100-pt bedtime day at 10:00 PM safe through 8:00 AM wake-up and continuous on morning refresh', () => {
+    // At 10:00 PM (22.0h) with a 100-pt day (1,212 kcal deficit against 1,732 Alpert cap, 1,767 BMR)
+    const bedtime100PtRunway = computeEatRunway({
+      caloriesIn: 1000,
+      scoredCaloriesOut: 2212,
       alpertNumber: 1732,
-      hoursElapsed: 20.69,
-      proteinG: 148,
+      hoursElapsed: 22.0,
+      proteinG: 155,
       proteinGoal: 150,
       bmrKcal: 1767,
     });
-    expect(tonightRunway.safeThrough8amTomorrow).toBe(true);
-    expect(tonightRunway.expectedBreachTimeLabel).toContain('Tomorrow 10:');
+    expect(bedtime100PtRunway.fatFaucetPerMinKcal).toBe(1.2);
+    expect(bedtime100PtRunway.overnightNetDrainHourlyKcal).toBe(15);
+    expect(bedtime100PtRunway.safeThrough8amTomorrow).toBe(true);
+    expect(bedtime100PtRunway.kcalBufferAt8amTomorrow).toBeGreaterThan(200);
+    expect(bedtime100PtRunway.expectedBreachTimeLabel).toContain('Tomorrow 10:');
 
     // Tomorrow at 8:00 AM wake-up (8.0h): fasted (0 kcal in), 589 kcal sleep burn, carrying over tonight's midnight deficit
     const wakeRunway = computeEatRunway({
@@ -85,28 +88,28 @@ describe('computeEatRunway', () => {
       proteinG: 0,
       proteinGoal: 150,
       bmrKcal: 1767,
-      prevDayDeficitKcal: tonightRunway.projectedMidnightDeficitKcal,
+      prevDayDeficitKcal: bedtime100PtRunway.projectedMidnightDeficitKcal,
     });
-    expect(wakeRunway.kcalUntilAlpertBreach).toBe(tonightRunway.kcalBufferAt8amTomorrow);
+    expect(wakeRunway.kcalUntilAlpertBreach).toBe(bedtime100PtRunway.kcalBufferAt8amTomorrow);
     expect(wakeRunway.expectedBreachTimeLabel).toContain('Today 10:');
   });
 
-  it('warns when safe through midnight but breaching overnight before 8:00 AM wake-up', () => {
-    // 7:22 PM (19.37h) with 750 kcal buffer: clears midnight (~440 kcal), but breaches ~4:10 AM before 8 AM wake
+  it('warns when safe through midnight but extreme deficit breaches overnight before 8:00 AM wake-up', () => {
+    // 10:00 PM (22.0h) with only 250 kcal buffer: clears midnight (~75 kcal left), but ~15 kcal/hr net sleep drain breaches ~5:05 AM
     const runway = computeEatRunway({
-      caloriesIn: 984,
-      scoredCaloriesOut: 1966,
+      caloriesIn: 730,
+      scoredCaloriesOut: 2212,
       alpertNumber: 1732,
-      hoursElapsed: 19.37,
+      hoursElapsed: 22.0,
       proteinG: 150,
       proteinGoal: 150,
       bmrKcal: 1767,
     });
-    expect(runway.kcalUntilAlpertBreach).toBe(750);
+    expect(runway.kcalUntilAlpertBreach).toBe(250);
     expect(runway.alpertBreachTimeLabel).toBeNull();
     expect(runway.safeThrough8amTomorrow).toBe(false);
-    expect(runway.kcalNeededFor8amTomorrow).toBeGreaterThan(200);
-    expect(runway.expectedBreachTimeLabel).toContain('Tomorrow 4:');
+    expect(runway.kcalNeededFor8amTomorrow).toBeGreaterThan(30);
+    expect(runway.expectedBreachTimeLabel).toContain('Tomorrow 5:');
     expect(runway.headline).toContain('Safe Through Midnight · Est. Breach Tomorrow');
   });
 
