@@ -1245,27 +1245,25 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
             {/* 3-Signal Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Signal 1: Direct Alpert Breach Clock (Calories & Time Until Breach) */}
+              {/* Signal 1: Direct Alpert Breach Clock (Calories & Time Until Breach + 8 AM Wake-Up Horizon) */}
               <div className="bg-white/85 backdrop-blur-sm rounded-xl p-3.5 border border-black/5">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">
-                    1. Until Alpert Breach
+                    1. Expected Alpert Breach
                   </span>
                   <Clock className="w-4 h-4 text-emerald-600" />
                 </div>
                 <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `${Math.abs(eatRunway.kcalUntilAlpertBreach).toLocaleString()} kcal OVER — Eat Now`
-                    : eatRunway.alpertBreachTimeLabel
-                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal · ~${eatRunway.hoursUntilAlpertBreach}h left`
-                      : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer ✓`}
+                    : `${eatRunway.expectedBreachTimeLabel} (~${eatRunway.hoursUntilAlpertBreach}h)`}
                 </p>
                 <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
-                    : eatRunway.alpertBreachTimeLabel
-                      ? `Eat by ${eatRunway.alpertBreachTimeLabel} (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
-                      : `Safe past midnight (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`}
+                    : eatRunway.safeThrough8amTomorrow
+                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer · +${eatRunway.kcalBufferAt8amTomorrow.toLocaleString()} kcal at 8 AM wake ✓`
+                      : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left · Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`}
                 </p>
               </div>
 
@@ -1280,13 +1278,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.kcalToAlpertFloor > 0
                     ? `Eat ≥${eatRunway.kcalToAlpertFloor.toLocaleString()} kcal before bed`
-                    : `EOD Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) Hit ✓`}
+                    : !eatRunway.safeThrough8amTomorrow
+                      ? `Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`
+                      : `8 AM & EOD Floor (${eatRunway.alpertFloorIntakeKcal.toLocaleString()} kcal) Hit ✓`}
                 </p>
                 <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   100-pt target: {eatRunway.target100PtIntakeKcal.toLocaleString()} kcal (
                   {eatRunway.kcalLeftFor100Pts >= 0
                     ? `${eatRunway.kcalLeftFor100Pts.toLocaleString()} left`
-                    : `${Math.abs(eatRunway.kcalLeftFor100Pts).toLocaleString()} over`}
+                    : `${Math.abs(eatRunway.kcalLeftFor100Pts).toLocaleString()} past`}
                   )
                 </p>
               </div>

@@ -57,8 +57,49 @@ describe('computeEatRunway', () => {
     expect(runway.kcalUntilAlpertBreach).toBe(200);
     expect(runway.hoursUntilAlpertBreach).toBeGreaterThan(2);
     expect(runway.alpertBreachTimeLabel).toBe('4:20 PM');
+    expect(runway.expectedBreachTimeLabel).toBe('Today 4:20 PM');
     expect(runway.status).toBe('eat_soon');
     expect(runway.proteinToGoG).toBe(110);
+  });
+
+  it('projects expected breach time into tomorrow morning and confirms safety through 8:00 AM wake-up', () => {
+    // 7:22 PM (19.37h): 1,348 kcal in, 1,966 counted burn, 1,732 Alpert cap, 1,767 BMR
+    // Buffer left = 1,114 kcal -> carries through 11 PM waking + 9h overnight BMR past 8:00 AM tomorrow
+    const runway = computeEatRunway({
+      caloriesIn: 1348,
+      scoredCaloriesOut: 1966,
+      alpertNumber: 1732,
+      hoursElapsed: 19.37,
+      proteinG: 148,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+    });
+    expect(runway.kcalUntilAlpertBreach).toBe(1114);
+    expect(runway.alpertBreachTimeLabel).toBeNull();
+    expect(runway.safeThrough8amTomorrow).toBe(true);
+    expect(runway.kcalBufferAt8amTomorrow).toBeGreaterThan(50);
+    expect(runway.kcalNeededFor8amTomorrow).toBe(0);
+    expect(runway.expectedBreachTimeLabel).toContain('Tomorrow 8:');
+    expect(runway.headline).toContain('Safe Past 8:00 AM Wake-Up');
+  });
+
+  it('warns when safe through midnight but breaching overnight before 8:00 AM wake-up', () => {
+    // 7:22 PM (19.37h) with 750 kcal buffer: clears midnight (~440 kcal), but breaches ~4:10 AM before 8 AM wake
+    const runway = computeEatRunway({
+      caloriesIn: 984,
+      scoredCaloriesOut: 1966,
+      alpertNumber: 1732,
+      hoursElapsed: 19.37,
+      proteinG: 150,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+    });
+    expect(runway.kcalUntilAlpertBreach).toBe(750);
+    expect(runway.alpertBreachTimeLabel).toBeNull();
+    expect(runway.safeThrough8amTomorrow).toBe(false);
+    expect(runway.kcalNeededFor8amTomorrow).toBeGreaterThan(200);
+    expect(runway.expectedBreachTimeLabel).toContain('Tomorrow 4:');
+    expect(runway.headline).toContain('Safe Through Midnight · Est. Breach Tomorrow');
   });
 
   it('flags immediate Alpert breach when current deficit exceeds alpertNumber', () => {
@@ -73,6 +114,7 @@ describe('computeEatRunway', () => {
     expect(runway.kcalUntilAlpertBreach).toBe(-250);
     expect(runway.hoursUntilAlpertBreach).toBe(0);
     expect(runway.alpertBreachTimeLabel).toBe('Now');
+    expect(runway.expectedBreachTimeLabel).toBe('Now');
     expect(runway.status).toBe('eat_now');
     expect(runway.headline).toContain('250');
   });
@@ -125,4 +167,3 @@ describe('computeEatRunway', () => {
     expect(runwayMorning.muscleBurnStartTimeLabel).toBeTruthy();
   });
 });
-

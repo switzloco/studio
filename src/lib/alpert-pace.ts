@@ -89,12 +89,22 @@ export interface EatRunway {
   currentDeficitKcal: number;
   /** Positive = kcal of burn left before hitting Alpert limit; <= 0 = kcal past Alpert limit right now. */
   kcalUntilAlpertBreach: number;
-  /** Estimated current burn rate (kcal/hr). */
+  /** Estimated current waking burn rate (kcal/hr). */
   hourlyBurnRateKcal: number;
-  /** Hours from now until current deficit hits alpertNumber (0 if already breached). */
+  /** Estimated overnight sleeping burn rate (kcal/hr, resting BMR). */
+  overnightBurnRateKcal: number;
+  /** Hours from now until current deficit hits alpertNumber (0 if already breached). Uses waking rate + overnight BMR sleep rate. */
   hoursUntilAlpertBreach: number;
   /** Clock time when Alpert breach will occur today (e.g. "4:35 PM"), "Now" if breached, or null if after midnight. */
   alpertBreachTimeLabel: string | null;
+  /** Always-present expected breach clock time across midnight/tomorrow (e.g. "Today 4:35 PM", "Tomorrow 8:45 AM", "Now"). */
+  expectedBreachTimeLabel: string;
+  /** Whether current calorie buffer safely carries through 8:00 AM wake-up tomorrow without breaching Alpert limit. */
+  safeThrough8amTomorrow: boolean;
+  /** Projected kcal of Alpert buffer remaining at 8:00 AM tomorrow (negative = kcal short of 8:00 AM wake-up). */
+  kcalBufferAt8amTomorrow: number;
+  /** Calories needed before bed to reach 8:00 AM wake-up tomorrow without breaching Alpert limit (0 if already safe). */
+  kcalNeededFor8amTomorrow: number;
   // Signal 1: Intraday Fuel Tank ("Time-to-Muscle-Burn" clock)
   nowSlotIndex: number;
   liverKcalRemaining: number;
@@ -118,6 +128,9 @@ export interface EatRunway {
 const SIM_START_MIN = 6 * 60; // 06:00 AM
 const SIM_INTERVAL_MIN = 15;
 const KITCHEN_CLOSE_HOUR = 20.5; // 8:30 PM
+const SLEEP_START_HOUR = 23; // 11:00 PM bedtime transition to resting BMR
+const WAKE_UP_HOUR = 8; // 8:00 AM wake-up horizon
+const TOMORROW_WAKE_HOUR = 24 + WAKE_UP_HOUR; // 32.0h from today's midnight
 const PROTEIN_PER_MEAL_CAP_G = 45;
 const MEAL_SPACING_HOURS = 3;
 
@@ -143,11 +156,95 @@ export function hoursSinceMidnightToTimeLabel(hours: number): string {
 }
 
 /**
+ * Formats an absolute hour offset from today's midnight (e.g. 16.3 -> "Today 4:20 PM",
+ * 32.8 -> "Tomorrow 8:50 AM", 50.0 -> "In 2d (2:00 AM)").
+ */
+export function formatMultiDayBreachTime(breachHourFromTodayMidnight: number): string {
+  const clockLabel = hoursSinceMidnightToTimeLabel(breachHourFromTodayMidnight);
+  if (breachHourFromTodayMidnight < 24) {
+    return `Today ${clockLabel}`;
+  }
+  if (breachHourFromTodayMidnight < 48) {
+    return `Tomorrow ${clockLabel}`;
+  }
+  const daysOut = Math.floor(breachHourFromTodayMidnight / 24);
+  return `In ${daysOut}d (${clockLabel})`;
+}
+
+/**
+ * Piecewise circadian burn projection:
+ * - Waking hours (08:00 to 23:00): burns at `wakingRateKcal`
+ * - Overnight sleep hours (23:00 to 08:00): burns at `sleepRateKcal` (resting BMR)
+ */
+function isSleepHourOfDay(hourMod24: number): boolean {
+  return hourMod24 >= SLEEP_START_HOUR || hourMod24 < WAKE_UP_HOUR;
+}
+
+function nextCircadianBoundaryHour(currentHour: number): number {
+  const dayBase = Math.floor(currentHour / 24) * 24;
+  const hMod = currentHour - dayBase;
+  if (hMod < WAKE_UP_HOUR) return dayBase + WAKE_UP_HOUR;
+  if (hMod < SLEEP_START_HOUR) return dayBase + SLEEP_START_HOUR;
+  return dayBase + 24 + WAKE_UP_HOUR;
+}
+
+function computeBurnBetweenHours(
+  startHour: number,
+  endHour: number,
+  wakingRateKcal: number,
+  sleepRateKcal: number
+): number {
+  if (endHour <= startHour) return 0;
+  let cursor = startHour;
+  let totalBurn = 0;
+  let guard = 0;
+  while (cursor < endHour && guard < 20) {
+    guard++;
+    const nextBoundary = Math.min(endHour, nextCircadianBoundaryHour(cursor));
+    const dt = Math.max(0, nextBoundary - cursor);
+    const hMod = ((cursor % 24) + 24) % 24;
+    const rate = isSleepHourOfDay(hMod) ? sleepRateKcal : wakingRateKcal;
+    totalBurn += dt * rate;
+    cursor = nextBoundary;
+  }
+  return totalBurn;
+}
+
+function projectHoursUntilAlpertBreach(
+  startHour: number,
+  kcalBuffer: number,
+  wakingRateKcal: number,
+  sleepRateKcal: number
+): number {
+  if (kcalBuffer <= 0) return 0;
+  let cursor = startHour;
+  let remainingKcal = kcalBuffer;
+  let guard = 0;
+  while (remainingKcal > 0 && guard < 30) {
+    guard++;
+    const nextBoundary = nextCircadianBoundaryHour(cursor);
+    const segHours = Math.max(0.01, nextBoundary - cursor);
+    const hMod = ((cursor % 24) + 24) % 24;
+    const rate = Math.max(1, isSleepHourOfDay(hMod) ? sleepRateKcal : wakingRateKcal);
+    const segBurn = segHours * rate;
+    if (remainingKcal <= segBurn) {
+      cursor += remainingKcal / rate;
+      remainingKcal = 0;
+      break;
+    }
+    remainingKcal -= segBurn;
+    cursor = nextBoundary;
+  }
+  return Math.max(0.1, cursor - startHour);
+}
+
+/**
  * 3-Signal "Should I Eat Now?" & Alpert Breach Runway:
- *   1. Direct Alpert Breach Clock: computes exact calories of burn remaining
- *      (`kcalUntilAlpertBreach = alpertNumber - (scoredCaloriesOut - caloriesIn)`)
- *      and clock time (`alpertBreachTimeLabel`) before today's deficit breaches
- *      the Alpert limit at your current hourly burn rate.
+ *   1. Direct Alpert Breach Clock (with 8:00 AM Tomorrow Wake-Up Horizon):
+ *      computes exact calories of burn remaining (`kcalUntilAlpertBreach`) and
+ *      projects the exact expected breach clock time across midnight and overnight
+ *      sleep (`expectedBreachTimeLabel`, e.g., "Tomorrow 8:45 AM"), plus your
+ *      projected buffer at 8:00 AM wake-up tomorrow (`kcalBufferAt8amTomorrow`).
  *   2. End-of-Day Alpert Floor & 100-Pt Target: projects full-day burn (adding
  *      remaining hours of resting BMR when mid-day) so you know how many total
  *      calories to plan before bed.
@@ -173,30 +270,51 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
 
   // Direct Alpert Breach Clock (calories & time until current deficit hits alpertNumber)
   const bmrHourly = safeBmr / 24;
+  const overnightBurnRateKcal = Math.round(bmrHourly);
   const effectiveHours = Math.max(1, Math.min(24, hoursElapsed));
   const observedHourly = safeScoredOut / effectiveHours;
   const hourlyBurnRateKcal = Math.max(
-    Math.round(bmrHourly),
+    overnightBurnRateKcal,
     Math.min(Math.round(observedHourly), Math.round(bmrHourly * 2.5))
   );
 
   const currentDeficitKcal = safeScoredOut - safeCaloriesIn;
   const kcalUntilAlpertBreach = safeAlpert - currentDeficitKcal;
 
+  // Project burn from now until Tomorrow 8:00 AM (hour 32.0)
+  const clampedStartHour = Math.max(0, Math.min(24, hoursElapsed));
+  const burnTo8amTomorrow = computeBurnBetweenHours(
+    clampedStartHour,
+    TOMORROW_WAKE_HOUR,
+    hourlyBurnRateKcal,
+    bmrHourly
+  );
+  const kcalBufferAt8amTomorrow = Math.round(kcalUntilAlpertBreach - burnTo8amTomorrow);
+  const safeThrough8amTomorrow = kcalBufferAt8amTomorrow >= 0;
+  const kcalNeededFor8amTomorrow = Math.max(0, -kcalBufferAt8amTomorrow);
+
   let hoursUntilAlpertBreach = 0;
   let alpertBreachTimeLabel: string | null = null;
+  let expectedBreachTimeLabel = 'Now';
 
   if (kcalUntilAlpertBreach <= 0) {
     hoursUntilAlpertBreach = 0;
     alpertBreachTimeLabel = 'Now';
+    expectedBreachTimeLabel = 'Now';
   } else {
-    const rawHoursToBreach = kcalUntilAlpertBreach / Math.max(1, hourlyBurnRateKcal);
+    const rawHoursToBreach = projectHoursUntilAlpertBreach(
+      clampedStartHour,
+      kcalUntilAlpertBreach,
+      hourlyBurnRateKcal,
+      bmrHourly
+    );
     hoursUntilAlpertBreach = Math.max(0.1, Math.round(rawHoursToBreach * 10) / 10);
-    const breachHourOfDay = hoursElapsed + rawHoursToBreach;
+    const breachHourOfDay = clampedStartHour + rawHoursToBreach;
+    expectedBreachTimeLabel = formatMultiDayBreachTime(breachHourOfDay);
     if (breachHourOfDay < 24) {
       alpertBreachTimeLabel = hoursSinceMidnightToTimeLabel(breachHourOfDay);
     } else {
-      alpertBreachTimeLabel = null; // Safe past midnight
+      alpertBreachTimeLabel = null; // Past midnight (use expectedBreachTimeLabel for tomorrow's clock time)
     }
   }
 
@@ -234,8 +352,6 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   }
 
   // Signal 2: Projected Full-Day Burn & End-of-Day Alpert Floor / 100-Pt Intake Target
-  // Mid-day wearable burn only reflects calories burned so far; add remaining resting BMR
-  // up to midnight so the daily intake target reflects the full 24h day.
   const remainingDayHours = hoursElapsed < 23.5 ? Math.max(0, 24 - hoursElapsed) : 0;
   const projectedFullDayBurnKcal =
     remainingDayHours > 0
@@ -256,7 +372,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     proteinToGoG > PROTEIN_PER_MEAL_CAP_G &&
     (hoursUntilKitchenClose <= 0.5 || minHoursNeededForProtein >= hoursUntilKitchenClose);
 
-  // Determine overall status & actionable coaching headline focused on Alpert Breach
+  // Determine overall status & actionable coaching headline focused on Alpert Breach + 8:00 AM Wake-Up
   let status: EatRunwayStatus = 'clear';
   let headline = 'Alpert Runway Clear';
   let subline = '';
@@ -275,32 +391,37 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
       overBy > 0
         ? `Alpert Limit Breached by ${overBy.toLocaleString()} kcal — Eat Now`
         : 'At Alpert Limit Now — Time to Eat';
-    subline = `Current deficit (${currentDeficitKcal.toLocaleString()} kcal) is past your ${safeAlpert.toLocaleString()} kcal fat cap. Eat ≥${Math.max(overBy, 150).toLocaleString()} kcal now to stop lean-mass draw, and ≥${kcalToAlpertFloor.toLocaleString()} kcal more before bed.`;
+    subline = `Current deficit (${currentDeficitKcal.toLocaleString()} kcal) is past your ${safeAlpert.toLocaleString()} kcal fat cap. Eat ≥${Math.max(overBy, 150).toLocaleString()} kcal now (or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to cover through 8:00 AM wake-up).`;
   } else if (burningMuscleNow) {
     status = 'eat_now';
     headline = `Eat Now — ${kcalUntilAlpertBreach.toLocaleString()} kcal Until Alpert Breach`;
-    subline = `Glycogen buffer is tapped out and you are ~${hoursUntilAlpertBreach}h from breaching your ${safeAlpert.toLocaleString()} kcal Alpert cap. Plan ≥${kcalToAlpertFloor.toLocaleString()} kcal before bed.`;
+    subline = `Glycogen buffer is tapped out and expected Alpert breach is ${expectedBreachTimeLabel} (~${hoursUntilAlpertBreach}h). Eat ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to stay clear through 8:00 AM wake-up.`;
   } else if (breachingSoon && alpertBreachTimeLabel) {
     status = 'eat_soon';
     headline = `Plan to Eat by ${alpertBreachTimeLabel} (~${hoursUntilAlpertBreach}h) · ${kcalUntilAlpertBreach.toLocaleString()} kcal Left`;
-    subline = `Burning ~${hourlyBurnRateKcal} kcal/hr — deficit (${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal) hits Alpert breach at ${alpertBreachTimeLabel}. Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal more today.`;
+    subline = `Burning ~${hourlyBurnRateKcal} kcal/hr — deficit (${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal) breaches at ${expectedBreachTimeLabel}. Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal today (≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8:00 AM wake-up).`;
   } else if (proteinWindowTight) {
     status = 'eat_soon';
     headline = alpertBreachTimeLabel
       ? `Eat by ${alpertBreachTimeLabel} (${kcalUntilAlpertBreach.toLocaleString()} kcal left) · ${proteinToGoG}g Protein Left`
-      : `Start Protein Window Soon (${proteinToGoG}g to go)`;
-    subline = `Needs ~${mealsNeededForProtein} meals (~45g each) across the ${hoursUntilKitchenClose}h left before 8:30 PM · Plan ≥${kcalToAlpertFloor.toLocaleString()} kcal more before bed.`;
+      : `Start Protein Window Soon (${proteinToGoG}g to go) · Breach ${expectedBreachTimeLabel}`;
+    subline = `Needs ~${mealsNeededForProtein} meals (~45g each) across the ${hoursUntilKitchenClose}h left before 8:30 PM · Expected Alpert breach: ${expectedBreachTimeLabel}.`;
   } else if (alpertBreachTimeLabel) {
     status = 'clear';
     headline = `Plan to Eat by ${alpertBreachTimeLabel} (~${hoursUntilAlpertBreach}h) · ${kcalUntilAlpertBreach.toLocaleString()} kcal to Breach`;
-    subline = `Deficit is ${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal (~${hourlyBurnRateKcal} kcal/hr). Plan ≥${kcalToAlpertFloor.toLocaleString()} kcal more today (${kcalLeftFor100Pts.toLocaleString()} kcal for a 100-pt day).`;
+    subline = `Deficit is ${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal (~${hourlyBurnRateKcal} kcal/hr). Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal for midnight floor, or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to clear 8:00 AM wake-up.`;
+  } else if (safeThrough8amTomorrow) {
+    status = 'clear';
+    headline = `Safe Past 8:00 AM Wake-Up · Est. Breach ${expectedBreachTimeLabel}`;
+    subline = `${kcalUntilAlpertBreach.toLocaleString()} kcal buffer left (~${hoursUntilAlpertBreach}h) — wakes at 8:00 AM with +${kcalBufferAt8amTomorrow.toLocaleString()} kcal buffer to spare. ${
+      kcalLeftFor100Pts >= 0
+        ? `${kcalLeftFor100Pts.toLocaleString()} kcal left for a 100-pt day.`
+        : `${Math.abs(kcalLeftFor100Pts).toLocaleString()} kcal past 100-pt line.`
+    }`;
   } else {
     status = 'clear';
-    headline = `Safe Through Midnight · ${kcalUntilAlpertBreach.toLocaleString()} kcal Buffer Left`;
-    subline =
-      kcalToAlpertFloor > 0
-        ? `Deficit is ${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal · Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal before bed to stay above EOD Alpert floor.`
-        : `Full-day Alpert floor (${alpertFloorIntakeKcal.toLocaleString()} kcal) cleared ✓ · ${kcalLeftFor100Pts >= 0 ? `${kcalLeftFor100Pts.toLocaleString()} kcal left for a 100-pt day` : `${Math.abs(kcalLeftFor100Pts).toLocaleString()} kcal past 100-pt line`}.`;
+    headline = `Safe Through Midnight · Est. Breach ${expectedBreachTimeLabel} (~${hoursUntilAlpertBreach}h)`;
+    subline = `${kcalUntilAlpertBreach.toLocaleString()} kcal buffer clears midnight, but breaches before 8:00 AM wake-up. Eat ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal before bed to stay safe until 8:00 AM.`;
   }
 
   return {
@@ -310,8 +431,13 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     currentDeficitKcal,
     kcalUntilAlpertBreach,
     hourlyBurnRateKcal,
+    overnightBurnRateKcal,
     hoursUntilAlpertBreach,
     alpertBreachTimeLabel,
+    expectedBreachTimeLabel,
+    safeThrough8amTomorrow,
+    kcalBufferAt8amTomorrow,
+    kcalNeededFor8amTomorrow,
     nowSlotIndex,
     liverKcalRemaining,
     muscleLostSoFarKcal,
@@ -329,4 +455,3 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     proteinWindowTight,
   };
 }
-
