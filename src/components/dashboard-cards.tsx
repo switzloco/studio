@@ -320,19 +320,46 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [isOuraSyncing, setIsOuraSyncing] = React.useState(false);
   const [isWithingsSyncing, setIsWithingsSyncing] = React.useState(false);
+  const hasAutoSyncedTodayRef = React.useRef<string | null>(null);
 
-  const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : null;
+  const todayFitbitSnapshot = data?.fitbitByDate?.[todayStr] ?? null;
+  const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : todayFitbitSnapshot;
   const isLegacyFitbit = fitbitCreds?.provider === 'fitbit';
+
+  const bmrKcal = estimateBmrKcal(data?.weightKg, data?.heightCm, prefs?.profile?.age);
 
   const dailyProteinG = computedTotals?.proteinG ?? (isViewingToday ? (data?.dailyProteinG || 0) : (historyEntry?.breakdown?.proteinG || 0));
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (isViewingToday ? (data?.dailyCaloriesIn || 0) : (historyEntry?.breakdown?.caloriesIn || 0));
   const dailyCarbsG = computedTotals?.carbsG ?? (data?.dailyCarbsG || 0);
-  const dailyCaloriesOut = isViewingToday
-    ? (data?.dailyCaloriesOut || 2000)
-    : (historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data?.dailyCaloriesOut || 2000);
+
+  // Prevent yesterday's dailyCaloriesOut from leaking into a new morning before the first sync
+  const dailyCaloriesOut = React.useMemo(() => {
+    if (!isViewingToday) {
+      return historyEntry?.breakdown?.caloriesOut || fitbitForDate?.caloriesOut || data?.dailyCaloriesOut || 2000;
+    }
+    if (todayFitbitSnapshot?.caloriesOut && todayFitbitSnapshot.caloriesOut > 0) {
+      return todayFitbitSnapshot.caloriesOut;
+    }
+    if (!data?.fitbitByDate && data?.lastActiveDate === todayStr && data?.dailyCaloriesOut) {
+      return data.dailyCaloriesOut;
+    }
+    if (data?.isDeviceVerified && data?.lastActiveDate === todayStr && data?.dailyCaloriesOut && !data?.fitbitByDate?.[prevDateStr]) {
+      return data.dailyCaloriesOut;
+    }
+    if (!data?.isDeviceVerified && data?.dailyCaloriesOut) {
+      return data.dailyCaloriesOut;
+    }
+    // New calendar day before watch has published today's caloriesOut: estimate from elapsed BMR + logged exercise
+    const now = new Date();
+    const hoursElapsedNow = Math.max(0.5, now.getHours() + now.getMinutes() / 60);
+    const activeExKcal = (todayExerciseLogs ?? [])
+      .filter((e) => !e.ignored)
+      .reduce((s, e) => s + (e.adjustedCalories || 0), 0);
+    return Math.max(60, Math.round((bmrKcal / 24) * hoursElapsedNow) + activeExKcal);
+  }, [isViewingToday, historyEntry, fitbitForDate, todayFitbitSnapshot, data, todayStr, prevDateStr, todayExerciseLogs, bmrKcal]);
 
   const fitbitActivities = isViewingToday
-    ? data?.fitbitByDate?.[new Date().toLocaleDateString('en-CA')]?.activities
+    ? todayFitbitSnapshot?.activities
     : fitbitForDate?.activities;
 
   const visceralFatPoints = data?.visceralFatPoints || 0;
@@ -348,10 +375,44 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const showVfScore = prefs?.display?.showVfScore ?? true;
 
   const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
-  const bmrKcal = estimateBmrKcal(data?.weightKg, data?.heightCm, prefs?.profile?.age);
   const scoredCaloriesOut = historyEntry?.breakdown?.scoredCaloriesOut
     ?? creditedCaloriesOut(dailyCaloriesOut, bmrKcal);
   const alpertDeficit = scoredCaloriesOut - dailyCaloriesIn;
+
+  // Compute yesterday's end-of-day net deficit so waking up fasted at 8:00 AM continues last night's breach clock seamlessly
+  const prevDayDeficitKcal = React.useMemo(() => {
+    if (!isViewingToday || !data) return 0;
+    try {
+      const cached = typeof window !== 'undefined' ? window.localStorage.getItem(`vf_midnight_deficit_${prevDateStr}`) : null;
+      if (cached !== null && !Number.isNaN(Number(cached))) {
+        return Math.max(0, Number(cached));
+      }
+    } catch {
+      // ignore storage errors
+    }
+    const prevEntry = data.history?.find((h) => (h.isoDate || h.date) === prevDateStr);
+    const prevSnap = data.fitbitByDate?.[prevDateStr];
+    const activePrevFood = (prevFoodLogs ?? []).filter((e) => !e.ignored);
+    const prevCalIn =
+      activePrevFood.length > 0
+        ? activePrevFood.reduce((s, e) => s + (e.calories || 0), 0)
+        : (prevEntry?.breakdown?.caloriesIn ?? 0);
+    if (prevCalIn <= 0 && !prevEntry && !prevSnap) return 0;
+
+    const prevRawOut =
+      prevSnap?.caloriesOut ||
+      prevEntry?.breakdown?.caloriesOut ||
+      (data.lastActiveDate === prevDateStr ? data.dailyCaloriesOut : 0) ||
+      bmrKcal;
+    let prevScoredOut =
+      prevEntry?.breakdown?.scoredCaloriesOut ?? creditedCaloriesOut(prevRawOut, bmrKcal);
+
+    // If yesterday's snapshot was captured mid-evening before midnight, top up ~3h of evening BMR
+    if (prevSnap?.capturedOnDate === prevDateStr && !prevEntry?.breakdown?.scoredCaloriesOut) {
+      prevScoredOut += Math.round((bmrKcal / 24) * 3.2);
+    }
+    return Math.max(0, prevScoredOut - prevCalIn);
+  }, [isViewingToday, data, prevDateStr, prevFoodLogs, bmrKcal]);
 
   const dailyAlpertScore = React.useMemo(() => {
     if (!data) return null;
@@ -410,9 +471,39 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       proteinG: dailyProteinG,
       proteinGoal,
       bmrKcal,
+      prevDayDeficitKcal: isViewingToday ? prevDayDeficitKcal : 0,
       slots: simulationResult?.slots,
     });
-  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, bmrKcal, simulationResult?.slots]);
+  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, bmrKcal, prevDayDeficitKcal, simulationResult?.slots]);
+
+  // Cache today's projected midnight deficit so waking up fasted at 8:00 AM tomorrow matches tonight's breach clock to the minute
+  React.useEffect(() => {
+    if (!isViewingToday || dailyCaloriesIn <= 0) return;
+    try {
+      window.localStorage.setItem(
+        `vf_midnight_deficit_${todayStr}`,
+        String(Math.max(0, eatRunway.projectedMidnightDeficitKcal))
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [isViewingToday, dailyCaloriesIn, todayStr, eatRunway.projectedMidnightDeficitKcal]);
+
+  // Auto-sync device when viewing Today if today's snapshot has no caloriesOut yet or last sync was >15m ago
+  React.useEffect(() => {
+    if (!isViewingToday || !user || !data?.isDeviceVerified) return;
+    if (data.connectedDevice === 'oura' || data.connectedDevice === 'withings') return;
+    const hasTodayBurn = !!(todayFitbitSnapshot?.caloriesOut && todayFitbitSnapshot.caloriesOut > 0);
+    const lastSynced = fitbitCreds?.lastSyncedAt ?? 0;
+    const isStale = Date.now() - lastSynced > 15 * 60 * 1000;
+    if (hasTodayBurn && !isStale) return;
+    if (hasAutoSyncedTodayRef.current === todayStr) return;
+    hasAutoSyncedTodayRef.current = todayStr;
+    const tzOffset = new Date().getTimezoneOffset();
+    syncFitbitData(user.uid, todayStr, tzOffset).catch((e) =>
+      console.warn('[DashboardCards AutoSync] Failed:', e)
+    );
+  }, [isViewingToday, user, data?.isDeviceVerified, data?.connectedDevice, todayFitbitSnapshot?.caloriesOut, fitbitCreds?.lastSyncedAt, todayStr]);
 
   const alpertPace = React.useMemo(() => {
     if (!data || !isViewingToday) return null;
@@ -1261,9 +1352,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
-                    : eatRunway.safeThrough8amTomorrow
-                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer · +${eatRunway.kcalBufferAt8amTomorrow.toLocaleString()} kcal at 8 AM wake ✓`
-                      : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left · Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`}
+                    : eatRunway.overnightCarryoverKcal > 0
+                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left (incl. ${eatRunway.overnightCarryoverKcal.toLocaleString()} kcal overnight fast)`
+                      : eatRunway.safeThrough8amTomorrow
+                        ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer · +${eatRunway.kcalBufferAt8amTomorrow.toLocaleString()} kcal at 8 AM wake ✓`
+                        : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left · Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`}
                 </p>
               </div>
 

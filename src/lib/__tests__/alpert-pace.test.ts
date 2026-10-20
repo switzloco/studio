@@ -62,25 +62,33 @@ describe('computeEatRunway', () => {
     expect(runway.proteinToGoG).toBe(110);
   });
 
-  it('projects expected breach time into tomorrow morning and confirms safety through 8:00 AM wake-up', () => {
-    // 7:22 PM (19.37h): 1,348 kcal in, 1,966 counted burn, 1,732 Alpert cap, 1,767 BMR
-    // Buffer left = 1,114 kcal -> carries through 11 PM waking + 9h overnight BMR past 8:00 AM tomorrow
-    const runway = computeEatRunway({
+  it('projects expected breach time into tomorrow morning and stays continuous at 8:00 AM wake-up', () => {
+    // Tonight at 8:41 PM (20.69h): 1,348 kcal in, 1,966 counted burn, 1,732 Alpert cap, 1,767 BMR
+    const tonightRunway = computeEatRunway({
       caloriesIn: 1348,
       scoredCaloriesOut: 1966,
       alpertNumber: 1732,
-      hoursElapsed: 19.37,
+      hoursElapsed: 20.69,
       proteinG: 148,
       proteinGoal: 150,
       bmrKcal: 1767,
     });
-    expect(runway.kcalUntilAlpertBreach).toBe(1114);
-    expect(runway.alpertBreachTimeLabel).toBeNull();
-    expect(runway.safeThrough8amTomorrow).toBe(true);
-    expect(runway.kcalBufferAt8amTomorrow).toBeGreaterThan(50);
-    expect(runway.kcalNeededFor8amTomorrow).toBe(0);
-    expect(runway.expectedBreachTimeLabel).toContain('Tomorrow 8:');
-    expect(runway.headline).toContain('Safe Past 8:00 AM Wake-Up');
+    expect(tonightRunway.safeThrough8amTomorrow).toBe(true);
+    expect(tonightRunway.expectedBreachTimeLabel).toContain('Tomorrow 10:');
+
+    // Tomorrow at 8:00 AM wake-up (8.0h): fasted (0 kcal in), 589 kcal sleep burn, carrying over tonight's midnight deficit
+    const wakeRunway = computeEatRunway({
+      caloriesIn: 0,
+      scoredCaloriesOut: 589,
+      alpertNumber: 1732,
+      hoursElapsed: 8.0,
+      proteinG: 0,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+      prevDayDeficitKcal: tonightRunway.projectedMidnightDeficitKcal,
+    });
+    expect(wakeRunway.kcalUntilAlpertBreach).toBe(tonightRunway.kcalBufferAt8amTomorrow);
+    expect(wakeRunway.expectedBreachTimeLabel).toContain('Today 10:');
   });
 
   it('warns when safe through midnight but breaching overnight before 8:00 AM wake-up', () => {

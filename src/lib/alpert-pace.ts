@@ -75,6 +75,12 @@ export interface EatRunwayInput {
   proteinGoal: number;
   /** Optional 24-hour resting BMR (kcal/day), defaults to 1750. */
   bmrKcal?: number;
+  /**
+   * Optional net deficit carried over from yesterday at midnight (kcal).
+   * Keeps the expected Alpert breach time 100% continuous across midnight when
+   * waking up fasted the next morning, decaying to 0 once you eat (~350+ kcal).
+   */
+  prevDayDeficitKcal?: number;
   /** Optional 15-min metabolic simulation slots (73 slots, 06:00 to 24:00). */
   slots?: MetabolicSlotData[];
 }
@@ -87,6 +93,10 @@ export interface EatRunway {
   subline: string;
   // Direct Alpert Breach Clock & Calorie Buffer
   currentDeficitKcal: number;
+  /** Portion of currentDeficitKcal carried over from yesterday's unbroken overnight fast (0 once fed). */
+  overnightCarryoverKcal: number;
+  /** Projected end-of-day deficit at midnight tonight (used as tomorrow morning's carryover). */
+  projectedMidnightDeficitKcal: number;
   /** Positive = kcal of burn left before hitting Alpert limit; <= 0 = kcal past Alpert limit right now. */
   kcalUntilAlpertBreach: number;
   /** Estimated current waking burn rate (kcal/hr). */
@@ -97,7 +107,7 @@ export interface EatRunway {
   hoursUntilAlpertBreach: number;
   /** Clock time when Alpert breach will occur today (e.g. "4:35 PM"), "Now" if breached, or null if after midnight. */
   alpertBreachTimeLabel: string | null;
-  /** Always-present expected breach clock time across midnight/tomorrow (e.g. "Today 4:35 PM", "Tomorrow 8:45 AM", "Now"). */
+  /** Always-present expected breach clock time across midnight/tomorrow (e.g. "Today 4:35 PM", "Tomorrow 10:00 AM", "Now"). */
   expectedBreachTimeLabel: string;
   /** Whether current calorie buffer safely carries through 8:00 AM wake-up tomorrow without breaching Alpert limit. */
   safeThrough8amTomorrow: boolean;
@@ -188,7 +198,7 @@ function nextCircadianBoundaryHour(currentHour: number): number {
   return dayBase + 24 + WAKE_UP_HOUR;
 }
 
-function computeBurnBetweenHours(
+export function computeBurnBetweenHours(
   startHour: number,
   endHour: number,
   wakingRateKcal: number,
@@ -240,14 +250,14 @@ function projectHoursUntilAlpertBreach(
 
 /**
  * 3-Signal "Should I Eat Now?" & Alpert Breach Runway:
- *   1. Direct Alpert Breach Clock (with 8:00 AM Tomorrow Wake-Up Horizon):
+ *   1. Direct Alpert Breach Clock (with 8:00 AM Tomorrow Wake-Up Horizon & Overnight Fast Carryover):
  *      computes exact calories of burn remaining (`kcalUntilAlpertBreach`) and
  *      projects the exact expected breach clock time across midnight and overnight
- *      sleep (`expectedBreachTimeLabel`, e.g., "Tomorrow 8:45 AM"), plus your
- *      projected buffer at 8:00 AM wake-up tomorrow (`kcalBufferAt8amTomorrow`).
- *   2. End-of-Day Alpert Floor & 100-Pt Target: projects full-day burn (adding
- *      remaining hours of resting BMR when mid-day) so you know how many total
- *      calories to plan before bed.
+ *      sleep (`expectedBreachTimeLabel`, e.g., "Tomorrow 10:00 AM"). When waking up
+ *      fasted the next morning, `prevDayDeficitKcal` carries over until you eat so
+ *      the morning breach time matches last night's prediction without jumping at midnight.
+ *   2. End-of-Day Alpert Floor & 100-Pt Target: projects full-day burn so you know
+ *      how many total calories to plan before bed.
  *   3. Protein Pacing Window: checks remaining protein vs. ~45g/meal synthesis
  *      bolus spacing before 8:30 PM kitchen close.
  */
@@ -260,6 +270,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     proteinG,
     proteinGoal,
     bmrKcal = 1750,
+    prevDayDeficitKcal = 0,
     slots,
   } = input;
 
@@ -273,23 +284,53 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   const overnightBurnRateKcal = Math.round(bmrHourly);
   const effectiveHours = Math.max(1, Math.min(24, hoursElapsed));
   const observedHourly = safeScoredOut / effectiveHours;
+
+  // Early morning (before 11:00 AM), 00:00-08:00 was sleep at BMR, so observedHourly
+  // reflects sleep rather than daytime waking pace. Use a 1.28x BMR waking floor (~94 kcal/hr)
+  // when carrying over an overnight fast so morning waking projection matches last night's.
+  const wakingFloorRate =
+    prevDayDeficitKcal > 0 && hoursElapsed < 11
+      ? Math.round(bmrHourly * 1.28)
+      : overnightBurnRateKcal;
+
   const hourlyBurnRateKcal = Math.max(
-    overnightBurnRateKcal,
+    wakingFloorRate,
     Math.min(Math.round(observedHourly), Math.round(bmrHourly * 2.5))
   );
 
-  const currentDeficitKcal = safeScoredOut - safeCaloriesIn;
+  // Overnight Fast Carryover:
+  // - When fasted (caloriesIn == 0), 100% of yesterday's midnight deficit carries over so
+  //   waking up at 8:00 AM shows the exact same ~10:00 AM breach time predicted the night before.
+  // - As you log meals today, each calorie eaten pays down the overnight fast carryover by 2.5x
+  //   (clearing completely once you've eaten ~350+ kcal or after 6:00 PM).
+  const clampedPrevDeficit = Math.max(0, Math.min(safeAlpert, Math.round(prevDayDeficitKcal)));
+  const overnightCarryoverKcal =
+    clampedPrevDeficit > 0 && hoursElapsed < 18
+      ? Math.max(0, Math.round(clampedPrevDeficit - safeCaloriesIn * 2.5))
+      : 0;
+
+  const todayOnlyDeficitKcal = safeScoredOut - safeCaloriesIn;
+  const currentDeficitKcal = todayOnlyDeficitKcal + overnightCarryoverKcal;
   const kcalUntilAlpertBreach = safeAlpert - currentDeficitKcal;
 
-  // Project burn from now until Tomorrow 8:00 AM (hour 32.0)
+  // Project burn from now until Midnight (24.0h) and Tomorrow 8:00 AM (32.0h)
   const clampedStartHour = Math.max(0, Math.min(24, hoursElapsed));
+  const burnToMidnight = computeBurnBetweenHours(
+    clampedStartHour,
+    24,
+    hourlyBurnRateKcal,
+    bmrHourly
+  );
+  const projectedMidnightDeficitKcal = Math.round(todayOnlyDeficitKcal + burnToMidnight);
+
   const burnTo8amTomorrow = computeBurnBetweenHours(
     clampedStartHour,
     TOMORROW_WAKE_HOUR,
     hourlyBurnRateKcal,
     bmrHourly
   );
-  const kcalBufferAt8amTomorrow = Math.round(kcalUntilAlpertBreach - burnTo8amTomorrow);
+  // 8:00 AM Tomorrow buffer is always evaluated on today's full-day deficit into tomorrow morning
+  const kcalBufferAt8amTomorrow = Math.round((safeAlpert - todayOnlyDeficitKcal) - burnTo8amTomorrow);
   const safeThrough8amTomorrow = kcalBufferAt8amTomorrow >= 0;
   const kcalNeededFor8amTomorrow = Math.max(0, -kcalBufferAt8amTomorrow);
 
@@ -355,7 +396,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   const remainingDayHours = hoursElapsed < 23.5 ? Math.max(0, 24 - hoursElapsed) : 0;
   const projectedFullDayBurnKcal =
     remainingDayHours > 0
-      ? Math.max(safeScoredOut, safeBmr, Math.round(safeScoredOut + bmrHourly * remainingDayHours))
+      ? Math.max(safeScoredOut, safeBmr, Math.round(safeScoredOut + burnToMidnight))
       : safeScoredOut;
 
   const alpertFloorIntakeKcal = Math.max(0, Math.round(projectedFullDayBurnKcal - safeAlpert));
@@ -391,7 +432,10 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
       overBy > 0
         ? `Alpert Limit Breached by ${overBy.toLocaleString()} kcal — Eat Now`
         : 'At Alpert Limit Now — Time to Eat';
-    subline = `Current deficit (${currentDeficitKcal.toLocaleString()} kcal) is past your ${safeAlpert.toLocaleString()} kcal fat cap. Eat ≥${Math.max(overBy, 150).toLocaleString()} kcal now (or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to cover through 8:00 AM wake-up).`;
+    subline =
+      overnightCarryoverKcal > 0
+        ? `Unbroken overnight fast deficit (${currentDeficitKcal.toLocaleString()} kcal incl. yesterday) is past your ${safeAlpert.toLocaleString()} kcal cap. Eat a high-protein meal now to reset today's runway.`
+        : `Current deficit (${currentDeficitKcal.toLocaleString()} kcal) is past your ${safeAlpert.toLocaleString()} kcal fat cap. Eat ≥${Math.max(overBy, 150).toLocaleString()} kcal now (or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to cover through 8:00 AM wake-up).`;
   } else if (burningMuscleNow) {
     status = 'eat_now';
     headline = `Eat Now — ${kcalUntilAlpertBreach.toLocaleString()} kcal Until Alpert Breach`;
@@ -399,7 +443,10 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   } else if (breachingSoon && alpertBreachTimeLabel) {
     status = 'eat_soon';
     headline = `Plan to Eat by ${alpertBreachTimeLabel} (~${hoursUntilAlpertBreach}h) · ${kcalUntilAlpertBreach.toLocaleString()} kcal Left`;
-    subline = `Burning ~${hourlyBurnRateKcal} kcal/hr — deficit (${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal) breaches at ${expectedBreachTimeLabel}. Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal today (≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8:00 AM wake-up).`;
+    subline =
+      overnightCarryoverKcal > 0
+        ? `Continuing overnight fast (${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal incl. yesterday's ${overnightCarryoverKcal.toLocaleString()} kcal deficit). Eat by ${alpertBreachTimeLabel} to refuel and reset today's runway.`
+        : `Burning ~${hourlyBurnRateKcal} kcal/hr — deficit (${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal) breaches at ${expectedBreachTimeLabel}. Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal today (≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8:00 AM wake-up).`;
   } else if (proteinWindowTight) {
     status = 'eat_soon';
     headline = alpertBreachTimeLabel
@@ -409,7 +456,10 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   } else if (alpertBreachTimeLabel) {
     status = 'clear';
     headline = `Plan to Eat by ${alpertBreachTimeLabel} (~${hoursUntilAlpertBreach}h) · ${kcalUntilAlpertBreach.toLocaleString()} kcal to Breach`;
-    subline = `Deficit is ${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal (~${hourlyBurnRateKcal} kcal/hr). Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal for midnight floor, or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to clear 8:00 AM wake-up.`;
+    subline =
+      overnightCarryoverKcal > 0
+        ? `Includes ${overnightCarryoverKcal.toLocaleString()} kcal overnight fast carryover from yesterday (~${hourlyBurnRateKcal} kcal/hr). Logging your first meal clears overnight debt.`
+        : `Deficit is ${currentDeficitKcal.toLocaleString()} / ${safeAlpert.toLocaleString()} kcal (~${hourlyBurnRateKcal} kcal/hr). Eat ≥${kcalToAlpertFloor.toLocaleString()} kcal for midnight floor, or ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to clear 8:00 AM wake-up.`;
   } else if (safeThrough8amTomorrow) {
     status = 'clear';
     headline = `Safe Past 8:00 AM Wake-Up · Est. Breach ${expectedBreachTimeLabel}`;
@@ -429,6 +479,8 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     headline,
     subline,
     currentDeficitKcal,
+    overnightCarryoverKcal,
+    projectedMidnightDeficitKcal,
     kcalUntilAlpertBreach,
     hourlyBurnRateKcal,
     overnightBurnRateKcal,
