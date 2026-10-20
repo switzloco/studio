@@ -443,11 +443,62 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   }, [data, isViewingToday, historyEntry, selectedHistoryEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
       proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age, lockFastingHours, lockAlcoholDrinks]);
 
+  // Build 3-day recent history summary for Zero-AI 3-Day Nutritionist
+  const recentDaysSummary = React.useMemo(() => {
+    if (!data) return [];
+    const results: Array<{
+      date: string;
+      caloriesIn: number;
+      scoredCaloriesOut: number;
+      proteinG: number;
+      carbsG?: number;
+      score?: number;
+    }> = [];
+    const baseDate = new Date(`${selectedDateStr}T12:00:00`);
+    for (let offset = 1; offset <= 3; offset++) {
+      const d = new Date(baseDate.getTime() - offset * 86_400_000);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const hEntry = data.history?.find((h) => (h.isoDate || h.date) === iso);
+      const snap = data.fitbitByDate?.[iso];
+      const calIn =
+        offset === 1 && isViewingToday && (prevFoodLogs ?? []).some((e) => !e.ignored)
+          ? (prevFoodLogs ?? []).filter((e) => !e.ignored).reduce((s, e) => s + (e.calories || 0), 0)
+          : (hEntry?.breakdown?.caloriesIn ?? 0);
+      const protG =
+        offset === 1 && isViewingToday && (prevFoodLogs ?? []).some((e) => !e.ignored)
+          ? (prevFoodLogs ?? []).filter((e) => !e.ignored).reduce((s, e) => s + (e.proteinG || 0), 0)
+          : (hEntry?.breakdown?.proteinG ?? 0);
+      const carbsG =
+        offset === 1 && isViewingToday && (prevFoodLogs ?? []).some((e) => !e.ignored)
+          ? (prevFoodLogs ?? []).filter((e) => !e.ignored).reduce((s, e) => s + (e.carbsG || 0), 0)
+          : undefined;
+      const rawOut = snap?.caloriesOut || hEntry?.breakdown?.caloriesOut || bmrKcal;
+      const scoredOut = hEntry?.breakdown?.scoredCaloriesOut ?? creditedCaloriesOut(rawOut, bmrKcal);
+      if (calIn > 0 || hEntry) {
+        results.push({
+          date: iso,
+          caloriesIn: calIn,
+          scoredCaloriesOut: scoredOut,
+          proteinG: protG,
+          carbsG,
+          score: hEntry?.gain,
+        });
+      }
+    }
+    return results;
+  }, [data, selectedDateStr, isViewingToday, prevFoodLogs, bmrKcal]);
+
   const simulationResult = React.useMemo(() => {
     if (!data || dailyCaloriesOut <= 0) return null;
     const muscleMax = computeMuscleGlycogenMaxKcal(data.weightKg, data.bodyFatPct);
+    const now = new Date();
+    const hoursElapsedNow = isViewingToday ? Math.max(1, now.getHours() + now.getMinutes() / 60) : 24;
+    const projectedFullDayScoredOut =
+      isViewingToday && hoursElapsedNow < 23 && scoredCaloriesOut < bmrKcal * 1.15
+        ? Math.max(scoredCaloriesOut, Math.round((scoredCaloriesOut / hoursElapsedNow) * 24), bmrKcal)
+        : scoredCaloriesOut;
     return runMetabolicSimulation({
-      caloriesOut: scoredCaloriesOut,
+      caloriesOut: projectedFullDayScoredOut,
       exerciseCreditFraction: ACTIVITY_CREDIT_FRACTION,
       alpertNumber,
       foodLogs: todayFoodLogs ?? [],
@@ -458,9 +509,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       morningGlycogenPct,
       hasCreatine: prefs?.profile?.hasCreatine,
     });
-  }, [data, dailyCaloriesOut, scoredCaloriesOut, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
+  }, [data, isViewingToday, dailyCaloriesOut, scoredCaloriesOut, bmrKcal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, dailyCaloriesIn, morningGlycogenPct, prefs?.profile?.hasCreatine]);
 
-  // 3-Signal "Should I Eat Now?" & Alpert Breach Runway
+  // 3-Signal "Should I Eat Now?" & Alpert Breach Runway + Zero-AI 3-Day Nutritionist
   const eatRunway = React.useMemo(() => {
     const now = new Date();
     const hoursElapsed = isViewingToday ? (now.getHours() + now.getMinutes() / 60) : 24;
@@ -474,8 +525,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       bmrKcal,
       prevDayDeficitKcal: isViewingToday ? prevDayDeficitKcal : 0,
       slots: simulationResult?.slots,
+      foodLogs: todayFoodLogs ?? [],
+      recentDays: recentDaysSummary,
     });
-  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, bmrKcal, prevDayDeficitKcal, simulationResult?.slots]);
+  }, [isViewingToday, dailyCaloriesIn, scoredCaloriesOut, alpertNumber, dailyProteinG, proteinGoal, bmrKcal, prevDayDeficitKcal, simulationResult?.slots, todayFoodLogs, recentDaysSummary]);
 
   // Cache today's projected midnight deficit so waking up fasted at 8:00 AM tomorrow matches tonight's breach clock to the minute
   React.useEffect(() => {
@@ -1337,30 +1390,26 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
             {/* 3-Signal Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Signal 1: Direct Alpert Breach Clock (Calories & Time Until Breach + 8 AM Wake-Up Horizon) */}
+              {/* Signal 1: Direct Alpert Breach Clock + Optimal Eat-By Sweet Spot */}
               <div className="bg-white/85 backdrop-blur-sm rounded-xl p-3.5 border border-black/5">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">
-                    1. Expected Alpert Breach
+                    1. Sweet Spot & Breach Clock
                   </span>
                   <Clock className="w-4 h-4 text-emerald-600" />
                 </div>
                 <p className="text-base sm:text-lg font-black text-foreground leading-snug">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `${Math.abs(eatRunway.kcalUntilAlpertBreach).toLocaleString()} kcal OVER — Eat Now`
-                    : `${eatRunway.expectedBreachTimeLabel} (~${eatRunway.hoursUntilAlpertBreach}h)`}
+                    : `Optimal Eat-By: ${eatRunway.nutritionistRx.optimalEatByTimeLabel} (~${eatRunway.nutritionistRx.hoursUntilOptimalEat}h)`}
                 </p>
                 <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
                   {eatRunway.kcalUntilAlpertBreach <= 0
                     ? `Deficit ${eatRunway.currentDeficitKcal.toLocaleString()} / ${alpertNumber.toLocaleString()} cap (~${eatRunway.hourlyBurnRateKcal} kcal/hr)`
-                    : eatRunway.overnightCarryoverKcal > 0
-                      ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left (incl. ${eatRunway.overnightCarryoverKcal.toLocaleString()} kcal net overnight fast)`
-                      : eatRunway.safeThrough8amTomorrow
-                        ? `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal buffer · +${eatRunway.kcalBufferAt8amTomorrow.toLocaleString()} kcal at 8 AM wake ✓`
-                        : `${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left · Eat ≥${eatRunway.kcalNeededFor8amTomorrow.toLocaleString()} kcal for 8 AM wake`}
+                    : `Hard Alpert cap: ${eatRunway.expectedBreachTimeLabel} (~${eatRunway.hoursUntilAlpertBreach}h · ${eatRunway.kcalUntilAlpertBreach.toLocaleString()} kcal left)`}
                 </p>
                 <p className="text-[11px] font-semibold text-emerald-800/80 mt-0.5">
-                  Fat faucet: {eatRunway.fatFaucetPerMinKcal} kcal/min ({eatRunway.fatFaucetHourlyKcal}/hr) · Sleep net drain: ~{eatRunway.overnightNetDrainHourlyKcal} kcal/hr
+                  Fat faucet: {eatRunway.nutritionistRx.fatFaucetEfficiencyPct}% ({eatRunway.fatFaucetHourlyKcal} kcal/hr) · Non-fat gap: ~{eatRunway.nutritionistRx.wakingNonFatGapHourlyKcal} kcal/hr
                 </p>
               </div>
 
@@ -1404,10 +1453,30 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 <div className="mt-2">
                   <Progress value={proteinProgress} className="h-2 bg-purple-100" />
                   <p className="text-xs sm:text-sm font-bold text-muted-foreground mt-1">
-                    {dailyProteinG}g / {proteinGoal}g · {eatRunway.hoursUntilKitchenClose}h to 8:30 PM
+                    {dailyProteinG}g / {proteinGoal}g · PSMF 40g pulse = +{eatRunway.nutritionistRx.psmfPulseGainHours}h runway
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Zero-AI 3-Day Nutritionist Rx Banner (0 LLM Tokens, Pure Physiology Math) */}
+            <div className="bg-white/90 backdrop-blur-sm rounded-xl p-3.5 border border-emerald-500/25 shadow-xs space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-black uppercase tracking-wider">
+                    Zero-AI 3-Day Nutritionist
+                  </span>
+                  <span className="text-xs font-bold text-muted-foreground">
+                    {eatRunway.nutritionistRx.threeDaySummaryLabel}
+                  </span>
+                </div>
+                <span className="text-xs font-black text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-full">
+                  {eatRunway.nutritionistRx.sweetSpotWindowLabel}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm font-bold text-foreground leading-relaxed">
+                {eatRunway.nutritionistRx.recommendation}
+              </p>
             </div>
 
             {alpertPace && eatRunway.status === 'clear' && (

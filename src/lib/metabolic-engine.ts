@@ -314,11 +314,13 @@ export function runMetabolicSimulation(params: MetabolicEngineParams): Metabolic
       
       const fiberDelaySlots = Math.round((food.fiberG || 0) * 0.5);
       const fatDelaySlots   = Math.round((food.fatG || 0) * 0.2);
-      const absorptionDuration = Math.min(24, 6 + fiberDelaySlots + fatDelaySlots);
+      const proteinDelaySlots = Math.round((food.proteinG || 0) * 0.2);
+      const absorptionDuration = Math.min(24, 6 + fiberDelaySlots + fatDelaySlots + proteinDelaySlots);
       
       const perSlot = food.calories / absorptionDuration;
       // Carb share of what's absorbed — the only part that can refill glycogen.
-      const carbPerSlot = Math.min(perSlot, ((food.carbsG || 0) * 4) / absorptionDuration);
+      const glucogenicProteinKcal = Math.max(0, (food.proteinG || 0) - 15) * 1.5;
+      const carbPerSlot = Math.min(perSlot, (((food.carbsG || 0) * 4) + glucogenicProteinKcal) / absorptionDuration);
       for (let s = eatSlot; s < Math.min(eatSlot + absorptionDuration, NUM_SLOTS); s++) {
         absorptionPerSlot[s] += perSlot;
         carbAbsorptionPerSlot[s] += carbPerSlot;

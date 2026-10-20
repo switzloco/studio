@@ -1,12 +1,18 @@
 /**
- * @fileOverview Alpert pace warning — is today's deficit running past the most
- * fat the body can supply in a day (the Alpert ceiling)? Past it, the rest of
- * the deficit comes from glycogen and lean tissue.
+ * @fileOverview Alpert & Glycogen Timing Engine + Zero-AI 3-Day Nutritionist.
  *
- * Deliberately runs on the device burn (after the 0.90 discount) rather than the
- * score's 50%-credited burn: for a muscle-loss warning, the higher burn estimate
- * is the cautious one.
+ * Models Seymour Alpert's (2005) maximal lipolytic energy transfer rate (~31 kcal/lb fat/day,
+ * i.e. `alpertNumber / 24` kcal/hr or `alpertNumber / 1440` kcal/min) across two horizons:
+ *   1. Real-Time Hepatic Glycogen + 4h Glucogenic Amino Acid Runway (respecting that skeletal
+ *      muscle glycogen lacks glucose-6-phosphatase and cannot fuel the brain or resting BMR).
+ *   2. Rolling 24-Hour Alpert Energy Balance Cap + 8:00 AM Tomorrow Wake-Up Horizon.
+ *   3. Zero-AI 3-Day Nutritionist Prescription (0 LLM tokens): audits the last 3 days of
+ *      intake & output + today's meal timestamps/macros to recommend the exact "Sweet Spot"
+ *      window ("Fast Until X for Peak Fat Burn -> Eat By Y to Prevent Catabolism").
  */
+
+import type { MetabolicSlotData } from './metabolic-engine';
+import type { FoodLogEntry } from './food-exercise-types';
 
 export interface AlpertPaceInput {
   caloriesIn: number;      // logged so far today
@@ -30,10 +36,6 @@ export interface AlpertPace {
  *   1. the deficit so far is already ≥ 90% of the whole day's ceiling, or
  *   2. after 17:00, the projected day is ≥ 130% of the ceiling with ≥ 75% already spent.
  * A day with nothing logged still counts — a fast is exactly when this matters.
- *
- * Note: rule 2 can't fire on its own. At ≥ 17h, projecting ≥ 130% of the ceiling
- * needs a deficit ≥ 1.3 × 17/24 ≈ 92% of it, so rule 1 has already fired. Kept
- * as-is to preserve the dashboard's existing behavior.
  */
 export function computeAlpertPace(input: AlpertPaceInput): AlpertPace | null {
   const { caloriesIn, caloriesOut, alpertNumber, hoursElapsed } = input;
@@ -59,7 +61,49 @@ export function computeAlpertPace(input: AlpertPaceInput): AlpertPace | null {
   };
 }
 
-import type { MetabolicSlotData } from './metabolic-engine';
+export interface RecentDaySummary {
+  isoDate?: string;
+  date?: string;
+  caloriesIn: number;
+  scoredCaloriesOut: number;
+  deficit?: number;
+  proteinG?: number;
+  carbsG?: number;
+  alcoholDrinks?: number;
+  vfScore?: number;
+  score?: number;
+}
+
+export interface ZeroAiNutritionistRx {
+  daysAnalyzed: number;
+  threeDayAvgInKcal: number;
+  threeDayAvgOutKcal: number;
+  threeDayAvgDeficitKcal: number;
+  threeDayAvgScore: number | null;
+  cutIntensity: 'deep_cut' | 'steady_cut' | 'recharged';
+  /** Calibrated usable hepatic glycogen at 8:00 AM wake-up based on 3-day deficit history (kcal). */
+  morningUsableLiverKcal: number;
+  /** Waking energy rate that CANNOT come from the fat faucet: max(0, wakingBurn - fatFaucet) + 15 kcal/hr CNS glucose. */
+  wakingNonFatGapHourlyKcal: number;
+  /** Remaining usable hepatic glycogen + active meal/glucogenic amino acid buffer right now (kcal). */
+  usableNonFatBufferKcal: number;
+  /** Current adipose fat-oxidation faucet efficiency (0-100%, suppressed briefly by post-meal insulin). */
+  fatFaucetEfficiencyPct: number;
+  /** "Active Now (100%)" when fat faucet is >=85% open, or clock time when post-meal insulin clears. */
+  fatPeakTimeLabel: string;
+  /** Optimal clock time to eat next so hepatic glycogen + amino shield never hit catabolism (e.g. "Today 10:15 AM"). */
+  optimalEatByTimeLabel: string;
+  /** Hours from now until the optimal hepatic/amino anti-catabolic eat window. */
+  hoursUntilOptimalEat: number;
+  /** Hours of additional fat-burning runway gained by logging a ~40g lean protein (PSMF) pulse (~200 kcal). */
+  psmfPulseGainHours: number;
+  /** Summary of the last 3 days intake/output. */
+  threeDaySummaryLabel: string;
+  /** Dual-horizon sweet-spot window summary ("Fast Until X · Eat By Y"). */
+  sweetSpotWindowLabel: string;
+  /** Concrete 0-token nutritionist recommendation tailored to the user's current state. */
+  recommendation: string;
+}
 
 export interface EatRunwayInput {
   caloriesIn: number;
@@ -83,6 +127,10 @@ export interface EatRunwayInput {
   prevDayDeficitKcal?: number;
   /** Optional 15-min metabolic simulation slots (73 slots, 06:00 to 24:00). */
   slots?: MetabolicSlotData[];
+  /** Optional today's food logs (for exact meal timing, insulin clearance, and protein shield duration). */
+  foodLogs?: FoodLogEntry[];
+  /** Optional last 3 completed days of intake & output for the Zero-AI Nutritionist audit. */
+  recentDays?: RecentDaySummary[];
 }
 
 export type EatRunwayStatus = 'clear' | 'eat_soon' | 'eat_now';
@@ -144,6 +192,8 @@ export interface EatRunway {
   mealsNeededForProtein: number;
   hoursUntilKitchenClose: number;
   proteinWindowTight: boolean;
+  // Signal 4: Zero-AI 3-Day Nutritionist & Dual-Horizon Sweet-Spot Rx
+  nutritionistRx: ZeroAiNutritionistRx;
 }
 
 const SIM_START_MIN = 6 * 60; // 06:00 AM
@@ -154,6 +204,8 @@ const WAKE_UP_HOUR = 8; // 8:00 AM wake-up horizon
 const TOMORROW_WAKE_HOUR = 24 + WAKE_UP_HOUR; // 32.0h from today's midnight
 const PROTEIN_PER_MEAL_CAP_G = 45;
 const MEAL_SPACING_HOURS = 3;
+const CNS_OBLIGATE_NET_HOURLY_KCAL = 15; // ~110g/d brain glucose net of glycerol from lipolysis
+const MAX_USABLE_HEPATIC_GUT_BUFFER_KCAL = 420; // Max post-absorptive hepatic glycogen + active amino shield
 
 export function slotToTimeLabel(slotIndex: number): string {
   const totalMinutes = SIM_START_MIN + slotIndex * SIM_INTERVAL_MIN;
@@ -275,21 +327,24 @@ function projectHoursUntilAlpertBreach(
   return Math.max(0.1, cursor - startHour);
 }
 
+function parseFoodHour(food: FoodLogEntry): number {
+  if (food.consumedAt) {
+    const [h, m] = food.consumedAt.split(':').map(Number);
+    return (h || 0) + (m || 0) / 60;
+  }
+  if (food.meal === 'breakfast') return 8.5;
+  if (food.meal === 'lunch') return 12.5;
+  if (food.meal === 'snack') return 15.5;
+  return 18.5;
+}
+
 /**
- * 3-Signal "Should I Eat Now?" & Alpert Breach Runway:
- *   1. Direct Alpert Breach Clock (with Minute-by-Minute Fat Faucet & 8:00 AM Wake-Up Horizon):
- *      - Within today (00:00-24:00), today's 24h Alpert cap (`alpertNumber`) already pre-credits
- *        24 hours of fat oxidation (`alpertNumber / 24` kcal/hr = `alpertNumber / 1440` kcal/min).
- *      - Across post-midnight sleep (00:00-08:00), your body burns at resting BMR (~1.23 kcal/min)
- *        while the new day's minute-by-minute fat faucet (~1.20 kcal/min) covers ~80% of sleep burn
- *        in real time, leaving only the obligate CNS glucose trickle + any BMR-over-faucet gap
- *        (~15 kcal/hr = ~0.25 kcal/min) to draw down your remaining buffer.
- *      - When waking up fasted the next morning, `prevDayDeficitKcal` carries over (net of fat-oxidized
- *        sleep) so 8:00 AM wake-up matches last night's prediction down to the exact calorie.
- *   2. End-of-Day Alpert Floor & 100-Pt Target: projects full-day burn so you know
- *      how many total calories to plan before bed.
- *   3. Protein Pacing Window: checks remaining protein vs. ~45g/meal synthesis
- *      bolus spacing before 8:30 PM kitchen close.
+ * 3-Signal + Zero-AI 3-Day Nutritionist Alpert & Glycogen Timing Engine:
+ *   1. Direct Alpert Breach Clock (with Minute-by-Minute Fat Faucet & 8:00 AM Wake-Up Horizon)
+ *   2. End-of-Day Alpert Floor & 100-Pt Target
+ *   3. Protein Pacing Window
+ *   4. Zero-AI 3-Day Nutritionist & Dual-Horizon Sweet-Spot Rx (Hepatic Glycogen + 4h Amino Shield
+ *      vs. 1.20 kcal/min Fat Faucet, with 0 LLM tokens).
  */
 export function computeEatRunway(input: EatRunwayInput): EatRunway {
   const {
@@ -302,6 +357,8 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     bmrKcal = 1750,
     prevDayDeficitKcal = 0,
     slots,
+    foodLogs,
+    recentDays,
   } = input;
 
   const safeCaloriesIn = Math.max(0, Math.round(caloriesIn));
@@ -345,11 +402,6 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   const wakingBurnPerMinKcal = Math.round((hourlyBurnRateKcal / 60) * 100) / 100;
 
   // Overnight Fast Carryover (with minute-by-minute sleep fat-faucet credit):
-  // - Yesterday's midnight deficit (`prevDayDeficitKcal`) carries across midnight while fasted.
-  // - Because today's `safeScoredOut` includes gross sleep burn from 00:00-08:00 (`sleepHoursElapsed * bmrHourly`),
-  //   and the new day's fat faucet already funded `sleepHoursElapsed * sleepFatFaucetHourly` of that sleep,
-  //   we subtract `sleepFatCoveredKcal` from the carryover so overnight sleep only adds `overnightNetDrainHourly`/hr.
-  // - As you log meals today, each calorie eaten pays down the overnight fast carryover by 2.5x.
   const clampedPrevDeficit = Math.max(0, Math.min(safeAlpert, Math.round(prevDayDeficitKcal)));
   const sleepHoursElapsedToday = Math.max(0, Math.min(WAKE_UP_HOUR, hoursElapsed));
   const sleepFatCoveredTodayKcal = Math.round(sleepHoursElapsedToday * sleepFatFaucetHourly);
@@ -410,7 +462,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     }
   }
 
-  // Signal 1: Intraday slot scan
+  // Signal 1: Intraday slot scan (strictly requires actual muscleContribution > 0.5)
   const minutesSinceMidnight = Math.round(hoursElapsed * 60);
   const rawNowSlot = Math.round((minutesSinceMidnight - SIM_START_MIN) / SIM_INTERVAL_MIN);
   const nowSlotIndex = Math.max(0, Math.min(72, rawNowSlot));
@@ -463,6 +515,199 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   const proteinWindowTight =
     proteinToGoG > PROTEIN_PER_MEAL_CAP_G &&
     (hoursUntilKitchenClose <= 0.5 || minHoursNeededForProtein >= hoursUntilKitchenClose);
+
+  // ── Signal 4: Zero-AI 3-Day Nutritionist & Dual-Horizon Hepatic + Amino Runway ────────
+  const validRecentDays = (recentDays ?? []).slice(0, 3).map((d) => ({
+    ...d,
+    deficit: d.deficit ?? Math.max(0, d.scoredCaloriesOut - d.caloriesIn),
+    vfScore: d.vfScore ?? d.score,
+  }));
+  const daysAnalyzed = validRecentDays.length;
+  const threeDayAvgInKcal =
+    daysAnalyzed > 0
+      ? Math.round(validRecentDays.reduce((s, d) => s + d.caloriesIn, 0) / daysAnalyzed)
+      : safeCaloriesIn;
+  const threeDayAvgOutKcal =
+    daysAnalyzed > 0
+      ? Math.round(validRecentDays.reduce((s, d) => s + d.scoredCaloriesOut, 0) / daysAnalyzed)
+      : projectedFullDayBurnKcal;
+  const threeDayAvgDeficitKcal =
+    daysAnalyzed > 0
+      ? Math.round(validRecentDays.reduce((s, d) => s + d.deficit, 0) / daysAnalyzed)
+      : prevDayDeficitKcal > 0
+        ? Math.round(prevDayDeficitKcal)
+        : Math.max(0, projectedMidnightDeficitKcal);
+
+  const scoredDays = validRecentDays.filter((d) => d.vfScore != null);
+  const threeDayAvgScore =
+    scoredDays.length > 0
+      ? Math.round(scoredDays.reduce((s, d) => s + (d.vfScore ?? 0), 0) / scoredDays.length)
+      : null;
+
+  const weightedRecentDeficit =
+    daysAnalyzed >= 3
+      ? 0.55 * validRecentDays[0].deficit +
+        0.3 * validRecentDays[1].deficit +
+        0.15 * validRecentDays[2].deficit
+      : daysAnalyzed === 2
+        ? 0.65 * validRecentDays[0].deficit + 0.35 * validRecentDays[1].deficit
+        : daysAnalyzed === 1
+          ? validRecentDays[0].deficit
+          : prevDayDeficitKcal > 0
+            ? prevDayDeficitKcal
+            : Math.max(0, todayOnlyDeficitKcal);
+
+  const cutIntensity: 'deep_cut' | 'steady_cut' | 'recharged' =
+    weightedRecentDeficit >= safeAlpert * 0.52
+      ? 'deep_cut'
+      : weightedRecentDeficit >= 350
+        ? 'steady_cut'
+        : 'recharged';
+
+  // Usable morning hepatic glycogen at 8:00 AM (above the 40 kcal cortisol/proteolysis floor).
+  // Skeletal muscle glycogen lacks glucose-6-phosphatase and cannot fuel the brain or resting BMR.
+  const morningUsableLiverKcal = Math.max(
+    70,
+    Math.min(165, Math.round(145 - 0.055 * Math.max(0, weightedRecentDeficit - 200)))
+  );
+
+  // Waking Non-Fat Gap: energy per waking hour that CANNOT come from the fat faucet
+  const wakingNonFatGapHourly = Math.max(
+    CNS_OBLIGATE_NET_HOURLY_KCAL,
+    Math.max(0, hourlyBurnRateKcal - alpertHourly) + CNS_OBLIGATE_NET_HOURLY_KCAL
+  );
+  const wakingNonFatGapHourlyKcal = Math.round(wakingNonFatGapHourly);
+
+  // Glucogenic protein sparing bonus (~0.45 kcal/g protein shields hepatic gluconeogenesis)
+  const glucogenicProteinBonusKcal = Math.round(Math.max(0, proteinG) * 0.45);
+  const wakingHoursSince8am = Math.max(
+    0,
+    Math.min(SLEEP_START_HOUR, clampedStartHour) - WAKE_UP_HOUR
+  );
+  const sleepHoursSince23 = Math.max(0, clampedStartHour - SLEEP_START_HOUR);
+
+  const rawUsableNonFatBuffer = Math.round(
+    morningUsableLiverKcal +
+      safeCaloriesIn +
+      glucogenicProteinBonusKcal -
+      wakingHoursSince8am * wakingNonFatGapHourly -
+      sleepHoursSince23 * overnightNetDrainHourly
+  );
+  // Hepatic glycogen + active 4h gut/amino pool has a physiological storage ceiling (~420 kcal)
+  const usableNonFatBufferKcal = Math.min(
+    MAX_USABLE_HEPATIC_GUT_BUFFER_KCAL,
+    rawUsableNonFatBuffer
+  );
+
+  // Project hours until usableNonFatBufferKcal hits 0 (true hepatic/amino catabolic threshold)
+  const hoursUntilHepaticDepletion =
+    usableNonFatBufferKcal <= 0
+      ? 0
+      : projectHoursUntilAlpertBreach(
+          clampedStartHour,
+          usableNonFatBufferKcal,
+          wakingNonFatGapHourly,
+          overnightNetDrainHourly,
+          overnightNetDrainHourly
+        );
+
+  // True optimal eat deadline is the EARLIER of hepatic/amino depletion and the 24h Alpert cap
+  const rawOptimalEatHours =
+    kcalUntilAlpertBreach <= 0 || usableNonFatBufferKcal <= 0
+      ? 0
+      : Math.min(hoursUntilHepaticDepletion, hoursUntilAlpertBreach);
+  const hoursUntilOptimalEat =
+    rawOptimalEatHours <= 0 ? 0 : Math.max(0.1, Math.round(rawOptimalEatHours * 10) / 10);
+  const optimalEatByTimeLabel =
+    hoursUntilOptimalEat <= 0
+      ? 'Now'
+      : formatMultiDayBreachTime(clampedStartHour + rawOptimalEatHours);
+
+  // Post-meal insulin clearance & Fat Faucet efficiency
+  const activeFoods = (foodLogs ?? []).filter(
+    (f) => !f.ignored && (f.calories || 0) > 30 && parseFoodHour(f) <= clampedStartHour + 0.1
+  );
+  let fatFaucetEfficiencyPct = 100;
+  let fatPeakTimeLabel = 'Active Now (100%)';
+  let fastUntilHour = clampedStartHour;
+
+  if (activeFoods.length > 0) {
+    const latestFood = activeFoods.reduce((latest, f) =>
+      parseFoodHour(f) >= parseFoodHour(latest) ? f : latest
+    );
+    const mealHour = parseFoodHour(latestFood);
+    const hoursSinceMeal = Math.max(0, clampedStartHour - mealHour);
+    const carbKcal = (latestFood.carbsG || 0) * 4;
+    // Lean protein (PSMF) clears insulin in ~0.5h; high-carb meals take ~1.8-2.8h
+    const insulinClearHours = Math.min(
+      3.0,
+      0.45 + (carbKcal / 160) * 1.1 + ((latestFood.calories || 0) / 900) * 0.4
+    );
+    if (hoursSinceMeal < insulinClearHours) {
+      fatFaucetEfficiencyPct = Math.max(
+        35,
+        Math.min(95, Math.round(40 + 55 * (hoursSinceMeal / insulinClearHours)))
+      );
+      fastUntilHour = mealHour + insulinClearHours;
+      fatPeakTimeLabel = formatMultiDayBreachTime(fastUntilHour);
+    }
+  }
+
+  // How many hours a ~40-45g lean protein (PSMF) pulse (~200 kcal) adds to the non-fat runway
+  const psmfPulseGainHours =
+    Math.round((220 / Math.max(25, wakingNonFatGapHourly)) * 10) / 10;
+
+  const cutTag =
+    cutIntensity === 'deep_cut'
+      ? 'Deep 3d Cut'
+      : cutIntensity === 'steady_cut'
+        ? 'Steady 3d Cut'
+        : 'Glycogen Recharged';
+
+  const threeDaySummaryLabel =
+    daysAnalyzed > 0
+      ? `${daysAnalyzed}d Avg: ${threeDayAvgInKcal.toLocaleString()} in / ${threeDayAvgOutKcal.toLocaleString()} out (-${threeDayAvgDeficitKcal.toLocaleString()} kcal/d${threeDayAvgScore !== null ? ` · ${threeDayAvgScore > 0 ? '+' : ''}${threeDayAvgScore} pts/d` : ''}) · ${cutTag}`
+      : `Recent Baseline: -${Math.max(0, threeDayAvgDeficitKcal).toLocaleString()} kcal/d (${cutTag}) · Morning Liver Buffer: ~${morningUsableLiverKcal} kcal`;
+
+  const sweetSpotWindowLabel =
+    hoursUntilOptimalEat <= 0
+      ? 'Eat Now (Catabolic Line Reached)'
+      : fatFaucetEfficiencyPct < 85
+        ? `Fast Until ${fatPeakTimeLabel.replace(/^Today /, '')} (Fat Peak) → Eat Next by ${optimalEatByTimeLabel}`
+        : `Fat Faucet 100% Open (${fatFaucetHourlyKcal} kcal/hr) → Eat Next by ${optimalEatByTimeLabel} (~${hoursUntilOptimalEat}h)`;
+
+  let recommendation = '';
+  if (hoursUntilOptimalEat <= 0) {
+    recommendation = `Catabolic buffer tapped out (${cutTag}). Log a 40–45g lean protein pulse (~200 kcal, <5g carbs) now to block cortisol/muscle loss and buy +${psmfPulseGainHours}h of ${fatFaucetHourlyKcal} kcal/hr fat burn.`;
+  } else if (clampedStartHour >= 20 && proteinToGoG <= 15 && safeThrough8amTomorrow) {
+    recommendation = `Kitchen Closed / Evening Lock-In (${cutTag}): Fat faucet (${fatFaucetPerMinKcal} kcal/min) covers ~80% of overnight sleep. Ride fast until ${optimalEatByTimeLabel}, then anchor tomorrow with a 40g PSMF protein pulse (+${psmfPulseGainHours}h runway).`;
+  } else if (fatFaucetEfficiencyPct < 85) {
+    recommendation = `Digesting last meal (fat faucet at ${fatFaucetEfficiencyPct}%). Hold off eating until at least ${fatPeakTimeLabel.replace(/^Today /, '')} so insulin clears, then plan your next ${Math.min(45, Math.max(35, proteinToGoG))}g protein meal by ${optimalEatByTimeLabel}.`;
+  } else if (hoursUntilOptimalEat <= 2.5) {
+    recommendation = `Peak fat oxidation active (${fatFaucetHourlyKcal} kcal/hr), with ~${usableNonFatBufferKcal} kcal hepatic/amino buffer left (~${hoursUntilOptimalEat}h at ${wakingNonFatGapHourlyKcal} kcal/hr non-fat gap). Take a ~40g lean protein pulse (~200 kcal) by ${optimalEatByTimeLabel} to extend pure fat burn by +${psmfPulseGainHours}h.`;
+  } else {
+    recommendation = `Sweet Spot Active (${cutTag}): Fat faucet is pumping at ${fatFaucetHourlyKcal} kcal/hr (${fatFaucetPerMinKcal}/min) with ${usableNonFatBufferKcal} kcal hepatic/amino shield left. Keep fasting until ${optimalEatByTimeLabel} (~${hoursUntilOptimalEat}h), then refuel with ~40g lean protein (+${psmfPulseGainHours}h runway).`;
+  }
+
+  const nutritionistRx: ZeroAiNutritionistRx = {
+    daysAnalyzed,
+    threeDayAvgInKcal,
+    threeDayAvgOutKcal,
+    threeDayAvgDeficitKcal,
+    threeDayAvgScore,
+    cutIntensity,
+    morningUsableLiverKcal,
+    wakingNonFatGapHourlyKcal,
+    usableNonFatBufferKcal,
+    fatFaucetEfficiencyPct,
+    fatPeakTimeLabel,
+    optimalEatByTimeLabel,
+    hoursUntilOptimalEat,
+    psmfPulseGainHours,
+    threeDaySummaryLabel,
+    sweetSpotWindowLabel,
+    recommendation,
+  };
 
   // Determine overall status & actionable coaching headline focused on Alpert Breach + 8:00 AM Wake-Up
   let status: EatRunwayStatus = 'clear';
@@ -563,5 +808,6 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
     mealsNeededForProtein,
     hoursUntilKitchenClose,
     proteinWindowTight,
+    nutritionistRx,
   };
 }

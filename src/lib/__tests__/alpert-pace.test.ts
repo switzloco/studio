@@ -215,4 +215,62 @@ describe('computeEatRunway', () => {
     expect(runwayMorning.firstMuscleBurnSlot).not.toBeNull();
     expect(runwayMorning.muscleBurnStartTimeLabel).toBeTruthy();
   });
+
+  it('computes Zero-AI 3-Day Nutritionist Rx with 3-day deficit history and PSMF protein pulse extension', () => {
+    // 1. After 3 days of deep cutting (~1,480 kcal/day deficit), morning usable liver glycogen is tighter
+    const deepCutDays = [
+      { date: '2026-10-19', caloriesIn: 1100, scoredCaloriesOut: 2600, proteinG: 165, score: 94 },
+      { date: '2026-10-18', caloriesIn: 1200, scoredCaloriesOut: 2650, proteinG: 170, score: 91 },
+      { date: '2026-10-17', caloriesIn: 1150, scoredCaloriesOut: 2640, proteinG: 160, score: 93 },
+    ];
+    const fastedMorning = computeEatRunway({
+      caloriesIn: 0,
+      scoredCaloriesOut: 850,
+      alpertNumber: 1732,
+      hoursElapsed: 8.5, // 8:30 AM
+      proteinG: 0,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+      recentDays: deepCutDays,
+    });
+
+    expect(fastedMorning.nutritionistRx.cutIntensity).toBe('deep_cut');
+    expect(fastedMorning.nutritionistRx.threeDayAvgDeficitKcal).toBeGreaterThan(1400);
+    // Morning optimal eat-by deadline is earlier than the raw 24h Alpert cap because hepatic glycogen drains at ~45 kcal/hr
+    expect(fastedMorning.nutritionistRx.hoursUntilOptimalEat).toBeLessThan(fastedMorning.hoursUntilAlpertBreach);
+    expect(fastedMorning.nutritionistRx.psmfPulseGainHours).toBeGreaterThanOrEqual(3.5);
+
+    // 2. Taking a 45g protein / 200 kcal PSMF shake at 11:30 AM extends the Optimal Eat-By deadline by ~4+ hours
+    const afterPsmfPulse = computeEatRunway({
+      caloriesIn: 200,
+      scoredCaloriesOut: 1200,
+      alpertNumber: 1732,
+      hoursElapsed: 11.75, // 11:45 AM (15 mins after 200 kcal shake)
+      proteinG: 45,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+      recentDays: deepCutDays,
+      foodLogs: [
+        {
+          id: 'shake-1',
+          name: 'Whey Isolate PSMF Shake',
+          meal: 'lunch',
+          portionG: 300,
+          calories: 200,
+          proteinG: 45,
+          carbsG: 2,
+          fatG: 1,
+          fiberG: 0,
+          source: 'user_estimate',
+          timestamp: {} as never,
+          date: '2026-10-20',
+          consumedAt: '11:30',
+        },
+      ],
+    });
+
+    expect(afterPsmfPulse.nutritionistRx.usableNonFatBufferKcal).toBeGreaterThan(fastedMorning.nutritionistRx.usableNonFatBufferKcal);
+    expect(afterPsmfPulse.nutritionistRx.hoursUntilOptimalEat).toBeGreaterThan(fastedMorning.nutritionistRx.hoursUntilOptimalEat + 1);
+    expect(afterPsmfPulse.nutritionistRx.recommendation).toBeTruthy();
+  });
 });
