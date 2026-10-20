@@ -429,7 +429,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
 
     for (let s = clampedNow; s < slots.length; s++) {
       const slot = slots[s];
-      if (slot.muscleContribution > 0.05 || (slot.liverKcal <= 0 && slot.gutContribution <= 0)) {
+      if (slot.muscleContribution > 0.5) {
         firstMuscleBurnSlot = s;
         break;
       }
@@ -470,7 +470,10 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   let subline = '';
 
   const breachedNow = kcalUntilAlpertBreach <= 0;
-  const burningMuscleNow = hoursUntilMuscleBurn !== null && hoursUntilMuscleBurn <= 0.25;
+  const burningMuscleNow =
+    hoursUntilMuscleBurn !== null &&
+    hoursUntilMuscleBurn <= 0.25 &&
+    (!safeThrough8amTomorrow || hoursUntilAlpertBreach <= 3);
   const breachingSoon =
     !breachedNow &&
     alpertBreachTimeLabel !== null &&
@@ -490,7 +493,7 @@ export function computeEatRunway(input: EatRunwayInput): EatRunway {
   } else if (burningMuscleNow) {
     status = 'eat_now';
     headline = `Eat Now — ${kcalUntilAlpertBreach.toLocaleString()} kcal Until Alpert Breach`;
-    subline = `Glycogen buffer is tapped out and expected Alpert breach is ${expectedBreachTimeLabel} (~${hoursUntilAlpertBreach}h). Eat ≥${kcalNeededFor8amTomorrow.toLocaleString()} kcal to stay clear through 8:00 AM wake-up.`;
+    subline = `Glycogen buffer is tapped out and expected Alpert breach is ${expectedBreachTimeLabel} (~${hoursUntilAlpertBreach}h). Eat ≥${Math.max(150, kcalNeededFor8amTomorrow).toLocaleString()} kcal to protect lean mass.`;
   } else if (breachingSoon && alpertBreachTimeLabel) {
     status = 'eat_soon';
     headline = `Plan to Eat by ${alpertBreachTimeLabel} (~${hoursUntilAlpertBreach}h) · ${kcalUntilAlpertBreach.toLocaleString()} kcal Left`;

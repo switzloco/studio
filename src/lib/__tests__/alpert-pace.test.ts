@@ -159,16 +159,54 @@ describe('computeEatRunway', () => {
     expect(runway.status).toBe('eat_soon');
   });
 
-  it('detects intraday muscle burn slot from metabolic simulation on a heavy fasted burn day', () => {
+  it('does NOT trigger false Eat Now warning at 11:24 PM on a low-carb PSMF day when Alpert buffer is 761 kcal (~14.5h)', () => {
     const sim = runMetabolicSimulation({
-      caloriesOut: 3200,
-      alpertNumber: 1400,
+      caloriesOut: 2389,
+      alpertNumber: 1732,
+      caloriesIn: 1418,
+      foodLogs: [
+        {
+          id: '1',
+          name: 'Steak & Shake',
+          calories: 1418,
+          proteinG: 165,
+          carbsG: 32,
+          fatG: 50,
+          portionG: 500,
+          meal: 'dinner',
+          date: '2026-10-19',
+          consumedAt: '18:30',
+          source: 'text',
+        } as any,
+      ],
+    });
+    const runway = computeEatRunway({
+      caloriesIn: 1418,
+      scoredCaloriesOut: 2389,
+      alpertNumber: 1732,
+      hoursElapsed: 23.4, // 11:24 PM
+      proteinG: 165,
+      proteinGoal: 150,
+      bmrKcal: 1767,
+      slots: sim.slots,
+    });
+    expect(runway.kcalUntilAlpertBreach).toBe(761);
+    expect(runway.safeThrough8amTomorrow).toBe(true);
+    expect(runway.status).toBe('clear');
+    expect(runway.headline).toContain('Safe Past 8:00 AM Wake-Up');
+  });
+
+  it('detects intraday muscle burn slot from metabolic simulation on an extreme fasted burn day', () => {
+    const sim = runMetabolicSimulation({
+      caloriesOut: 4200,
+      alpertNumber: 1000,
       caloriesIn: 0,
+      morningGlycogenPct: 30,
     });
     const runwayMorning = computeEatRunway({
       caloriesIn: 0,
       scoredCaloriesOut: 2500,
-      alpertNumber: 1400,
+      alpertNumber: 1000,
       hoursElapsed: 9, // 9:00 AM
       proteinG: 0,
       proteinGoal: 150,
