@@ -49,6 +49,7 @@ import {
   DEFAULT_ACTIVE_LEVEL,
   DEFAULT_LEVEL_HISTORY,
   getEffectiveDayNote,
+  resolveActiveLevel,
   type LevelConfig,
 } from '@/lib/level-tracker';
 import { CURRENT_SCORING_RELEASE, inferScoringRelease } from '@/lib/scoring-releases';
@@ -517,7 +518,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   }, [data, isViewingToday, dailyCaloriesIn, dailyCaloriesOut, alpertNumber]);
 
   // Active Level & Level History (Replaces Google Sheet right-side tracker)
-  const activeLevel: LevelConfig = prefs?.activeLevel ?? DEFAULT_ACTIVE_LEVEL;
+  const activeLevel: LevelConfig = resolveActiveLevel(prefs?.activeLevel);
   const levelHistory: LevelConfig[] = prefs?.levelHistory ?? DEFAULT_LEVEL_HISTORY;
 
   const levelProgress = React.useMemo(
@@ -1777,6 +1778,25 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   </p>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] font-bold text-slate-400 mr-1">Quick Presets:</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        handleSwitchPresetLevel({
+                          id: 'level-3-thanksgiving-2026',
+                          name: 'Level 3 (Thanksgiving 500)',
+                          startDate: '2026-09-22',
+                          targetPoints: 500,
+                          targetDate: '2026-11-26',
+                          status: 'active',
+                          engineEra: 'v3.2 Taylor–Joule',
+                          notes: '500 points by Thanksgiving (started Sep 22)',
+                        })
+                      }
+                      className="h-6 px-2 text-[9px] font-black uppercase bg-emerald-700 border-emerald-500 text-white hover:bg-emerald-600"
+                    >
+                      Sep 22 → Thanksgiving (500 pts)
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

@@ -97,39 +97,40 @@ export const DEFAULT_LEVEL_HISTORY: LevelConfig[] = [
   },
   {
     id: 'level-3-2026',
-    name: 'Level 3',
+    name: 'Level 3 (Summer)',
     startDate: '2026-07-20',
-    endDate: '2026-10-10',
+    endDate: '2026-09-21',
     targetPoints: 2000,
     status: 'completed',
     engineEra: 'v3.1 Bull–Lovelace',
     snapshotTotalPoints: 1901,
-    snapshotDays: 90,
-    notes: 'v3.1 alcohol clearance engine; reached 1,901 / 2,000 pts (21.1 pts/day)',
-  },
-  {
-    id: 'level-3-retry-2026',
-    name: 'Level 3 - Retry',
-    startDate: '2026-10-11',
-    endDate: '2026-10-17',
-    targetPoints: 500,
-    status: 'retry',
-    engineEra: 'v3.1 Bull–Lovelace',
-    snapshotTotalPoints: -82,
-    snapshotDays: 7,
-    notes: '1-week October reset before v3.2 Taylor–Joule upgrade',
+    snapshotDays: 64,
+    notes: 'v3.1 alcohol clearance engine; reached 1,901 / 2,000 pts',
   },
 ];
 
 export const DEFAULT_ACTIVE_LEVEL: LevelConfig = {
-  id: 'level-3-lock-in-2026',
-  name: 'Level 3 - Lock-In',
-  startDate: '2026-10-18',
-  targetPoints: 1000,
+  id: 'level-3-thanksgiving-2026',
+  name: 'Level 3 (Thanksgiving 500)',
+  startDate: '2026-09-22',
+  targetPoints: 500,
+  targetDate: '2026-11-26',
   status: 'active',
   engineEra: 'v3.2 Taylor–Joule',
-  notes: 'Fall lock-in on v3.2 Taylor–Joule (counted burn + 3-signal Alpert runway)',
+  notes: '500 points by Thanksgiving (started Sep 22)',
 };
+
+/**
+ * Resolves the user's active level, automatically upgrading the old Oct 18 placeholder
+ * default to the user's Sep 22 -> Thanksgiving 500-pt Level 3 sprint.
+ */
+export function resolveActiveLevel(saved?: LevelConfig | null): LevelConfig {
+  if (!saved) return DEFAULT_ACTIVE_LEVEL;
+  if (saved.id === 'level-3-lock-in-2026' && saved.startDate === '2026-10-18' && saved.targetPoints === 1000) {
+    return DEFAULT_ACTIVE_LEVEL;
+  }
+  return saved;
+}
 
 /**
  * Handwritten notes imported from the user's 2026 Google Sheet (Jan 11 – Oct 17).
@@ -318,4 +319,98 @@ export function computeLevelProgress(
     progressPct,
     isTargetMet,
   };
+}
+
+export interface DailyLevelPointEntry {
+  isoDate: string;
+  dailyScore: number;
+  /** Running cumulative points inside this date's Level (resets at each Level startDate). */
+  levelPoints: number;
+  levelId: string;
+  levelName: string;
+  shortLabel: string;
+  targetPoints: number;
+  isInActiveLevel: boolean;
+}
+
+function getShortLevelLabel(name: string): string {
+  const m = name.match(/Level\s*(\d+)/i);
+  if (m) {
+    if (/retry/i.test(name)) return `L${m[1]}R`;
+    if (/thanksgiving|lock-in/i.test(name)) return `L${m[1]}`;
+    return `L${m[1]}`;
+  }
+  return 'LVL';
+}
+
+/**
+ * Computes day-by-day Level Tracking cumulative points (`levelPoints`) for every date
+ * in `history`, matching each day to either `activeLevel` (when >= activeLevel.startDate)
+ * or its historical level from `levelHistory`.
+ */
+export function computeDailyLevelPointsMap(
+  history: HistoryEntry[] = [],
+  activeLevel: LevelConfig = DEFAULT_ACTIVE_LEVEL,
+  levelHistory: LevelConfig[] = DEFAULT_LEVEL_HISTORY,
+): Map<string, DailyLevelPointEntry> {
+  const result = new Map<string, DailyLevelPointEntry>();
+
+  // Deduplicate history by isoDate (chronological order)
+  const byDate = new Map<string, HistoryEntry>();
+  for (const h of history) {
+    if (h.detail === 'Account Created') continue;
+    const key = h.isoDate || h.date;
+    if (key) byDate.set(key, h);
+  }
+
+  const sortedDates = Array.from(byDate.keys()).sort();
+  const activeUpper = activeLevel.endDate ?? '9999-12-31';
+
+  // Track running sum per levelId
+  const runningByLevel = new Map<string, number>();
+
+  for (const dateKey of sortedDates) {
+    const entry = byDate.get(dateKey)!;
+    const isInActive =
+      dateKey >= activeLevel.startDate && dateKey <= activeUpper;
+
+    let matchedLevel: LevelConfig | undefined;
+    if (isInActive) {
+      matchedLevel = activeLevel;
+    } else {
+      // Find matching historical level whose window covers dateKey
+      for (let i = levelHistory.length - 1; i >= 0; i--) {
+        const lvl = levelHistory[i];
+        const end = lvl.endDate ?? '9999-12-31';
+        if (dateKey >= lvl.startDate && dateKey <= end) {
+          matchedLevel = lvl;
+          break;
+        }
+      }
+    }
+
+    const lvlId = matchedLevel?.id ?? 'unassigned-level';
+    const lvlName = matchedLevel?.name ?? 'Level';
+    const lvlTarget = matchedLevel?.targetPoints ?? activeLevel.targetPoints;
+    const startOffset = matchedLevel?.startingPointsOffset ?? 0;
+
+    const prevRunning = runningByLevel.has(lvlId)
+      ? runningByLevel.get(lvlId)!
+      : startOffset;
+    const nextRunning = Math.round((prevRunning + entry.gain) * 10) / 10;
+    runningByLevel.set(lvlId, nextRunning);
+
+    result.set(dateKey, {
+      isoDate: dateKey,
+      dailyScore: entry.gain,
+      levelPoints: nextRunning,
+      levelId: lvlId,
+      levelName: lvlName,
+      shortLabel: getShortLevelLabel(lvlName),
+      targetPoints: lvlTarget,
+      isInActiveLevel: isInActive,
+    });
+  }
+
+  return result;
 }

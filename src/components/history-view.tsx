@@ -7,7 +7,7 @@ import { Briefcase, TrendingUp, AlertCircle, History as HistoryIcon, Dumbbell, T
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { doc, collection, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 import { fetchAllLedger, ledgerToCSV, ledgerToJSON, downloadTextFile } from '@/lib/ledger-export';
-import { HealthData, HistoryEntry, healthService } from '@/lib/health-service';
+import { HealthData, HistoryEntry, UserPreferences, healthService } from '@/lib/health-service';
 import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry } from '@/lib/food-exercise-types';
 import { useToast } from '@/hooks/use-toast';
 import { VFScoreChart } from './vf-score-chart';
@@ -19,7 +19,12 @@ import { ProteinChart } from './protein-chart';
 import { ShareMealButton } from './share-meal-button';
 import { MySharesSection } from './my-shares-section';
 import { inferScoringRelease } from '@/lib/scoring-releases';
-import { getEffectiveDayNote } from '@/lib/level-tracker';
+import {
+  computeDailyLevelPointsMap,
+  DEFAULT_LEVEL_HISTORY,
+  getEffectiveDayNote,
+  resolveActiveLevel,
+} from '@/lib/level-tracker';
 
 type SortMode = 'latest' | 'calories';
 
@@ -117,6 +122,9 @@ export function HistoryView() {
   // 1. Fetch High-Level Equity Summary (for the charts)
   const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
+  const prefsRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
+  const { data: prefs } = useDoc<UserPreferences>(prefsRef);
+  const [logScope, setLogScope] = useState<'all' | 'level'>('all');
 
   // 2. Fetch structured food & exercise logs for the transaction ledger
   const foodQuery = useMemoFirebase(() => user ? query(
@@ -242,6 +250,12 @@ export function HistoryView() {
   const isLogsLoading = isFoodLoading || isExerciseLoading;
 
   const history = healthData?.history || [];
+  const activeLevel = useMemo(() => resolveActiveLevel(prefs?.activeLevel), [prefs?.activeLevel]);
+  const levelHistory = useMemo(() => prefs?.levelHistory ?? DEFAULT_LEVEL_HISTORY, [prefs?.levelHistory]);
+  const levelPointsMap = useMemo(
+    () => computeDailyLevelPointsMap(history, activeLevel, levelHistory),
+    [history, activeLevel, levelHistory]
+  );
 
   const handleDayClick = (entry: HistoryEntry) => {
     setSelectedEntry(entry);
@@ -314,7 +328,12 @@ export function HistoryView() {
 
       {/* VF Score Bar + Cumulative Line Chart */}
       {history.length > 0 ? (
-        <VFScoreChart history={history} onDayClick={handleDayClick} />
+        <VFScoreChart
+          history={history}
+          onDayClick={handleDayClick}
+          activeLevel={activeLevel}
+          levelHistory={levelHistory}
+        />
       ) : (
         <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-6">
@@ -345,7 +364,31 @@ export function HistoryView() {
                   Click any day to inspect full math, engine vintage, or edit its spreadsheet note
                 </p>
               </div>
-              <span className="text-[10px] font-black uppercase text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLogScope('level')}
+                  className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-all ${
+                    logScope === 'level'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {activeLevel.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogScope('all')}
+                  className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-all ${
+                    logScope === 'all'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  All Days
+                </button>
+              </div>
+              <span className="hidden">
                 {history.filter((h) => h.detail !== 'Account Created').length} days
               </span>
             </div>
@@ -355,6 +398,7 @@ export function HistoryView() {
                   <tr>
                     <th className="py-2 px-3">Date</th>
                     <th className="py-2 px-3">VF Score</th>
+                    <th className="py-2 px-3">Level Pts</th>
                     <th className="py-2 px-3">Cumu</th>
                     <th className="py-2 px-3">Engine</th>
                     <th className="py-2 px-3">Notes</th>
@@ -362,11 +406,12 @@ export function HistoryView() {
                 </thead>
                 <tbody className="divide-y">
                   {[...history]
-                    .filter((h) => h.detail !== 'Account Created')
+                    .filter((h) => h.detail !== 'Account Created' && (logScope === 'all' || (h.isoDate || h.date) >= activeLevel.startDate))
                     .reverse()
                     .map((h, idx) => {
                       const rel = inferScoringRelease(h);
                       const note = getEffectiveDayNote(h);
+                      const lvlInfo = levelPointsMap.get(h.isoDate || h.date);
                       return (
                         <tr
                           key={`${h.isoDate || h.date}-${idx}`}
@@ -378,6 +423,29 @@ export function HistoryView() {
                           </td>
                           <td className={`py-2 px-3 font-black whitespace-nowrap ${h.gain >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                             {h.gain > 0 ? `+${h.gain}` : h.gain}
+                          </td>
+                          <td className="py-2 px-3 font-black whitespace-nowrap">
+                            {lvlInfo ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span
+                                  className={`px-1 py-0.5 rounded text-[8px] font-black uppercase ${
+                                    lvlInfo.isInActiveLevel
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  {lvlInfo.shortLabel}
+                                </span>
+                                <span className={lvlInfo.levelPoints >= 0 ? 'text-emerald-700' : 'text-amber-700'}>
+                                  {lvlInfo.levelPoints > 0 ? `+${lvlInfo.levelPoints}` : lvlInfo.levelPoints}
+                                </span>
+                                <span className="text-[9px] font-semibold text-muted-foreground">
+                                  /{lvlInfo.targetPoints}
+                                </span>
+                              </span>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                           <td className="py-2 px-3 font-semibold text-muted-foreground whitespace-nowrap">
                             {h.equity.toLocaleString()}

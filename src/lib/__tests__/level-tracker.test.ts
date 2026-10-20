@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  computeDailyLevelPointsMap,
   computeLevelProgress,
+  DEFAULT_ACTIVE_LEVEL,
   DEFAULT_LEVEL_HISTORY,
   getEffectiveDayNote,
+  resolveActiveLevel,
   type LevelConfig,
 } from '../level-tracker';
 import { inferScoringRelease } from '../scoring-releases';
@@ -48,6 +51,25 @@ describe('computeLevelProgress', () => {
     expect(prog.pointsToTarget).toBe(-277);
     expect(prog.pointsPerDay).toBe(41);
     expect(prog.isTargetMet).toBe(true);
+  });
+
+  it('computes day-by-day running Level points for the Ledger chart and table', () => {
+    const active = resolveActiveLevel(null);
+    expect(active.startDate).toBe('2026-09-22');
+    expect(active.targetPoints).toBe(500);
+    expect(active.targetDate).toBe('2026-11-26');
+
+    const history: HistoryEntry[] = [
+      { date: 'Sep 21', isoDate: '2026-09-21', gain: 40, status: 'Bullish', detail: 'ok', equity: -900 },
+      { date: 'Sep 22', isoDate: '2026-09-22', gain: 50, status: 'Bullish', detail: 'ok', equity: -850 },
+      { date: 'Sep 23', isoDate: '2026-09-23', gain: 35, status: 'Bullish', detail: 'ok', equity: -815 },
+    ];
+    const map = computeDailyLevelPointsMap(history, active, DEFAULT_LEVEL_HISTORY);
+    expect(map.get('2026-09-21')?.isInActiveLevel).toBe(false);
+    expect(map.get('2026-09-22')?.isInActiveLevel).toBe(true);
+    expect(map.get('2026-09-22')?.levelPoints).toBe(50);
+    expect(map.get('2026-09-23')?.levelPoints).toBe(85);
+    expect(map.get('2026-09-23')?.targetPoints).toBe(500);
   });
 });
 
