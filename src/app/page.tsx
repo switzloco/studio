@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, LayoutGrid, Loader2, ArrowRight, User as UserIcon, Info, RefreshCw, Settings } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, Loader2, User as UserIcon, Info, RefreshCw, Settings, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -35,6 +34,8 @@ import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
+import { resolveClientEntitlement } from '@/lib/entitlements';
+import { PaywallModal } from '@/components/paywall-modal';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
@@ -78,6 +79,7 @@ export default function Home() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
   const hasSyncedFitbit = useRef(false);
   const hasBackfilledFitbit = useRef(false);
   const hasBackfilledScores = useRef(false);
@@ -103,7 +105,9 @@ export default function Home() {
   const { data: healthData, isLoading: isHealthLoading } = useDoc<HealthData>(userDocRef);
 
   const prefsDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
-  const { data: prefsData } = useDoc<UserPreferences>(prefsDocRef);
+  useDoc<UserPreferences>(prefsDocRef);
+
+  const entitlement = resolveClientEntitlement(user, healthData);
 
   useEffect(() => {
     if (user && db) {
@@ -386,8 +390,33 @@ export default function Home() {
     } else if (params.get('error')?.startsWith('withings_')) {
       toast({ variant: 'destructive', title: 'Withings Link Failed', description: 'Check your Withings credentials and try again.' });
       window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('checkout') === 'success') {
+      const sessionId = params.get('session_id');
+      if (sessionId && user) {
+        user.getIdToken().then((idToken) =>
+          fetch('/api/stripe/verify-session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({ sessionId }),
+          }).catch(() => {})
+        );
+      }
+      toast({
+        title: 'Executive Retainer Active',
+        description: 'Welcome aboard, Partner. Unlimited AI CFO coaching, voice dictation, and Ledger Analyst are now unlocked.',
+      });
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('checkout') === 'cancelled') {
+      toast({
+        title: 'Checkout Closed',
+        description: 'No charge was made. Your Zero-AI Cockpit remains 100% free forever.',
+      });
+      window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [toast]);
+  }, [toast, user]);
 
   const handleAnonymousLogin = async () => {
     setIsLoggingIn(true);
@@ -483,13 +512,14 @@ export default function Home() {
     setIsAuditing(true);
     toast({ title: "Audit Initialized", description: "Running CFO diagnostic suite..." });
 
+    const idToken = await user.getIdToken();
     await runInternalAudit(db, user.uid, (test, success, message) => {
       toast({
         variant: success ? "default" : "destructive",
         title: `Audit ${test} ${success ? 'Passed' : 'Failed'}`,
         description: message
       });
-    });
+    }, idToken);
 
     setIsAuditing(false);
   };
@@ -522,6 +552,13 @@ export default function Home() {
         isOpen={showTutorial} 
         onComplete={handleTutorialComplete} 
       />
+      <PaywallModal
+        isOpen={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        onSwitchToZeroAi={() => handleTabChange('daily')}
+        auditsUsed={entitlement.aiAuditsUsed}
+        freeLimit={entitlement.freeLimit}
+      />
       <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary text-white rounded-xl shadow-md">
@@ -538,8 +575,10 @@ export default function Home() {
         <div className="flex items-center gap-4">
           {!user?.isAnonymous && (
             <div className="hidden md:flex flex-col items-end mr-1">
-              <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">Verified Identity</p>
-              <p className="text-xs font-bold text-foreground truncate max-w-[150px]">{user?.displayName || user?.email}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">
+                {entitlement.tier === 'founder' ? 'Founder Immunity' : entitlement.badgeLabel}
+              </p>
+              <p className="text-xs font-bold text-foreground truncate max-w-[160px]">{user?.displayName || user?.email}</p>
             </div>
           )}
 
@@ -560,7 +599,9 @@ export default function Home() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel className="flex flex-col gap-1 p-3">
-                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Portfolio Owner</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  {entitlement.badgeLabel}
+                </span>
                 <span className="text-sm font-bold text-foreground truncate">{user?.displayName || user?.email || 'Anonymous Auditor'}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -568,6 +609,12 @@ export default function Home() {
                 <DropdownMenuItem onClick={handleUpgradeAccount} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3 cursor-pointer">
                   <Cloud className="w-4 h-4" />
                   <span>Secure Portfolio (Google)</span>
+                </DropdownMenuItem>
+              )}
+              {!entitlement.isExempt && (
+                <DropdownMenuItem onClick={() => setPaywallOpen(true)} className="flex items-center gap-2 text-primary font-black uppercase text-xs p-3 cursor-pointer">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Retain AI CFO / Enter Code</span>
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={handleInternalAudit} className="flex items-center gap-2 font-bold uppercase text-xs p-3 cursor-pointer">
@@ -589,7 +636,7 @@ export default function Home() {
           <div className="flex-1 relative overflow-hidden h-full">
             {activeTab === 'chat' && (
               <div className="h-full w-full absolute inset-0 flex flex-col">
-                <ChatInterface />
+                <ChatInterface onSwitchToMetrics={() => handleTabChange('daily')} />
               </div>
             )}
             {activeTab === 'daily' && (

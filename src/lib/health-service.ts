@@ -150,6 +150,15 @@ export interface HealthData {
   isDeviceVerified: boolean;
   connectedDevice?: 'fitbit' | 'oura' | 'google' | 'withings' | null; // which wearable is currently linked
   lastActiveDate?: string;
+  entitlementTier?: 'founder' | 'vip' | 'pro' | 'free';
+  aiAuditsUsed?: number;
+  redeemedFounderCode?: string;
+  subscriptionPlan?: 'monthly' | 'annual' | 'lifetime' | 'founding_partner';
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  subscriptionStatus?: string;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: number;
 }
 
 export interface FoodNickname {

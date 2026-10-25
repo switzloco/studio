@@ -53,6 +53,8 @@
 	<string>CFO Fitness lets you attach meal photos from your library so the coach can estimate macros.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>CFO Fitness can save meal photos to your library.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CFO Fitness uses the microphone when you tap record to dictate meals and workouts by voice.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

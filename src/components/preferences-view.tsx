@@ -6,14 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders, Search, Trash2, Utensils, Tag } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders, Search, Trash2, Utensils, Tag, ShieldCheck, Sparkles } from "lucide-react";
+import { resolveClientEntitlement } from "@/lib/entitlements";
+import { PaywallModal } from "@/components/paywall-modal";
 import { Switch } from "@/components/ui/switch";
-import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { useUser, useFirestore, useDoc, useMemoFirebase, useAuth } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import { healthService, UserPreferences, HealthData } from '@/lib/health-service';
 import { useToast } from '@/hooks/use-toast';
 import { Progress } from '@/components/ui/progress';
 import { deleteNickname } from '@/app/actions/delete-nickname';
+import { deleteMyAccountAction } from '@/app/actions/delete-account';
+import { isNativeShell } from '@/lib/auth-environment';
+import { signOut } from 'firebase/auth';
 
 // Rank tiers — financial seniority ladder matching the app's portfolio metaphor
 const RANKS = [
@@ -34,6 +39,7 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function PreferencesView() {
   const { user } = useUser();
+  const auth = useAuth();
   const db = useFirestore();
   const { toast } = useToast();
   const [prefs, setPrefs] = useState<UserPreferences | null>(null);
@@ -60,6 +66,77 @@ export function PreferencesView() {
   const [nicknameSearch, setNicknameSearch] = useState('');
   const [nicknameMealFilter, setNicknameMealFilter] = useState<'all' | 'breakfast' | 'lunch' | 'dinner' | 'snack'>('all');
   const [deletingNicknameKey, setDeletingNicknameKey] = useState<string | null>(null);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [isOpeningPortal, setIsOpeningPortal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const entitlement = resolveClientEntitlement(user, healthData);
+  const nativeShell = isNativeShell();
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    const confirmed = window.confirm(
+      'Permanently delete your CFO Fitness account and all logged meals, workouts, scores, and coaching history? This action cannot be undone.'
+    );
+    if (!confirmed) return;
+
+    setIsDeletingAccount(true);
+    try {
+      const idToken = await user.getIdToken();
+      const result = await deleteMyAccountAction(idToken);
+      if (result.success) {
+        toast({
+          title: 'Account Liquidated',
+          description: 'Your account and all portfolio data have been permanently deleted.',
+        });
+        await signOut(auth).catch(() => {});
+        window.location.href = '/';
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Deletion Failed',
+          description: result.error || 'Could not delete account.',
+        });
+      }
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Deletion Failed',
+        description: err?.message || 'Could not delete account.',
+      });
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleOpenBillingPortal = async () => {
+    if (!user) return;
+    setIsOpeningPortal(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      toast({
+        variant: 'destructive',
+        title: 'Billing Portal Unavailable',
+        description: data.error || 'Could not open Stripe Customer Portal.',
+      });
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Billing Portal Error',
+        description: err?.message || 'Unexpected error.',
+      });
+    } finally {
+      setIsOpeningPortal(false);
+    }
+  };
 
   const handleDeleteNickname = async (key: string, name: string) => {
     if (!user || !prefs) return;
@@ -68,7 +145,8 @@ export function PreferencesView() {
     }
     setDeletingNicknameKey(key);
     try {
-      const res = await deleteNickname(user.uid, key);
+      const idToken = await user.getIdToken();
+      const res = await deleteNickname(user.uid, key, idToken);
       if (res.success) {
         const nextNicknames = { ...(prefs.foodNicknames || {}) };
         delete nextNicknames[key];
@@ -297,6 +375,59 @@ export function PreferencesView() {
           </Card>
         );
       })()}
+
+      {/* AI CFO Retainer & Membership Status */}
+      <PaywallModal
+        isOpen={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        auditsUsed={entitlement.aiAuditsUsed}
+        freeLimit={entitlement.freeLimit}
+      />
+      <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+        <CardHeader className="p-6 pb-2">
+          <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            AI CFO Membership & Retainer
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge className={entitlement.isExempt ? "bg-emerald-600 text-white font-black uppercase text-[10px]" : "bg-primary/10 text-primary font-black uppercase text-[10px] border-none"}>
+                {entitlement.badgeLabel}
+              </Badge>
+              {entitlement.tier === 'founder' && (
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Founder Immunity Active</span>
+              )}
+            </div>
+            <p className="text-xs font-medium text-muted-foreground">
+              {entitlement.isExempt
+                ? "Unlimited multimodal AI Coach, Voice Dictation, and Ledger Analyst access. Zero paywall restrictions."
+                : `${entitlement.remainingFreeAudits ?? entitlement.freeLimit} of ${entitlement.freeLimit} complimentary AI Coach audits remaining. The Zero-AI Cockpit (Metrics, 3-Day Nutritionist, Alpert Number, History) is 100% free forever.`}
+            </p>
+          </div>
+          {healthData?.stripeCustomerId && !nativeShell && (
+            <Button
+              variant="outline"
+              onClick={handleOpenBillingPortal}
+              disabled={isOpeningPortal}
+              className="rounded-xl font-black uppercase tracking-wider text-xs shrink-0 gap-2"
+            >
+              {isOpeningPortal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Manage / Cancel in 1 Click
+            </Button>
+          )}
+          {!entitlement.isExempt && (
+            <Button
+              onClick={() => setPaywallOpen(true)}
+              className="rounded-xl font-black uppercase tracking-wider text-xs shrink-0 gap-2"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {nativeShell ? 'Enter Partner / Access Code' : 'Retain AI CFO / Enter Code'}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Left Column: Schedule */}
@@ -819,6 +950,25 @@ export function PreferencesView() {
                   {user?.uid || "UNAUTHORIZED_ACCESS"}
                 </div>
                 <p className="text-[9px] text-muted-foreground italic px-1 mt-2">Use this ID to locate your document in the Firebase Console under /users/.</p>
+                {user && (
+                  <div className="pt-4 mt-4 border-t border-dashed flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-destructive">Account & Data Deletion</p>
+                      <p className="text-[10px] text-muted-foreground">Permanently erase your account and all portfolio data.</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isDeletingAccount}
+                      onClick={handleDeleteAccount}
+                      className="text-[10px] font-black uppercase tracking-wider text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0 gap-1.5"
+                    >
+                      {isDeletingAccount ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      Delete Account
+                    </Button>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

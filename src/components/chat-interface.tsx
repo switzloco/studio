@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -7,9 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
-import { sendChatMessage } from '@/app/actions/chat';
 import { useToast } from "@/hooks/use-toast";
 import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -17,6 +15,8 @@ import type { ChatMessage } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences } from '@/lib/health-service';
 import { SHARE_OFFER_SENTINEL, type ChatShareOffer } from '@/lib/share-offer';
 import { ShareMealButton } from '@/components/share-meal-button';
+import { resolveClientEntitlement } from '@/lib/entitlements';
+import { PaywallModal } from '@/components/paywall-modal';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -129,7 +129,11 @@ function readFileAsDataUri(file: File, maxDim = 1024, quality = 0.8): Promise<st
   });
 }
 
-export function ChatInterface() {
+export interface ChatInterfaceProps {
+  onSwitchToMetrics?: () => void;
+}
+
+export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
   const { user } = useUser();
   const db = useFirestore();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -138,6 +142,7 @@ export function ChatInterface() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   // picker state
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -154,7 +159,13 @@ export function ChatInterface() {
   );
 
   useEffect(() => {
-    if (micError) toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+    if (micError) {
+      if (micError.toLowerCase().includes('complimentary') || micError.toLowerCase().includes('retainer')) {
+        setPaywallOpen(true);
+      } else {
+        toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+      }
+    }
   }, [micError, toast]);
 
   const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
@@ -164,6 +175,8 @@ export function ChatInterface() {
 
   const prefsDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null, [db, user]);
   const { data: prefs, isLoading: prefsLoading } = useDoc<UserPreferences>(prefsDocRef);
+
+  const entitlement = resolveClientEntitlement(user, healthData);
 
   // Default to false so opening the Coach tab never triggers an unprompted paid Gemini call
   const autoChatEnabled = prefs?.autoChatEnabled ?? false;
@@ -219,6 +232,12 @@ export function ChatInterface() {
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
           body: JSON.stringify(payload),
         });
+
+        if (res.status === 402) {
+          setPaywallOpen(true);
+          setIsLoading(false);
+          return;
+        }
 
         if (!res.ok) {
           throw new Error('Failed to initialize');
@@ -425,6 +444,16 @@ export function ChatInterface() {
         body: JSON.stringify(payload),
       });
 
+      if (res.status === 402) {
+        setPaywallOpen(true);
+        setMessages(prev => [...prev, {
+          role: 'model',
+          content: `**Complimentary AI Audits Complete (${entitlement.freeLimit}/${entitlement.freeLimit})**\n\nYour **Zero-AI Cockpit** (Metrics, 3-Day Nutritionist, Alpert Number, and History) remains **100% free forever**. To continue live multimodal AI coaching, retain the AI CFO or enter a Founding Partner code.`,
+        }]);
+        setIsLoading(false);
+        return;
+      }
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Audit Failed: ${res.statusText}`);
@@ -489,6 +518,56 @@ export function ChatInterface() {
     </svg>
   );
 
+  /** Transparent status banner above the input bar (Seth Godin open-book style). */
+  const EntitlementBanner = (() => {
+    if (entitlement.tier === 'founder') {
+      return (
+        <div className="mb-2 flex items-center justify-between px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-700">
+          <span className="flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            Founder Immunity · Unlimited AI CFO
+          </span>
+          <span className="text-[9px] font-mono opacity-75">Exempt</span>
+        </div>
+      );
+    }
+    if (entitlement.tier === 'vip' || entitlement.tier === 'pro') {
+      return (
+        <div className="mb-2 flex items-center justify-between px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary">
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" />
+            {entitlement.badgeLabel} · Unlimited AI Audits
+          </span>
+        </div>
+      );
+    }
+    const remaining = entitlement.remainingFreeAudits ?? entitlement.freeLimit;
+    const isLow = remaining <= 5;
+    return (
+      <div
+        className={`mb-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border text-[10px] font-bold ${
+          isLow
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-900'
+            : 'bg-muted/40 border-border/50 text-muted-foreground'
+        }`}
+      >
+        <span className="truncate">
+          <strong className="font-black uppercase tracking-wider">
+            {remaining} of {entitlement.freeLimit}
+          </strong>{' '}
+          free AI audits left · Zero-AI Cockpit is free forever
+        </span>
+        <button
+          type="button"
+          onClick={() => setPaywallOpen(true)}
+          className="shrink-0 font-black uppercase tracking-wider text-primary hover:underline"
+        >
+          Retain CFO / Code
+        </button>
+      </div>
+    );
+  })();
+
   /** Shared photo thumbnail strip shown above the input bar. */
   const PhotoStrip = selectedPhotos.length > 0 || isPickerOpen ? (
     <div className="mb-3 flex gap-2 overflow-x-auto pb-1 px-1">
@@ -533,6 +612,7 @@ export function ChatInterface() {
   /** Shared input bar used in both the idle screen and main chat view. */
   const InputBar = (
     <div className="p-3 glass-morphism border-t shadow-2xl safe-area-bottom">
+      {EntitlementBanner}
       {PhotoStrip}
 
       {/* Hidden file inputs */}
@@ -625,6 +705,13 @@ export function ChatInterface() {
   if (!autoChatEnabled && messages.length === 0 && !isLoading) {
     return (
       <div className="flex flex-col flex-1 h-0">
+        <PaywallModal
+          isOpen={paywallOpen}
+          onClose={() => setPaywallOpen(false)}
+          onSwitchToZeroAi={onSwitchToMetrics}
+          auditsUsed={entitlement.aiAuditsUsed}
+          freeLimit={entitlement.freeLimit}
+        />
         <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
           <div className="p-4 bg-primary/10 rounded-3xl">
             <Zap className="w-10 h-10 text-primary" />
@@ -651,6 +738,13 @@ export function ChatInterface() {
 
   return (
     <div className="flex flex-col flex-1 h-0">
+      <PaywallModal
+        isOpen={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        onSwitchToZeroAi={onSwitchToMetrics}
+        auditsUsed={entitlement.aiAuditsUsed}
+        freeLimit={entitlement.freeLimit}
+      />
       <ScrollArea className="flex-1 p-4 pt-2">
         <div className="flex flex-col gap-4">
           {messages.map((m, i) => (

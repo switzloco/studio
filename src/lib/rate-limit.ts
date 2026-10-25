@@ -12,17 +12,17 @@ type WindowConfig = { max: number; windowMs: number };
 type BucketConfig = { minute: WindowConfig; hour: WindowConfig; day: WindowConfig };
 
 const LIMITS: Record<RateLimitBucket, BucketConfig> = {
-  // Chat covers /api/chat and /api/ledger-chat — moderate per-call cost.
+  // Chat covers /api/chat and /api/ledger-chat — capped at 60/day to bound worst-case LLM spend.
   chat: {
-    minute: { max: 20,  windowMs: 60_000 },
-    hour:   { max: 200, windowMs: 60 * 60_000 },
-    day:    { max: 500, windowMs: 24 * 60 * 60_000 },
+    minute: { max: 12, windowMs: 60_000 },
+    hour:   { max: 40, windowMs: 60 * 60_000 },
+    day:    { max: 60, windowMs: 24 * 60 * 60_000 },
   },
-  // Transcribe is much more expensive per call (audio tokens), so cap tighter.
+  // Transcribe is audio-token based, capped at 25/day.
   transcribe: {
-    minute: { max: 5,   windowMs: 60_000 },
-    hour:   { max: 30,  windowMs: 60 * 60_000 },
-    day:    { max: 100, windowMs: 24 * 60 * 60_000 },
+    minute: { max: 5,  windowMs: 60_000 },
+    hour:   { max: 15, windowMs: 60 * 60_000 },
+    day:    { max: 25, windowMs: 24 * 60 * 60_000 },
   },
 };
 

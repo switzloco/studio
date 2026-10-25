@@ -1,10 +1,9 @@
-
 'use server';
 
 import { personalizedAICoaching } from '@/ai/flows/personalized-ai-coaching';
-import { initializeFirebase } from '@/firebase/sdk';
-import { getAdminFirestore } from '@/firebase/admin';
+import { getAdminFirestore, verifyIdTokenString } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { checkServerEntitlement, recordAiAuditTurn } from '@/lib/entitlements-server';
 import { fetchSlimUserContext } from '@/lib/user-context';
 
 function extractContentType(dataUri: string): string {
@@ -14,6 +13,7 @@ function extractContentType(dataUri: string): string {
 
 /**
  * @fileOverview Server Action for sending chat messages to the CFO AI Coach.
+ * Requires a verified Firebase ID token when invoked outside internal founder diagnostics.
  */
 
 /** Timeout (ms) for the AI coaching flow — prevents infinite hangs when Genkit/Gemini is down. */
@@ -35,16 +35,33 @@ export async function sendChatMessage(
   photoTimestamps?: string[],
   /** Parallel array of EXIF-derived dates (YYYY-MM-DD) — one per photo, empty string if same as localDate. */
   photoDates?: string[],
+  /** Verified Firebase ID token from the client. */
+  idToken?: string,
 ) {
   try {
-    if (!userId) throw new Error("Anonymous UID required for audit.");
+    if (!idToken) {
+      throw new Error('Authentication token required for AI audit.');
+    }
+    const auth = await verifyIdTokenString(idToken);
+    if (!auth || (userId && auth.uid !== userId)) {
+      throw new Error('Unauthorized audit request.');
+    }
+
+    const entitlement = await checkServerEntitlement(auth);
+    if (!entitlement.allowed) {
+      return {
+        success: false,
+        code: 'PAYWALL_LIMIT_REACHED',
+        error: `You've used all ${entitlement.freeLimit} complimentary AI Coach audits.`,
+      };
+    }
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
     const firestore = getAdminFirestore();
 
     const [rateLimit, userContext] = await Promise.all([
-      checkRateLimit(userId, 'chat'),
-      fetchSlimUserContext(firestore, userId, resolvedDate).catch((err) => {
+      checkRateLimit(auth.uid, 'chat'),
+      fetchSlimUserContext(firestore, auth.uid, resolvedDate).catch((err) => {
         console.error('[sendChatMessage] Preload context error (falling back):', err);
         return null;
       }),
@@ -68,7 +85,7 @@ export async function sendChatMessage(
       : photoDataUri ? [photoDataUri] : [];
 
     const aiPromise = personalizedAICoaching({
-      userId,
+      userId: auth.uid,
       userName,
       message,
       currentDay,
@@ -90,6 +107,7 @@ export async function sendChatMessage(
     );
 
     const response = await Promise.race([aiPromise, timeoutPromise]);
+    void recordAiAuditTurn(auth, false);
 
     return { success: true, response: response.response };
   } catch (error: any) {

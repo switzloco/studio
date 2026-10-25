@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview Genkit flow for "Share Ingestion" — parses raw shared text
  * (basketball stats, workout notes, Fitbit summaries, etc.) into structured

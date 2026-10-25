@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview Genkit flow for "the CFO" AI coach.
  * Natural conversational coaching — no rigid onboarding gates.

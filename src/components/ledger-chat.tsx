@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send, Loader2, ChevronDown, ChevronUp, BarChart3, Mic, Square } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { sendLedgerMessage } from '@/app/actions/ledger-chat';
-import { useUser } from '@/firebase';
+import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
+import { doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useTranscription } from '@/hooks/use-transcription';
+import { HealthData } from '@/lib/health-service';
+import { resolveClientEntitlement } from '@/lib/entitlements';
+import { PaywallModal } from '@/components/paywall-modal';
 
 interface Message {
   role: 'user' | 'model';
@@ -25,20 +28,33 @@ const SUGGESTIONS = [
 
 export function LedgerChat() {
   const { user } = useUser();
+  const db = useFirestore();
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [initDone, setInitDone] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const userDocRef = useMemoFirebase(() => user ? doc(db, 'users', user.uid) : null, [db, user]);
+  const { data: healthData } = useDoc<HealthData>(userDocRef);
+  const entitlement = resolveClientEntitlement(user, healthData);
+
   const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
     useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
     useCallback(() => user!.getIdToken(), [user]),
   );
 
   useEffect(() => {
-    if (micError) toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+    if (micError) {
+      if (micError.toLowerCase().includes('complimentary') || micError.toLowerCase().includes('retainer')) {
+        setPaywallOpen(true);
+      } else {
+        toast({ title: 'Voice input error', description: micError, variant: 'destructive' });
+      }
+    }
   }, [micError, toast]);
 
   // Auto-scroll on new messages
@@ -84,6 +100,16 @@ export function LedgerChat() {
         body: JSON.stringify(payload),
       });
 
+      if (res.status === 402) {
+        setPaywallOpen(true);
+        setMessages(prev => [...prev, {
+          role: 'model',
+          content: `**Complimentary AI Audits Complete (${entitlement.freeLimit}/${entitlement.freeLimit})**\n\nAll deterministic History & Calendar views remain 100% free forever. Retain the AI CFO or enter a Founding Partner code to continue querying the AI Ledger Analyst.`,
+        }]);
+        setIsLoading(false);
+        return;
+      }
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Analyst Error');
@@ -118,6 +144,12 @@ export function LedgerChat() {
 
   return (
     <Card className="border-none shadow-md bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+      <PaywallModal
+        isOpen={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        auditsUsed={entitlement.aiAuditsUsed}
+        freeLimit={entitlement.freeLimit}
+      />
       {/* Header — always visible */}
       <button
         className="w-full p-5 flex items-center justify-between text-left"

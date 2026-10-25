@@ -131,7 +131,9 @@ jobs:
           /usr/bin/sed -i '' \
             "s|CODE_SIGN_STYLE = Automatic;|CODE_SIGN_STYLE = Manual; DEVELOPMENT_TEAM = N7DBYV74D4; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE_SPECIFIER = \"${PROFILE_NAME}\";|g" \
             "$PBX"
-          echo "App target signing settings:"
+          BUILD_NUM=$((10 + ${{ github.run_number }}))
+          /usr/bin/sed -i '' "s|CURRENT_PROJECT_VERSION = 1;|CURRENT_PROJECT_VERSION = ${BUILD_NUM};|g" "$PBX"
+          echo "App target signing & build (${BUILD_NUM}) settings:"
           grep -n "PROVISIONING_PROFILE_SPECIFIER\|CODE_SIGN_IDENTITY\|CODE_SIGN_STYLE" "$PBX" || true
 
       - name: Build & archive

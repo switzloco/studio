@@ -120,6 +120,17 @@ env:
     availability:
       - RUNTIME
 
+  # --- STRIPE WEB BILLING (Uncomment after running: firebase apphosting:secrets:set STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET) ---
+  # Note: STRIPE_PRICE_*_ID are optional — if omitted, inline price_data (.99/yr, .99/mo,  once) is used automatically.
+  # - variable: STRIPE_SECRET_KEY
+  #   secret: STRIPE_SECRET_KEY
+  #   availability:
+  #     - RUNTIME
+  # - variable: STRIPE_WEBHOOK_SECRET
+  #   secret: STRIPE_WEBHOOK_SECRET
+  #   availability:
+  #     - RUNTIME
+
 runConfig:
   # --- SCALING CONFIGURATION ---
   # minInstances: Minimum number of instances kept warm at all times.

@@ -1,15 +1,26 @@
 'use server';
 
-import { getAdminFirestore } from '@/firebase/admin';
+import { getAdminFirestore, verifyIdTokenString } from '@/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 
 /**
  * Server Action to delete a saved food nickname from the user's preferences.
  */
-export async function deleteNickname(userId: string, key: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteNickname(
+  userId: string,
+  key: string,
+  idToken?: string
+): Promise<{ success: boolean; error?: string }> {
   try {
     if (!userId) throw new Error('User ID is required');
     if (!key) throw new Error('Nickname key is required');
+
+    if (idToken) {
+      const verified = await verifyIdTokenString(idToken);
+      if (!verified || verified.uid !== userId) {
+        return { success: false, error: 'Unauthorized: UID mismatch' };
+      }
+    }
 
     const db = getAdminFirestore();
     const prefRef = db.doc(`users/${userId}/preferences/settings`);

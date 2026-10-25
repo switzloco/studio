@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
 import { runWithShareOffer, getShareOffer } from '@/ai/flows/share-offer-context';
-import { verifyAuthHeader, getAdminFirestore } from '@/firebase/admin';
+import { verifyAuthHeaderDetails, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { checkServerEntitlement, recordAiAuditTurn } from '@/lib/entitlements-server';
 import { adminHealthService } from '@/lib/health-service-admin';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
@@ -52,9 +53,37 @@ async function persistChatTurn(
 
 export async function POST(req: Request) {
   try {
-    const uid = await verifyAuthHeader(req);
-    if (!uid) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyAuthHeaderDetails(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { uid } = auth;
 
+    const body = await req.json();
+    const { message, chatHistory, currentHealth, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates, modelTier } = body;
+
+    // Input size safety bounds (prevents abusive payloads)
+    if (typeof message === 'string' && message.length > 6000) {
+      return NextResponse.json({ error: 'Message too long (max 6,000 chars).' }, { status: 400 });
+    }
+    if (Array.isArray(photoDataUris) && photoDataUris.length > 5) {
+      return NextResponse.json({ error: 'Maximum 5 photos per audit.' }, { status: 400 });
+    }
+
+    const isInitGreeting = message === '__init__';
+
+    // 1. Check Founder / Pro / Free AI Audit Entitlement
+    const entitlement = await checkServerEntitlement(auth, { isInitGreeting });
+    if (!entitlement.allowed) {
+      return NextResponse.json(
+        {
+          error: `You've used all ${entitlement.freeLimit} complimentary AI Coach audits. Retain the AI CFO for unlimited coaching, or use the Zero-AI Daily Cockpit & Quick Log free forever.`,
+          code: 'PAYWALL_LIMIT_REACHED',
+          entitlement,
+        },
+        { status: 402 },
+      );
+    }
+
+    // 2. Check abuse rate limit
     const limit = await checkRateLimit(uid, 'chat');
     if (!limit.ok) {
       return NextResponse.json(
@@ -62,9 +91,6 @@ export async function POST(req: Request) {
         { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
       );
     }
-
-    const body = await req.json();
-    const { message, chatHistory, currentHealth, userName, localDate, localTime, photoDataUris, photoTimestamps, photoDates, modelTier } = body;
 
     const resolvedDate = localDate || new Date().toISOString().split('T')[0];
     const [yr, mo, dy] = resolvedDate.split('-').map(Number);
@@ -80,16 +106,14 @@ export async function POST(req: Request) {
       ? chatHistory.slice(-MAX_SENT_HISTORY)
       : chatHistory;
 
-    // Preload slim user context on the opening turn so the LLM skips the extra
-    // get_user_context tool round-trip (cuts an entire input+output turn of tokens).
+    // Always preload slim user context so the LLM never wastes an 11,500-token
+    // tool round-trip calling get_user_context mid-conversation.
     let preloadedContext: string | undefined;
-    if (!trimmedHistory || trimmedHistory.length <= 2) {
-      try {
-        const ctx = await fetchSlimUserContext(getAdminFirestore(), uid, resolvedDate);
-        preloadedContext = JSON.stringify(ctx);
-      } catch (e) {
-        console.warn('[ChatRoute] preloadedContext fetch skipped:', e);
-      }
+    try {
+      const ctx = await fetchSlimUserContext(getAdminFirestore(), uid, resolvedDate);
+      preloadedContext = JSON.stringify(ctx);
+    } catch (e) {
+      console.warn('[ChatRoute] preloadedContext fetch skipped:', e);
     }
 
     const input: PersonalizedAICoachingInput = {
@@ -146,6 +170,7 @@ export async function POST(req: Request) {
         // write into it; we read it back once the text finishes.
         await runWithShareOffer(async () => {
           let fullText = '';
+          let streamSucceeded = false;
           try {
             const stream = await openStream();
             for await (const chunk of stream) {
@@ -154,6 +179,7 @@ export async function POST(req: Request) {
                 controller.enqueue(encoder.encode(chunk.text));
               }
             }
+            streamSucceeded = fullText.trim().length > 0;
 
             // The agent may have surfaced a "share this meal" chip via the
             // offer_meal_share tool. Append it AFTER the text as a sentinel the
@@ -177,9 +203,11 @@ export async function POST(req: Request) {
             );
           } finally {
             controller.close();
-            // Persist the completed turn for daily visibility. Fire-and-forget —
-            // the response has already streamed, so this never blocks the user.
+            // Persist the completed turn for daily visibility and increment free-tier audit counter
             void persistChatTurn(uid, resolvedDate, message, hasPhotos, fullText);
+            if (streamSucceeded) {
+              void recordAiAuditTurn(auth, isInitGreeting);
+            }
           }
         });
       },
