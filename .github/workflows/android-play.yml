@@ -34,8 +34,6 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_VERSION_CODE: ${{ 10 + github.run_number }}
-          ANDROID_VERSION_NAME: "1.0.${{ 10 + github.run_number }}"
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
@@ -63,9 +61,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_VERSION_CODE: ${{ 10 + github.run_number }}
-          ANDROID_VERSION_NAME: "1.0.${{ 10 + github.run_number }}"
         run: |
+          export ANDROID_VERSION_CODE=$((10 + ${{ github.run_number }}))
+          export ANDROID_VERSION_NAME="1.0.${ANDROID_VERSION_CODE}"
+          echo "Building Android release AAB with versionCode=${ANDROID_VERSION_CODE} (${ANDROID_VERSION_NAME})"
           ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file="$RELEASE_KEYSTORE" \
             -Pandroid.injected.signing.store.password="$ANDROID_STORE_PASSWORD" \
