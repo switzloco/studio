@@ -75,7 +75,9 @@ export async function POST(req: Request) {
     if (!entitlement.allowed) {
       return NextResponse.json(
         {
-          error: `You've used all ${entitlement.freeLimit} complimentary AI Coach audits. Retain the AI CFO for unlimited coaching, or use the Zero-AI Daily Cockpit & Quick Log free forever.`,
+          error: entitlement.requiresSignIn
+            ? 'Guest preview complete (5 free turns). Sign in free with Google or Email to unlock your full 15-audit starter pack or redeem a Friends & Family credit pass.'
+            : `You've used all ${entitlement.freeLimit} complimentary AI Coach audits. Retain the AI CFO for unlimited coaching, or use the Zero-AI Daily Cockpit & Quick Log free forever.`,
           code: 'PAYWALL_LIMIT_REACHED',
           entitlement,
         },
@@ -137,31 +139,6 @@ export async function POST(req: Request) {
       ? 'googleai/gemini-2.5-flash-lite'
       : undefined;
 
-    // Creates the model stream with a fallback model. Kept inside the ALS scope
-    // (see below) so any tool calls that fire during generation can record a
-    // share offer for this turn.
-    const openStream = async () => {
-      try {
-        const result = await cfoChatPrompt.stream(input, {
-          ...(selectedModel ? { model: selectedModel } : {}),
-          maxTurns: 8,
-        });
-        return result.stream;
-      } catch (err: any) {
-        const msg = String(err?.message ?? err ?? '').toLowerCase();
-        const status = err?.status || err?.statusCode;
-        if (status === 429 || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota')) {
-          throw err;
-        }
-        console.warn('[ChatRoute] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
-        const result = await cfoChatPrompt.stream(input, {
-          model: 'googleai/gemini-2.0-flash',
-          maxTurns: 8,
-        });
-        return result.stream;
-      }
-    };
-
     const encoder = new TextEncoder();
     const hasPhotos = Array.isArray(photoDataUris) && photoDataUris.length > 0;
     const readableStream = new ReadableStream({
@@ -172,7 +149,10 @@ export async function POST(req: Request) {
           let fullText = '';
           let streamSucceeded = false;
           try {
-            const stream = await openStream();
+            const { stream } = await cfoChatPrompt.stream(input, {
+              ...(selectedModel ? { model: selectedModel } : {}),
+              maxTurns: 8,
+            });
             for await (const chunk of stream) {
               if (chunk.text) {
                 fullText += chunk.text;
@@ -180,28 +160,69 @@ export async function POST(req: Request) {
               }
             }
             streamSucceeded = fullText.trim().length > 0;
+          } catch (streamErr: any) {
+            const detail = String(streamErr?.message ?? streamErr ?? '');
+            console.warn('[ChatRoute] Primary SSE stream interrupted:', detail);
 
-            // The agent may have surfaced a "share this meal" chip via the
-            // offer_meal_share tool. Append it AFTER the text as a sentinel the
-            // client parses and strips — never persisted to the transcript.
+            // Case 1: A tool (e.g. log_food) ALREADY succeeded on Turn 1 before the
+            // post-tool SSE stream returned 0 chunks ("Error aggregating stream chunks...").
+            // Do NOT re-run cfoChatPrompt from scratch or we would double-log the meal!
+            const offerAfterTool = getShareOffer();
+            if (offerAfterTool && !fullText.trim()) {
+              const recoveredMsg =
+                `Logged **${offerAfterTool.label}** to your ledger. Your daily macros and cockpit have been updated.`;
+              fullText = recoveredMsg;
+              controller.enqueue(encoder.encode(recoveredMsg));
+              streamSucceeded = true;
+            } else if (!fullText.trim()) {
+              // Case 2: No text emitted and no meal logged yet — fall back to non-streaming
+              // cfoChatPrompt(input) which uses standard JSON generateContent (immune to
+              // Genkit's SSE aggregateResponses([]) bug).
+              try {
+                const nonStreamResult = await cfoChatPrompt(input, {
+                  ...(selectedModel ? { model: selectedModel } : {}),
+                  maxTurns: 8,
+                });
+                if (nonStreamResult?.text) {
+                  fullText = nonStreamResult.text;
+                  controller.enqueue(encoder.encode(fullText));
+                  streamSucceeded = true;
+                }
+              } catch (fallbackErr: any) {
+                const fbDetail = String(fallbackErr?.message ?? fallbackErr ?? '');
+                console.error('[ChatRoute] Non-streaming fallback also failed:', fbDetail);
+                // If log_food succeeded during the non-streaming fallback before a late error:
+                const lateOffer = getShareOffer();
+                if (lateOffer && !fullText.trim()) {
+                  const recoveredMsg =
+                    `Logged **${lateOffer.label}** to your ledger. Your daily macros and cockpit have been updated.`;
+                  fullText = recoveredMsg;
+                  controller.enqueue(encoder.encode(recoveredMsg));
+                  streamSucceeded = true;
+                } else {
+                  controller.enqueue(
+                    encoder.encode(
+                      `⚠️ **System Interruption**\n\nPartner, the Gemini neural ledger could not be reached.\n\n` +
+                        `I have received your message: *"${message}"*.\n\n**Diagnostics:** \`${fbDetail || detail}\`\n\nPlease try again in a minute.`
+                    )
+                  );
+                }
+              }
+            } else {
+              // Mid-sentence stream drop after partial text was already sent
+              controller.enqueue(
+                encoder.encode(
+                  `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation.*\n\n\`\`\`\n${detail}\n\`\`\``
+                )
+              );
+            }
+          } finally {
+            // If the agent logged food during either the primary stream or fallback,
+            // append the share offer sentinel before closing.
             const offer = getShareOffer();
-            if (offer) {
+            if (offer && streamSucceeded) {
               controller.enqueue(encoder.encode(`${SHARE_OFFER_SENTINEL}${JSON.stringify(offer)}`));
             }
-          } catch (err: any) {
-            const detail = err?.message ?? String(err);
-            console.error('[ChatRoute] Stream failed:', detail, err?.stack ?? '');
-            // Mid-generation failures and total model failures both land here —
-            // render a friendly message inline so the chat never hangs.
-            controller.enqueue(
-              encoder.encode(
-                fullText
-                  ? `\n\n⚠️ **Stream Disrupted** — *The connection to the AI engine was lost mid-generation.*\n\n\`\`\`\n${detail}\n\`\`\``
-                  : `⚠️ **System Interruption**\n\nPartner, the Gemini neural ledger could not be reached.\n\n` +
-                    `I have received your message: *"${message}"*.\n\n**Diagnostics:** \`${detail}\`\n\nPlease try again in a minute.`
-              )
-            );
-          } finally {
             controller.close();
             // Persist the completed turn for daily visibility and increment free-tier audit counter
             void persistChatTurn(uid, resolvedDate, message, hasPhotos, fullText);

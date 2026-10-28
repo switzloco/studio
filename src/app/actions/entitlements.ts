@@ -2,20 +2,33 @@
 
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, verifyIdTokenString } from '@/firebase/admin';
-import { getValidFounderCodes, checkServerEntitlement } from '@/lib/entitlements-server';
-import { sendAdminReportEmail } from '@/lib/admin-email';
+import {
+  FRIENDS_BONUS_AI_AUDITS,
+  checkServerEntitlement,
+  getValidCreditPackCodes,
+  getValidFounderCodes,
+} from '@/lib/entitlements-server';
 
 /**
- * Redeems a Founding Member / Friend-of-Nick invite code (e.g., SWITZER, BEERBELLYBALLERS)
- * and permanently unlocks VIP immunity on the user's Firestore portfolio.
+ * Redeems either:
+ *   1. A Shareable Friends & Family Credit Code (e.g. FRIENDS25, FAMILY, BALLERS, BEERBELLYBALLERS)
+ *      -> Grants a ONE-TIME +25 Bonus AI Audits (`bonusAiAudits: 25`), capping LLM exposure at ~$0.11
+ *         while letting friends & family share codes freely.
+ *   2. A Master Founder Code (e.g. SWITZER) -> Grants VIP immunity.
  */
 export async function redeemFounderCodeAction(
   idToken: string,
   rawCode: string,
-): Promise<{ success: boolean; tier?: 'vip' | 'founder'; error?: string }> {
+): Promise<{
+  success: boolean;
+  tier?: 'vip' | 'founder' | 'credit_pack';
+  bonusAdded?: number;
+  message?: string;
+  error?: string;
+}> {
   const auth = await verifyIdTokenString(idToken);
   if (!auth) {
-    return { success: false, error: 'Please sign in to redeem a partner code.' };
+    return { success: false, error: 'Please sign in to redeem a credit code.' };
   }
 
   const cleanCode = (rawCode || '').trim().toUpperCase().replace(/\s+/g, '');
@@ -23,89 +36,67 @@ export async function redeemFounderCodeAction(
     return { success: false, error: 'Enter a valid code.' };
   }
 
-  const validCodes = getValidFounderCodes();
-  if (!validCodes.has(cleanCode)) {
+  const founderCodes = getValidFounderCodes();
+  const creditCodes = getValidCreditPackCodes();
+
+  const isMasterFounderCode = founderCodes.has(cleanCode);
+  const isCreditPackCode = creditCodes.has(cleanCode);
+
+  if (!isMasterFounderCode && !isCreditPackCode) {
     return {
       success: false,
-      error: 'Code not recognized. Ask Nick for a Founding Member code or use the direct request button below.',
+      error: 'Code not recognized. Try FRIENDS25 or ask Nick for a Friends & Family credit link.',
     };
   }
 
   try {
     const db = getAdminFirestore();
-    await db.doc(`users/${auth.uid}`).set(
+    const userRef = db.doc(`users/${auth.uid}`);
+
+    if (isMasterFounderCode) {
+      await userRef.set(
+        {
+          entitlementTier: 'vip',
+          redeemedFounderCode: cleanCode,
+          entitlementUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return {
+        success: true,
+        tier: 'vip',
+        message: 'Founder VIP access unlocked.',
+      };
+    }
+
+    // Credit pack code: one-time +25 bonus AI audits per user (cannot be stacked repeatedly)
+    const snap = await userRef.get();
+    const existing = snap.exists ? snap.data() : undefined;
+    if (existing?.redeemedGiftCode) {
+      return {
+        success: false,
+        error: `You already redeemed a Friends & Family credit pack (${existing.redeemedGiftCode}). Retain the AI CFO below for unlimited access!`,
+      };
+    }
+
+    await userRef.set(
       {
-        entitlementTier: 'vip',
-        redeemedFounderCode: cleanCode,
+        bonusAiAudits: FRIENDS_BONUS_AI_AUDITS,
+        redeemedGiftCode: cleanCode,
         entitlementUpdatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
-    return { success: true, tier: 'vip' };
+
+    return {
+      success: true,
+      tier: 'credit_pack',
+      bonusAdded: FRIENDS_BONUS_AI_AUDITS,
+      message: `+${FRIENDS_BONUS_AI_AUDITS} Friends & Family AI CFO credits added to your account!`,
+    };
   } catch (err: any) {
     console.error('[redeemFounderCodeAction] Failed:', err);
     return { success: false, error: 'Could not activate code. Please try again.' };
-  }
-}
-
-/**
- * Activates a CFO Pro Retainer plan ('monthly' | 'annual' | 'founding_partner')
- * or records a direct Founding Partner access request to Nick.
- */
-export async function activateProRetainerAction(
-  idToken: string,
-  plan: 'monthly' | 'annual' | 'founding_partner',
-  noteOrEmail?: string,
-): Promise<{ success: boolean; checkoutUrl?: string; activatedDirectly?: boolean; error?: string }> {
-  const auth = await verifyIdTokenString(idToken);
-  if (!auth) {
-    return { success: false, error: 'Authentication required.' };
-  }
-
-  // If Stripe Payment Links are configured in env, return the external checkout URL
-  const stripeUrl =
-    plan === 'annual'
-      ? process.env.NEXT_PUBLIC_STRIPE_ANNUAL_URL
-      : plan === 'monthly'
-        ? process.env.NEXT_PUBLIC_STRIPE_MONTHLY_URL
-        : process.env.NEXT_PUBLIC_STRIPE_FOUNDING_URL;
-
-  const db = getAdminFirestore();
-
-  // Log the retainer request and grant immediate Pro access during Founding Member launch
-  // so no high-intent user hits a dead end before Stripe/RevenueCat webhooks are live,
-  // while notifying Nick immediately via email.
-  try {
-    await db.doc(`users/${auth.uid}`).set(
-      {
-        entitlementTier: 'pro',
-        subscriptionPlan: plan,
-        entitlementUpdatedAt: FieldValue.serverTimestamp(),
-        ...(auth.email ? { email: auth.email } : {}),
-      },
-      { merge: true },
-    );
-
-    const userEmail = auth.email || noteOrEmail || 'Anonymous User';
-    void sendAdminReportEmail(
-      'nicholas.switzer@gmail.com',
-      `[the CFO] New Pro Retainer Activated (${plan.toUpperCase()}) — ${userEmail}`,
-      `<div style="font-family:sans-serif;max-width:600px;">
-        <h2>New CFO Pro Retainer Activated</h2>
-        <p><strong>UID:</strong> <code>${auth.uid}</code></p>
-        <p><strong>Email / Contact:</strong> ${userEmail}</p>
-        <p><strong>Selected Plan:</strong> ${plan}</p>
-        ${noteOrEmail ? `<p><strong>Note:</strong> ${noteOrEmail}</p>` : ''}
-      </div>`,
-    ).catch(() => {});
-
-    if (stripeUrl) {
-      return { success: true, checkoutUrl: stripeUrl, activatedDirectly: true };
-    }
-    return { success: true, activatedDirectly: true };
-  } catch (err: any) {
-    console.error('[activateProRetainerAction] Error:', err);
-    return { success: false, error: err?.message || 'Could not activate retainer.' };
   }
 }
 

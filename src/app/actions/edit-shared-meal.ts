@@ -2,6 +2,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { checkRateLimit } from '@/lib/rate-limit';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 const ItemSchema = z.object({
@@ -38,14 +39,31 @@ export async function editSharedMeal(
   editRequest: string,
 ): Promise<EditSharedMealResult> {
   try {
+    // 1. Strict input bounds so public visitors cannot submit oversized prompts
+    if (!Array.isArray(items) || items.length === 0 || items.length > 20) {
+      return { success: false, error: 'Invalid meal items list.' };
+    }
+    const cleanRequest = (editRequest || '').trim();
+    if (!cleanRequest || cleanRequest.length > 400) {
+      return { success: false, error: 'Edit request must be between 1 and 400 characters.' };
+    }
+
+    // 2. Global shared-meal edit rate limit bucket to cap worst-case unauthenticated spend
+    const limit = await checkRateLimit('public_shared_meal_edit', 'chat');
+    if (!limit.ok) {
+      return { success: false, error: `Busy right now — please try again in ${limit.retryAfter}s.` };
+    }
+
+    // 3. Use gemini-2.5-flash-lite (72% lower token cost) for simple arithmetic portion edits
     const { output } = await ai.generate({
+      model: 'googleai/gemini-2.5-flash-lite',
       output: { schema: EditResponseSchema },
       prompt: `You are editing a meal's food items based on a user's natural language request.
 
 Current items (JSON):
 ${JSON.stringify(items, null, 2)}
 
-User request: "${editRequest}"
+User request: "${cleanRequest}"
 
 Apply the user's edit:
 - Scale macros proportionally when the user changes portion sizes ("half", "double", "just a little", etc.)

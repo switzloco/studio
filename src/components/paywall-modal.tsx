@@ -184,8 +184,8 @@ export function PaywallModal({
       const res = await redeemFounderCodeAction(idToken, founderCode);
       if (res.success) {
         toast({
-          title: 'Founding Partner Immunity Unlocked',
-          description: 'Welcome to the tribe. Unlimited AI CFO access is now active on your ledger.',
+          title: res.tier === 'credit_pack' ? '+25 AI CFO Credits Unlocked!' : 'Founding Partner Immunity Unlocked',
+          description: res.message || 'Welcome to the tribe. Your AI CFO credits are now active on your ledger.',
         });
         setFounderCode('');
         onClose();
@@ -467,12 +467,12 @@ export function PaywallModal({
                 className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-primary transition-colors py-1"
               >
                 <KeyRound className="w-3.5 h-3.5" />
-                <span>Have a Founding Partner or Substack Tribe code from Nick?</span>
+                <span>Have a Friends &amp; Family credit code (e.g. FRIENDS25) from Nick?</span>
               </button>
             ) : (
               <form onSubmit={handleRedeemCode} className="flex gap-2">
                 <Input
-                  placeholder="Enter Partner Code (e.g. BEERBELLYBALLERS)"
+                  placeholder="Enter Credit Code (e.g. FRIENDS25)"
                   value={founderCode}
                   onChange={(e) => setFounderCode(e.target.value)}
                   className="h-10 text-xs font-mono uppercase tracking-wider"

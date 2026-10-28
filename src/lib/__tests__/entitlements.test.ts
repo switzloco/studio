@@ -3,9 +3,11 @@ import {
   isFounderIdentity,
   resolveClientEntitlement,
   FREE_AI_AUDITS_LIMIT,
+  ANONYMOUS_FREE_AI_AUDITS_LIMIT,
+  FRIENDS_BONUS_AI_AUDITS,
 } from '../entitlements';
 
-describe('Founder Immunity & Entitlements', () => {
+describe('Founder Immunity, Friends & Family Credit Packs & Entitlements', () => {
   it('grants unconditional Founder Immunity to Nick Switzer emails (case-insensitive)', () => {
     expect(isFounderIdentity({ email: 'nicholas.switzer@gmail.com', uid: 'any-uid' })).toBe(true);
     expect(isFounderIdentity({ email: 'NICHOLAS.SWITZER@GMAIL.COM', uid: 'any-uid' })).toBe(true);
@@ -29,10 +31,10 @@ describe('Founder Immunity & Entitlements', () => {
     expect(status.remainingFreeAudits).toBeNull();
   });
 
-  it('resolves VIP tier when a Founding Partner code has been redeemed', () => {
+  it('resolves VIP tier when a Master Founder code (SWITZER) has been redeemed', () => {
     const status = resolveClientEntitlement(
       { email: 'friend@example.com', uid: 'friend-uid' },
-      { redeemedFounderCode: 'BEERBELLYBALLERS', aiAuditsUsed: 42 }
+      { redeemedFounderCode: 'SWITZER', aiAuditsUsed: 42 }
     );
     expect(status.tier).toBe('vip');
     expect(status.isExempt).toBe(true);
@@ -48,6 +50,47 @@ describe('Founder Immunity & Entitlements', () => {
     expect(status.tier).toBe('pro');
     expect(status.isExempt).toBe(true);
     expect(status.canUseAiCoach).toBe(true);
+  });
+
+  it('caps unsigned-in anonymous guests at ANONYMOUS_FREE_AI_AUDITS_LIMIT (5) and sets requiresSignIn', () => {
+    const anonActive = resolveClientEntitlement(
+      { uid: 'anon-1', email: null, isAnonymous: true },
+      { aiAuditsUsed: 3 }
+    );
+    expect(anonActive.allowed).toBe(true);
+    expect(anonActive.freeLimit).toBe(ANONYMOUS_FREE_AI_AUDITS_LIMIT);
+    expect(anonActive.remainingFreeAudits).toBe(2);
+
+    const anonCapped = resolveClientEntitlement(
+      { uid: 'anon-2', email: null, isAnonymous: true },
+      { aiAuditsUsed: ANONYMOUS_FREE_AI_AUDITS_LIMIT }
+    );
+    expect(anonCapped.allowed).toBe(false);
+    expect(anonCapped.requiresSignIn).toBe(true);
+    expect(anonCapped.remainingFreeAudits).toBe(0);
+  });
+
+  it('adds finite +25 Friends & Family bonus credits and still gates at (15 + 25 = 40) to protect unit economics', () => {
+    const giftedUser = resolveClientEntitlement(
+      { email: 'cousin@example.com', uid: 'cousin-1' },
+      { aiAuditsUsed: 20, bonusAiAudits: FRIENDS_BONUS_AI_AUDITS, redeemedGiftCode: 'FRIENDS25' }
+    );
+    expect(giftedUser.tier).toBe('free');
+    expect(giftedUser.isExempt).toBe(false);
+    expect(giftedUser.allowed).toBe(true);
+    expect(giftedUser.freeLimit).toBe(FREE_AI_AUDITS_LIMIT + FRIENDS_BONUS_AI_AUDITS);
+    expect(giftedUser.remainingFreeAudits).toBe(20);
+
+    const exhaustedGiftUser = resolveClientEntitlement(
+      { email: 'cousin@example.com', uid: 'cousin-1' },
+      {
+        aiAuditsUsed: FREE_AI_AUDITS_LIMIT + FRIENDS_BONUS_AI_AUDITS,
+        bonusAiAudits: FRIENDS_BONUS_AI_AUDITS,
+        redeemedGiftCode: 'FRIENDS25',
+      }
+    );
+    expect(exhaustedGiftUser.allowed).toBe(false);
+    expect(exhaustedGiftUser.remainingFreeAudits).toBe(0);
   });
 
   it('tracks remaining free AI audits for Open Terminal (free) users and gates at FREE_AI_AUDITS_LIMIT', () => {

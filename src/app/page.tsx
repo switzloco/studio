@@ -35,6 +35,7 @@ import { useToast } from '@/hooks/use-toast';
 import { runInternalAudit } from '@/lib/internal-audit';
 import { healthService, HealthData, UserPreferences } from '@/lib/health-service';
 import { resolveClientEntitlement } from '@/lib/entitlements';
+import { redeemFounderCodeAction } from '@/app/actions/entitlements';
 import { PaywallModal } from '@/components/paywall-modal';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
@@ -375,9 +376,30 @@ export default function Home() {
     };
   }, [auth, toast]);
 
-  // Show toast for Fitbit OAuth callback result.
+  // Show toast for Fitbit OAuth callback result, Stripe checkout, and Friends & Family ?gift= links.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const giftParam = params.get('gift') || params.get('invite') || params.get('code');
+    if (giftParam) {
+      localStorage.setItem('cfo_pending_gift_code', giftParam.trim().toUpperCase());
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    const pendingCode = localStorage.getItem('cfo_pending_gift_code');
+    if (pendingCode && user) {
+      localStorage.removeItem('cfo_pending_gift_code');
+      user.getIdToken().then((idToken) =>
+        redeemFounderCodeAction(idToken, pendingCode).then((res) => {
+          if (res.success) {
+            toast({
+              title: res.tier === 'credit_pack' ? '+25 Friends & Family AI Credits Added!' : 'Partner Access Unlocked!',
+              description: res.message || 'Your bonus AI CFO coaching credits are active on your ledger.',
+            });
+          }
+        }).catch(() => {})
+      );
+    }
+
     if (params.get('fitbit_sync') === 'success') {
       toast({ title: 'Fitbit Linked', description: 'Hardware verified. Device data is now trusted.' });
       window.history.replaceState({}, '', window.location.pathname);

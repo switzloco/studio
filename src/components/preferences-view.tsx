@@ -17,6 +17,9 @@ import { useToast } from '@/hooks/use-toast';
 import { Progress } from '@/components/ui/progress';
 import { deleteNickname } from '@/app/actions/delete-nickname';
 import { deleteMyAccountAction } from '@/app/actions/delete-account';
+import { submitContactForm } from '@/app/actions/contact';
+import { Textarea } from '@/components/ui/textarea';
+import { Share2, Send } from 'lucide-react';
 import { isNativeShell } from '@/lib/auth-environment';
 import { signOut } from 'firebase/auth';
 
@@ -69,6 +72,70 @@ export function PreferencesView() {
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+  const [copiedGiftLink, setCopiedGiftLink] = useState(false);
+
+  const handleShareGiftCredits = async () => {
+    const giftUrl = 'https://cfofitness.app/?gift=FRIENDS25';
+    const shareText = `Here are 25 bonus AI CFO coaching credits on CFO Fitness (plus the daily Visceral Fat & 3-day macro cockpit is free forever): ${giftUrl}`;
+    if (typeof navigator !== 'undefined' && 'share' in navigator) {
+      try {
+        await navigator.share({
+          title: '25 Free AI CFO Credits — CFO Fitness',
+          text: shareText,
+          url: giftUrl,
+        });
+        return;
+      } catch {
+        // Fall through to clipboard copy if user cancels native share sheet
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setCopiedGiftLink(true);
+      toast({
+        title: 'Friends & Family Credit Link Copied!',
+        description: 'Paste it into an email or text — gives +25 bonus AI CFO audits (1-time per person).',
+      });
+      setTimeout(() => setCopiedGiftLink(false), 3000);
+    } catch {
+      toast({
+        title: 'Share Link',
+        description: giftUrl,
+      });
+    }
+  };
+
+  const handleSendFeedback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedbackMessage.trim()) return;
+    setIsSendingFeedback(true);
+    try {
+      const res = await submitContactForm({
+        name: user?.displayName || 'Portfolio Partner',
+        email: user?.email || 'guest@cfofitness.app',
+        message: feedbackMessage,
+        uid: user?.uid,
+        context: `Tier: ${entitlement.tier} | Used: ${entitlement.aiAuditsUsed}/${entitlement.freeLimit} | Equity: ${points}`,
+      });
+      if (res.success) {
+        setFeedbackMessage('');
+        toast({
+          title: 'Note Sent to Nick',
+          description: 'Thanks! Your feedback was logged and sent directly to Nick.',
+        });
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Could Not Send Note',
+          description: res.error || 'Please try again.',
+        });
+      }
+    } finally {
+      setIsSendingFeedback(false);
+    }
+  };
   const entitlement = resolveClientEntitlement(user, healthData);
   const nativeShell = isNativeShell();
 
@@ -426,6 +493,15 @@ export function PreferencesView() {
               {nativeShell ? 'Enter Partner / Access Code' : 'Retain AI CFO / Enter Code'}
             </Button>
           )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleShareGiftCredits}
+            className="rounded-xl font-black uppercase tracking-wider text-xs shrink-0 gap-2 border-emerald-600/30 text-emerald-700 hover:bg-emerald-50"
+          >
+            {copiedGiftLink ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+            {copiedGiftLink ? 'Copied Credit Link!' : 'Gift 25 Free Credits'}
+          </Button>
         </CardContent>
       </Card>
 
@@ -932,6 +1008,38 @@ export function PreferencesView() {
                   </div>
                 );
               })()}
+            </CardContent>
+          </Card>
+
+          {/* Direct Feedback Loop to Founder (Nick) */}
+          <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">
+            <CardHeader className="p-6 pb-2">
+              <CardTitle className="text-[12px] font-black uppercase text-muted-foreground flex items-center gap-3 tracking-widest">
+                <MessageSquare className="w-4 h-4 text-primary" />
+                Direct Line to Nick (Feedback &amp; Bugs)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-3">
+              <form onSubmit={handleSendFeedback} className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Spot a bug, a weird macro estimate, or have an idea? Send a note straight to Nick&apos;s inbox.
+                </p>
+                <Textarea
+                  placeholder="Tell Nick what worked, what broke, or what you wish the CFO did..."
+                  value={feedbackMessage}
+                  onChange={(e) => setFeedbackMessage(e.target.value)}
+                  className="min-h-[80px] text-xs bg-white/60"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSendingFeedback || !feedbackMessage.trim()}
+                  className="rounded-xl font-black uppercase tracking-wider text-xs gap-2"
+                >
+                  {isSendingFeedback ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  Send Note to Nick
+                </Button>
+              </form>
             </CardContent>
           </Card>
 

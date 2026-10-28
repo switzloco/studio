@@ -4,6 +4,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
+import { checkRateLimit } from '@/lib/rate-limit';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 const AssessmentSchema = z.object({
@@ -17,7 +18,7 @@ export type WelcomeAssessmentResult =
   | { success: false; error: string };
 
 interface MealSummary {
-  /** When provided, the generated greeting is cached on the share for future views. */
+  /** Required: cached on the share document so each shared meal only generates once. */
   shareId?: string;
   title: string;
   createdByName?: string;
@@ -26,21 +27,43 @@ interface MealSummary {
 }
 
 /**
- * The "welcome CFO" greeting on a shared-meal landing page. Gives a friend who
- * just opened the link a playful, honest read on the meal's macros — without
- * fitness-bro intensity — and a soft invite to try the app. Deliberately
- * low-pressure: no sign-up wall, no jargon, no scolding.
+ * The "welcome CFO" greeting on a shared-meal landing page.
+ * Guarded against unauthenticated bot abuse:
+ *   1. Checks Firestore for an existing cached `cfoAssessment` first (0 LLM cost on repeat views).
+ *   2. Applies rate limiting per shareId/public bucket.
+ *   3. Uses `gemini-2.5-flash-lite` (72% lower token cost).
  */
 export async function assessSharedMeal(meal: MealSummary): Promise<WelcomeAssessmentResult> {
   try {
+    const db = getAdminFirestore();
+
+    if (meal.shareId) {
+      const existingShare = await healthService.getSharedMeal(db, meal.shareId);
+      if (!existingShare || existingShare.revoked) {
+        return { success: false, error: 'Shared meal not found.' };
+      }
+      if (existingShare.cfoAssessment) {
+        return { success: true, assessment: existingShare.cfoAssessment };
+      }
+    }
+
+    const limit = await checkRateLimit(`share_welcome_${meal.shareId || 'anon'}`, 'chat');
+    if (!limit.ok) {
+      return { success: false, error: 'Rate limit reached.' };
+    }
+
     const { totals, items, title, createdByName } = meal;
-    const itemList = items.map(i => `${i.name} (${Math.round(i.calories)} cal, ${Math.round(i.proteinG)}g protein)`).join(', ');
+    const itemList = (items || [])
+      .slice(0, 15)
+      .map(i => `${String(i.name).slice(0, 80)} (${Math.round(i.calories)} cal, ${Math.round(i.proteinG)}g protein)`)
+      .join(', ');
 
     const { output } = await ai.generate({
+      model: 'googleai/gemini-2.5-flash-lite',
       output: { schema: AssessmentSchema },
-      prompt: `You are "the CFO" — a warm, witty health coach who talks about food like a financial portfolio (protein = assets, calories = budget, fiber/plants = long-term holdings). ${createdByName ? `${createdByName} just shared this meal` : 'Someone just shared this meal'} with a friend, who has NEVER used the app and just opened the link. You are greeting that friend.
+      prompt: `You are "the CFO" — a warm, witty health coach who talks about food like a financial portfolio (protein = assets, calories = budget, fiber/plants = long-term holdings). ${createdByName ? `${String(createdByName).slice(0, 50)} just shared this meal` : 'Someone just shared this meal'} with a friend, who has NEVER used the app and just opened the link. You are greeting that friend.
 
-Meal: "${title}"
+Meal: "${String(title).slice(0, 100)}"
 Items: ${itemList || 'n/a'}
 Totals: ${Math.round(totals.calories)} cal, ${Math.round(totals.proteinG)}g protein, ${Math.round(totals.carbsG)}g carbs, ${Math.round(totals.fatG)}g fat, ${Math.round(totals.fiberG)}g fiber
 
@@ -56,10 +79,8 @@ Return only the greeting text.`,
     if (!output?.assessment) return { success: false, error: 'No response from AI.' };
 
     const assessment = output.assessment.trim();
-    // Cache on the share so subsequent visitors get it instantly and free —
-    // the meal snapshot is immutable, so the greeting never needs to change.
     if (meal.shareId) {
-      await healthService.saveShareAssessment(getAdminFirestore(), meal.shareId, assessment);
+      await healthService.saveShareAssessment(db, meal.shareId, assessment);
     }
 
     return { success: true, assessment };

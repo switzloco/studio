@@ -1,21 +1,31 @@
 /**
- * @fileOverview Entitlement & Founder-Exempt Paywall Definitions.
+ * @fileOverview Entitlement, Credit Pack & Founder-Exempt Paywall Definitions.
  *
- * Philosophy (Seth Godin "Generous First"):
+ * Philosophy (Seth Godin "Generous First" + Strict Unit-Economics Protection):
  *   1. The deterministic Daily Cockpit (VF v3.2 Taylor–Joule scoring, Alpert Eat Runway,
  *      Zero-AI 3-Day Nutritionist, 1-Tap Ticker Quick Log, Level Sprint Tracker, Wearable Sync,
  *      and CSV/JSON Ledger Export) is 100% FREE FOREVER for everyone.
- *   2. Active AI Coaching (multimodal photo audits, USDA tool-calling agent, voice transcription,
- *      and Ledger Analyst) includes a generous 15 Free AI Audits ("Opening Audit") so every
- *      new user and Apple App Store reviewer gets real value before ever seeing a paywall.
- *   3. Founder & VIP Immunity: Nick Switzer (`nicholas.switzer@gmail.com`) and allowlisted
- *      founders/partners NEVER hit the paywall.
+ *   2. Active AI Coaching:
+ *      - Anonymous guests get 5 complimentary AI preview turns before free sign-in (prevents
+ *        incognito tab farming).
+ *      - Signed-in free users get 15 complimentary AI Audits ("Opening Audit").
+ *      - Friends & Family Shareable Credit Codes (e.g. FRIENDS25, FAMILY, BALLERS) grant a
+ *        one-time +25 Bonus AI Audits (40 total, max ~$0.11 LLM cost) — once exhausted, users
+ *        convert via Stripe Checkout ($12.99/mo or $79.99/yr).
+ *   3. Founder Immunity: Nick Switzer (`nicholas.switzer@gmail.com`) and private master code
+ *      `SWITZER` NEVER hit the paywall.
  */
 
 export type EntitlementTier = 'founder' | 'vip' | 'pro' | 'free';
 
-/** Generous free AI turn allowance before the AI Coach / Analyst paywall appears. */
+/** Generous free AI turn allowance for signed-in users before the AI Coach paywall appears. */
 export const FREE_AI_AUDITS_LIMIT = 15;
+
+/** Cap for unsigned-in anonymous guests to prevent incognito token farming. */
+export const ANONYMOUS_FREE_AI_AUDITS_LIMIT = 5;
+
+/** One-time bonus AI audits granted when redeeming a Friends & Family credit code/link. */
+export const FRIENDS_BONUS_AI_AUDITS = 25;
 
 /** Pricing constants for the Executive Retainer. */
 export const CFO_PRICING = {
@@ -50,7 +60,6 @@ export function isFounderIdentity(user?: {
   const email = user.email?.trim().toLowerCase();
   if (email && FOUNDER_EMAILS.has(email)) return true;
 
-  // Also check NEXT_PUBLIC_CFO_FOUNDER_UIDS if configured
   const envUids = (process.env.NEXT_PUBLIC_CFO_FOUNDER_UIDS || '')
     .split(',')
     .map((s) => s.trim())
@@ -68,6 +77,9 @@ export interface EntitlementStatus {
   isExempt: boolean;
   aiAuditsUsed: number;
   freeLimit: number;
+  bonusAudits?: number;
+  redeemedGiftCode?: string;
+  requiresSignIn?: boolean;
   remainingFreeAudits: number | null; // null when unlimited (founder / vip / pro)
 }
 
@@ -75,11 +87,13 @@ export interface EntitlementStatus {
  * Computes client-side entitlement status from user identity + Firestore HealthData.
  */
 export function resolveClientEntitlement(
-  user?: { uid?: string | null; email?: string | null; displayName?: string | null } | null,
+  user?: { uid?: string | null; email?: string | null; displayName?: string | null; isAnonymous?: boolean } | null,
   healthData?: {
     entitlementTier?: EntitlementTier;
     aiAuditsUsed?: number;
+    bonusAiAudits?: number;
     redeemedFounderCode?: string;
+    redeemedGiftCode?: string;
   } | null,
 ): EntitlementStatus {
   if (isFounderIdentity(user) || healthData?.entitlementTier === 'founder') {
@@ -115,17 +129,25 @@ export function resolveClientEntitlement(
     };
   }
 
+  const bonus = Math.max(0, Number(healthData?.bonusAiAudits ?? 0));
+  const isAnonWithoutGift = Boolean(user?.isAnonymous && !user?.email && bonus === 0);
+  const baseLimit = isAnonWithoutGift ? ANONYMOUS_FREE_AI_AUDITS_LIMIT : FREE_AI_AUDITS_LIMIT;
+  const effectiveLimit = baseLimit + bonus;
+
   const used = Math.max(0, healthData?.aiAuditsUsed ?? 0);
-  const remaining = Math.max(0, FREE_AI_AUDITS_LIMIT - used);
-  const allowed = used < FREE_AI_AUDITS_LIMIT;
+  const remaining = Math.max(0, effectiveLimit - used);
+  const allowed = used < effectiveLimit;
   return {
     allowed,
     canUseAiCoach: allowed,
     tier: 'free',
-    badgeLabel: 'Open Terminal',
+    badgeLabel: bonus > 0 ? `Partner Credit Pack (${remaining} left)` : 'Open Terminal',
     isExempt: false,
     aiAuditsUsed: used,
-    freeLimit: FREE_AI_AUDITS_LIMIT,
+    freeLimit: effectiveLimit,
+    bonusAudits: bonus,
+    redeemedGiftCode: healthData?.redeemedGiftCode,
+    requiresSignIn: !allowed && isAnonWithoutGift,
     remainingFreeAudits: remaining,
   };
 }

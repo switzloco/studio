@@ -153,6 +153,8 @@ export interface HealthData {
   entitlementTier?: 'founder' | 'vip' | 'pro' | 'free';
   aiAuditsUsed?: number;
   redeemedFounderCode?: string;
+  bonusAiAudits?: number;
+  redeemedGiftCode?: string;
   subscriptionPlan?: 'monthly' | 'annual' | 'lifetime' | 'founding_partner';
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;

@@ -16,7 +16,9 @@ export async function POST(req: Request) {
     if (!entitlement.allowed) {
       return NextResponse.json(
         {
-          error: `You've used all ${entitlement.freeLimit} complimentary AI audits. Retain the AI CFO to unlock unlimited Ledger Analyst queries, or export your full CSV/JSON ledger free forever.`,
+          error: entitlement.requiresSignIn
+            ? 'Guest preview complete (5 free turns). Sign in free with Google or Email to unlock your full 15-audit starter pack or redeem a Friends & Family credit pass.'
+            : `You've used all ${entitlement.freeLimit} complimentary AI audits. Retain the AI CFO to unlock unlimited Ledger Analyst queries, or export your full CSV/JSON ledger free forever.`,
           code: 'PAYWALL_LIMIT_REACHED',
           entitlement,
         },
@@ -57,21 +59,35 @@ export async function POST(req: Request) {
       chatHistory: Array.isArray(chatHistory) ? chatHistory.slice(-10) : chatHistory,
     };
 
-    const { stream } = await ledgerAnalystPrompt.stream(input, { maxTurns: 8 });
-
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
         let hasOutput = false;
         try {
+          const { stream } = await ledgerAnalystPrompt.stream(input, { maxTurns: 8 });
           for await (const chunk of stream) {
             if (chunk.text) {
               hasOutput = true;
               controller.enqueue(encoder.encode(chunk.text));
             }
           }
-        } catch (err) {
-          controller.error(err);
+        } catch (streamErr: any) {
+          console.warn('[LedgerChatRoute] SSE stream failed, falling back to non-streaming:', streamErr?.message ?? String(streamErr));
+          if (!hasOutput) {
+            try {
+              const fallback = await ledgerAnalystPrompt(input, { maxTurns: 8 });
+              if (fallback?.text) {
+                hasOutput = true;
+                controller.enqueue(encoder.encode(fallback.text));
+              }
+            } catch (fbErr: any) {
+              controller.enqueue(
+                encoder.encode(
+                  `⚠️ **Ledger Analyst Interruption**\n\nCould not complete query: \`${fbErr?.message ?? streamErr?.message ?? 'Unknown error'}\`. Please try again.`
+                )
+              );
+            }
+          }
         } finally {
           controller.close();
           if (hasOutput) {
