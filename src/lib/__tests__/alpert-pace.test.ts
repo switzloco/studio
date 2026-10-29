@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeAlpertPace, computeEatRunway, slotToTimeLabel } from '../alpert-pace';
 import { runMetabolicSimulation } from '../metabolic-engine';
+import { computeCarnosineSaturation } from '../food-exercise-types';
 
 const ALPERT = 1590;
 
@@ -272,5 +273,29 @@ describe('computeEatRunway', () => {
     expect(afterPsmfPulse.nutritionistRx.usableNonFatBufferKcal).toBeGreaterThan(fastedMorning.nutritionistRx.usableNonFatBufferKcal);
     expect(afterPsmfPulse.nutritionistRx.hoursUntilOptimalEat).toBeGreaterThan(fastedMorning.nutritionistRx.hoursUntilOptimalEat + 1);
     expect(afterPsmfPulse.nutritionistRx.recommendation).toBeTruthy();
+  });
+
+  it('tracks Beta-Alanine Carnosine Saturation across 10 days of 4g + today 3g (43g / 179g = 24%)', () => {
+    const entries = [
+      { date: '2026-10-19', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-20', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-21', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-22', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-23', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-24', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-25', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-26', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-27', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-28', name: 'Beta-Alanine (4g)', betaAlanineG: 4 },
+      { date: '2026-10-29', name: 'Beta-Alanine (3g)', betaAlanineG: 3 },
+    ];
+    const sat = computeCarnosineSaturation(entries, '2026-10-29');
+    expect(sat.cumulativeGrams).toBe(43);
+    expect(sat.targetGrams).toBe(179);
+    expect(sat.saturationPct).toBe(24);
+    expect(sat.todayGrams).toBe(3);
+    expect(sat.daysLogged).toBe(11);
+    expect(sat.remainingGrams).toBe(136);
+    expect(sat.daysToSaturationAt4g).toBe(34);
   });
 });

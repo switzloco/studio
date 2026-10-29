@@ -401,7 +401,10 @@ export const healthService = {
 
   async logFood(db: Firestore, userId: string, entry: Omit<FoodLogEntry, 'timestamp'>): Promise<string> {
     const ref = collection(db, 'users', userId, 'food_log');
-    const docRef = await addDoc(ref, { ...entry, timestamp: serverTimestamp() });
+    const clean = Object.fromEntries(
+      Object.entries({ ...entry, timestamp: serverTimestamp() }).filter(([, v]) => v !== undefined)
+    );
+    const docRef = await addDoc(ref, clean);
     return docRef.id;
   },
 

@@ -3,6 +3,7 @@ import { adminHealthService as healthService } from '@/lib/health-service-admin'
 import { computeAlpertNumber } from '@/lib/vf-scoring';
 import { computeAlpertPace } from '@/lib/alpert-pace';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, NUM_SLOTS } from '@/lib/metabolic-engine';
+import { computeCarnosineSaturation, type CarnosineSaturationState } from '@/lib/food-exercise-types';
 
 export interface SlimUserContext {
   today: string;
@@ -23,21 +24,25 @@ export interface SlimUserContext {
   temporaryContext: any;
   alpertPace: any;
   glycogenState: any;
+  carnosineSaturation?: CarnosineSaturationState;
 }
 
 export async function fetchSlimUserContext(firestore: Firestore, userId: string, today: string): Promise<SlimUserContext> {
   const [y, m, d] = today.split('-').map(Number);
   const yesterdayDate = new Date(y, m - 1, d - 1);
   const yesterday = yesterdayDate.toLocaleDateString('en-CA');
+  const sixtyDaysAgoDate = new Date(y, m - 1, d - 60);
+  const sixtyDaysAgo = sixtyDaysAgoDate.toLocaleDateString('en-CA');
 
-  const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts] = await Promise.all([
+  const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts, recent60dFood] = await Promise.all([
     healthService.getUserPreferences(firestore, userId),
     healthService.getHealthSummary(firestore, userId),
-    healthService.queryFoodLog(firestore, userId, today, 10),
+    healthService.queryFoodLog(firestore, userId, today, 20),
     healthService.queryExerciseLog(firestore, userId, today, 10),
-    healthService.queryFoodLog(firestore, userId, yesterday, 10),
+    healthService.queryFoodLog(firestore, userId, yesterday, 20),
     healthService.getFitbitCredentials(firestore, userId),
     healthService.queryFastLogRange(firestore, userId, yesterday, today, 10),
+    healthService.queryLogRangeAll(firestore, userId, 'food_log', sixtyDaysAgo, today, 1000).catch(() => []),
   ]);
 
   const isNewDay = health?.lastActiveDate !== today;
@@ -186,5 +191,9 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
         muscleDeficitG,
       };
     })(),
+    carnosineSaturation: computeCarnosineSaturation(
+      recent60dFood.length > 0 ? recent60dFood : [...recentFood, ...yesterdayFood],
+      today
+    ),
   };
 }

@@ -22,6 +22,8 @@ export interface FoodLogEntry {
   omega3Mg?: number;           // Omega-3 content (EPA/DHA); anti-inflammatory & sensitivity
   caffeineMg?: number;         // caffeine content; boosts fat oxidation rate
   hasElectrolytes?: boolean;   // true if electrolytes were supplemented
+  betaAlanineG?: number;       // Beta-alanine (g) — rate-limiting precursor for intramuscular carnosine saturation (179g target)
+  creatineG?: number;          // Creatine monohydrate (g) — phosphocreatine & cell-volumization saturation
   source: 'usda' | 'web_search' | 'user_estimate';
   meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   alcoholDrinks?: number;      // number of alcoholic drinks in this entry
@@ -134,4 +136,79 @@ export interface UserProfile {
   hasCreatine?: boolean;    // true if supplementing daily (increases glycogen cap)
   lastConversationSummary?: string;
   motivationalWhy?: string; // The user's personal "why" — their deeper reason for pursuing their goals
+}
+
+/**
+ * Clinical cumulative beta-alanine intake (grams) required for full (~60-80% increase)
+ * intramuscular carnosine saturation (Harris et al. / Stellingwerff et al. meta-analysis).
+ */
+export const CARNOSINE_SATURATION_TARGET_G = 179;
+
+export interface CarnosineSaturationState {
+  cumulativeGrams: number;
+  targetGrams: number;
+  saturationPct: number;
+  todayGrams: number;
+  daysLogged: number;
+  remainingGrams: number;
+  daysToSaturationAt4g: number;
+}
+
+/**
+ * Extracts grams of beta-alanine from a FoodLogEntry, checking both the explicit
+ * `betaAlanineG` field and any "Beta-Alanine (4g)" / "4g beta alanine" pattern in `name`.
+ */
+export function extractBetaAlanineG(entry: Partial<FoodLogEntry> | Record<string, any>): number {
+  if (entry.ignored) return 0;
+  if (typeof entry.betaAlanineG === 'number' && entry.betaAlanineG > 0) {
+    return entry.betaAlanineG;
+  }
+  const name = String(entry.name || '').toLowerCase();
+  if (!name.includes('beta alanine') && !name.includes('beta-alanine')) return 0;
+  const match = name.match(/(\d+(?:\.\d+)?)\s*g\b/);
+  if (match) return Number(match[1]) || 0;
+  if (typeof entry.portionG === 'number' && entry.portionG > 0 && entry.portionG <= 15) {
+    return entry.portionG;
+  }
+  return 3.2; // standard clinical single dose fallback
+}
+
+/**
+ * Computes intramuscular carnosine saturation progress from a list of food log entries.
+ */
+export function computeCarnosineSaturation(
+  entries: Array<Partial<FoodLogEntry> | Record<string, any>>,
+  todayStr: string
+): CarnosineSaturationState {
+  let cumulativeGrams = 0;
+  let todayGrams = 0;
+  const distinctDates = new Set<string>();
+
+  for (const e of entries) {
+    const g = extractBetaAlanineG(e);
+    if (g > 0) {
+      cumulativeGrams += g;
+      if (e.date) distinctDates.add(String(e.date));
+      if (e.date === todayStr) todayGrams += g;
+    }
+  }
+
+  const roundedCum = Math.round(cumulativeGrams * 10) / 10;
+  const roundedToday = Math.round(todayGrams * 10) / 10;
+  const saturationPct = Math.min(
+    100,
+    Math.round((roundedCum / CARNOSINE_SATURATION_TARGET_G) * 1000) / 10
+  );
+  const remainingGrams = Math.max(0, Math.round((CARNOSINE_SATURATION_TARGET_G - roundedCum) * 10) / 10);
+  const daysToSaturationAt4g = Math.max(0, Math.ceil(remainingGrams / 4));
+
+  return {
+    cumulativeGrams: roundedCum,
+    targetGrams: CARNOSINE_SATURATION_TARGET_G,
+    saturationPct,
+    todayGrams: roundedToday,
+    daysLogged: distinctDates.size,
+    remainingGrams,
+    daysToSaturationAt4g,
+  };
 }

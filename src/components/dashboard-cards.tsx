@@ -58,7 +58,12 @@ import { useToast } from '@/hooks/use-toast';
 import { doc, collection, query, where, limit, orderBy, Timestamp } from 'firebase/firestore';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { FoodLogEntry, ExerciseLogEntry } from '@/lib/food-exercise-types';
+import {
+  computeCarnosineSaturation,
+  extractBetaAlanineG,
+  type FoodLogEntry,
+  type ExerciseLogEntry,
+} from '@/lib/food-exercise-types';
 
 function formatTimeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -227,16 +232,102 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
 
-  // Recent 60 food logs across all days so we can sort saved Tickers by most recently logged
+  // Recent 250 food logs across all days so we can sort saved Tickers by recency AND track 60d Carnosine Saturation
   const recentFoodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
       orderBy('timestamp', 'desc'),
-      limit(60)
+      limit(250)
     ) : null,
     [db, user]
   );
   const { data: recentFoodLogs } = useCollection<FoodLogEntry>(recentFoodLogQuery);
+
+  const carnosineSaturation = React.useMemo(
+    () => computeCarnosineSaturation(recentFoodLogs ?? [], selectedDateStr),
+    [recentFoodLogs, selectedDateStr]
+  );
+
+  // One-time idempotent backfill for Nick's Beta-Alanine Carnosine Saturation protocol:
+  // 4g/day for the 10 days 2026-10-19 .. 2026-10-28 + 3g on 2026-10-29 (= 43g / 24.0% saturation)
+  const hasBackfilledBetaAlanineRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!user || !recentFoodLogs || hasBackfilledBetaAlanineRef.current) return;
+    const storageKey = `vf_beta_alanine_backfill_oct29_v1_${user.uid}`;
+    try {
+      if (window.localStorage.getItem(storageKey) === 'done') {
+        hasBackfilledBetaAlanineRef.current = true;
+        return;
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const schedule: Array<{ date: string; grams: number }> = [
+      { date: '2026-10-19', grams: 4 },
+      { date: '2026-10-20', grams: 4 },
+      { date: '2026-10-21', grams: 4 },
+      { date: '2026-10-22', grams: 4 },
+      { date: '2026-10-23', grams: 4 },
+      { date: '2026-10-24', grams: 4 },
+      { date: '2026-10-25', grams: 4 },
+      { date: '2026-10-26', grams: 4 },
+      { date: '2026-10-27', grams: 4 },
+      { date: '2026-10-28', grams: 4 },
+      { date: '2026-10-29', grams: 3 },
+    ];
+
+    const existingDatesWithBA = new Set<string>();
+    for (const entry of recentFoodLogs) {
+      if (extractBetaAlanineG(entry) > 0 && entry.date) {
+        existingDatesWithBA.add(entry.date);
+      }
+    }
+
+    const missing = schedule.filter((s) => !existingDatesWithBA.has(s.date));
+    hasBackfilledBetaAlanineRef.current = true;
+    if (missing.length === 0) {
+      try {
+        window.localStorage.setItem(storageKey, 'done');
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    (async () => {
+      try {
+        for (const item of missing) {
+          await healthService.logFood(db, user.uid, {
+            date: item.date,
+            meal: 'breakfast',
+            name: `Beta-Alanine (${item.grams}g)`,
+            portionG: item.grams,
+            calories: 0,
+            proteinG: 0,
+            carbsG: 0,
+            fatG: 0,
+            fiberG: 0,
+            betaAlanineG: item.grams,
+            source: 'user_estimate',
+            consumedAt: '09:00',
+          });
+        }
+        try {
+          window.localStorage.setItem(storageKey, 'done');
+        } catch {
+          // ignore
+        }
+        toast({
+          title: 'Beta-Alanine Backfill Logged (43g Total)',
+          description: `Added ${missing.length} day(s) of Beta-Alanine (4g × 10d + 3g Today) → 24.0% Carnosine Saturation (43g / 179g).`,
+        });
+      } catch (err) {
+        console.error('[BetaAlanineBackfill] Failed:', err);
+        hasBackfilledBetaAlanineRef.current = false;
+      }
+    })();
+  }, [user, db, recentFoodLogs, toast]);
 
   const exerciseLogQuery = useMemoFirebase(
     () => user ? query(
@@ -733,6 +824,41 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     }
   };
 
+  // Zero-AI 1-Tap Beta-Alanine (Carnosine Saturation) Dose Logger
+  const handleQuickLogBetaAlanine = async (grams: number) => {
+    if (!user || isLoggingQuick) return;
+    setIsLoggingQuick(true);
+    try {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      await healthService.logFood(db, user.uid, {
+        date: selectedDateStr,
+        meal: 'breakfast',
+        name: `Beta-Alanine (${grams}g)`,
+        portionG: grams,
+        calories: 0,
+        proteinG: 0,
+        carbsG: 0,
+        fatG: 0,
+        fiberG: 0,
+        betaAlanineG: grams,
+        source: 'user_estimate',
+        consumedAt: hhmm,
+      });
+      const newCum = Math.round((carnosineSaturation.cumulativeGrams + grams) * 10) / 10;
+      const newPct = Math.min(100, Math.round((newCum / carnosineSaturation.targetGrams) * 1000) / 10);
+      toast({
+        title: `Logged +${grams}g Beta-Alanine (Zero AI)`,
+        description: `Carnosine saturation: ${newCum}g / ${carnosineSaturation.targetGrams}g (${newPct}%).`,
+      });
+    } catch (err) {
+      console.error('[handleQuickLogBetaAlanine] Failed:', err);
+      toast({ variant: 'destructive', title: 'Supplement Log Failed', description: 'Could not save Beta-Alanine entry.' });
+    } finally {
+      setIsLoggingQuick(false);
+    }
+  };
+
   const handleQuickCustomFoodSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || isLoggingQuick) return;
@@ -741,7 +867,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     const carbs = Math.max(0, Number(quickCarbs) || 0);
     const fat = Math.max(0, Number(quickFat) || 0);
     const name = quickItemName.trim() || 'Quick Entry';
-    if (kcal === 0 && prot === 0) return;
+    if (kcal === 0 && prot === 0 && !quickItemName.trim()) return;
 
     setIsLoggingQuick(true);
     try {
@@ -1536,6 +1662,49 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </div>
           </div>
 
+          {/* Carnosine Saturation (Beta-Alanine) Tracker & 1-Tap Zero-AI Dose Bar */}
+          <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-xl p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider">
+                  Carnosine Saturation
+                </span>
+                <span className="text-xs sm:text-sm font-black text-indigo-950">
+                  {carnosineSaturation.cumulativeGrams}g / {carnosineSaturation.targetGrams}g Beta-Alanine ({carnosineSaturation.saturationPct}%)
+                </span>
+                <span className="text-xs font-bold text-indigo-800/80">
+                  · {carnosineSaturation.daysLogged}d logged
+                  {carnosineSaturation.todayGrams > 0 ? ` · ${carnosineSaturation.todayGrams}g on ${isViewingToday ? 'Today' : selectedDateStr} ✓` : ''}
+                  {carnosineSaturation.daysToSaturationAt4g > 0
+                    ? ` · ~${carnosineSaturation.daysToSaturationAt4g}d at 4g/d to 100%`
+                    : ' · Saturated ✓'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={isLoggingQuick}
+                  onClick={() => handleQuickLogBetaAlanine(3)}
+                  className="h-7 px-2.5 text-xs font-black border-indigo-300 text-indigo-800 hover:bg-indigo-100"
+                >
+                  +3g BA
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isLoggingQuick}
+                  onClick={() => handleQuickLogBetaAlanine(4)}
+                  className="h-7 px-2.5 text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  +4g BA
+                </Button>
+              </div>
+            </div>
+            <Progress value={carnosineSaturation.saturationPct} className="h-2 bg-indigo-100" />
+          </div>
+
           {/* Logged Today Strip — allows 1-tap removal of accidental entries like Atlantic Acquisition */}
           {activeTodayFoodLogs.length > 0 && (
             <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
@@ -1550,6 +1719,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               <div className="flex flex-wrap items-center gap-2">
                 {activeTodayFoodLogs.map((entry) => {
                   const isRemoving = removingFoodId === entry.id;
+                  const baGrams = extractBetaAlanineG(entry);
                   return (
                     <div
                       key={entry.id}
@@ -1559,7 +1729,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                         {entry.name}
                       </span>
                       <span className="text-slate-500 font-semibold whitespace-nowrap">
-                        {entry.calories} kcal · {entry.proteinG}g P
+                        {baGrams > 0 && entry.calories === 0
+                          ? `${baGrams}g Beta-Alanine · 0 kcal`
+                          : `${entry.calories} kcal · ${entry.proteinG}g P`}
                       </span>
                       <button
                         type="button"

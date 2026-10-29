@@ -129,23 +129,29 @@ const updatePreferencesTool = ai.defineTool(
 const logFoodTool = ai.defineTool(
   {
     name: 'log_food',
-    description: 'Logs a food entry with macro breakdown. For a multi-food meal, sum all macros and log once (e.g. "Breakfast: eggs + sourdough + egg whites") rather than one call per ingredient.',
+    description: 'Logs a food OR ergogenic supplement entry (e.g. Beta-Alanine, Creatine, Electrolytes, Omega-3, Caffeine) with macro breakdown. For a multi-food meal, sum all macros and log once. For multi-day backfills (e.g. "add 4g beta-alanine to the last 10 days"), pass the primary date in localDate and the rest of the YYYY-MM-DD dates in additionalDates to log all days in a single call.',
     inputSchema: z.object({
       userId: z.string(),
-      name: z.string().describe('Food name, e.g. "Chicken breast, grilled"'),
-      portionG: z.number().describe('Portion size in grams'),
-      calories: z.number(),
-      proteinG: z.number(),
+      name: z.string().describe('Food or supplement name, e.g. "Chicken breast, grilled" or "Beta-Alanine (4g)"'),
+      portionG: z.number().describe('Portion size in grams (for supplements, use the gram dose, e.g. 4 for 4g beta-alanine)'),
+      calories: z.number().describe('Calories (use 0 for non-caloric supplements like beta-alanine, creatine, electrolytes, black coffee)'),
+      proteinG: z.number().describe('Protein in grams (use 0 for pure beta-alanine/creatine)'),
       carbsG: z.number(),
       fatG: z.number(),
       fiberG: z.number().optional(),
       plantMassG: z.number().optional().describe('Raw weight in grams of fruits and vegetables only (Starrett 800g protocol). Apple = full portion. Mixed salad = ~80% of portion. Grain/meat/dairy dish = 0. Omit if not applicable.'),
+      betaAlanineG: z.number().optional().describe('Grams of beta-alanine supplemented in this entry (for intramuscular carnosine saturation tracking toward the 179g clinical benchmark).'),
+      creatineG: z.number().optional().describe('Grams of creatine monohydrate supplemented in this entry.'),
+      caffeineMg: z.number().optional().describe('Caffeine in mg (boosts fat oxidation rate).'),
+      omega3Mg: z.number().optional().describe('Omega-3 EPA/DHA in mg.'),
+      hasElectrolytes: z.boolean().optional().describe('True if electrolytes were supplemented.'),
       source: z.enum(['usda', 'web_search', 'user_estimate']),
       meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
       alcoholDrinks: z.number().optional().describe('Number of alcoholic drinks in this meal (beer, wine, cocktail = 1 each). Default 0.'),
       hasSeedOils: z.boolean().optional().describe('True if the meal is heavily processed or deep-fried in industrial seed oils (soybean, canola, sunflower). Default false.'),
-      consumedAt: z.string().optional().describe('HH:MM (24h) — when the user actually ate this. Infer from context (e.g. "I had lunch at noon" -> "12:00"). If unknown, use the current localTime.'),
-      localDate: z.string(),
+      consumedAt: z.string().optional().describe('HH:MM (24h) — when the user actually ate/took this. Infer from context (e.g. "I had lunch at noon" -> "12:00"). If unknown, use the current localTime.'),
+      localDate: z.string().describe('Primary YYYY-MM-DD date to log this entry to.'),
+      additionalDates: z.array(z.string()).optional().describe('Optional additional YYYY-MM-DD dates to log this exact same entry to in a single batch (use when the client says "log X to the last 10 days" or "add X to Monday through Friday").'),
     }),
     outputSchema: z.string(),
   },
@@ -157,53 +163,76 @@ const logFoodTool = ai.defineTool(
     if (!validated.success) throw new Error(validated.error.errors[0].message);
 
     const firestore = getAdminFirestore();
+    const allDates = Array.from(new Set([input.localDate, ...(input.additionalDates ?? [])])).filter(Boolean);
 
-    // Write to structured food_log — use the client's localDate, NOT server UTC
-    const newFoodId = await healthService.logFood(firestore, input.userId, {
-      name: input.name,
-      portionG: input.portionG,
-      calories: input.calories,
-      proteinG: input.proteinG,
-      carbsG: input.carbsG,
-      fatG: input.fatG,
-      fiberG: input.fiberG ?? 0,
-      plantMassG: input.plantMassG,
-      source: input.source,
-      meal: input.meal,
-      alcoholDrinks: input.alcoholDrinks ?? 0,
-      hasSeedOils: input.hasSeedOils ?? false,
-      consumedAt: input.consumedAt,
-      date: input.localDate,
-    });
+    let lastFoodId = '';
+    for (const targetDate of allDates) {
+      lastFoodId = await healthService.logFood(firestore, input.userId, {
+        name: input.name,
+        portionG: input.portionG,
+        calories: input.calories,
+        proteinG: input.proteinG,
+        carbsG: input.carbsG,
+        fatG: input.fatG,
+        fiberG: input.fiberG ?? 0,
+        plantMassG: input.plantMassG,
+        betaAlanineG: input.betaAlanineG,
+        creatineG: input.creatineG,
+        caffeineMg: input.caffeineMg,
+        omega3Mg: input.omega3Mg,
+        hasElectrolytes: input.hasElectrolytes,
+        source: input.source,
+        meal: input.meal,
+        alcoholDrinks: input.alcoholDrinks ?? 0,
+        hasSeedOils: input.hasSeedOils ?? false,
+        consumedAt: input.consumedAt,
+        date: targetDate,
+      });
+    }
+
+    if (input.creatineG && input.creatineG > 0) {
+      const existing = await healthService.getUserPreferences(firestore, input.userId);
+      if (!existing?.profile?.hasCreatine) {
+        await healthService.updateUserPreferences(firestore, input.userId, {
+          profile: { ...(existing?.profile ?? {}), hasCreatine: true },
+        });
+      }
+    }
 
     // Remember this entry for a possible share offer at the end of the turn.
-    recordLoggedFood(newFoodId, input.name);
+    if (lastFoodId && input.calories > 0) {
+      recordLoggedFood(lastFoodId, input.name);
+    }
 
-    // Recalculate daily totals from ALL non-ignored food entries for today
-    // (avoids counter drift from edits, ignores, timezone mismatches, etc.)
+    // Recalculate daily totals from ALL non-ignored food entries for primary localDate
     const allTodayFood = await healthService.queryFoodLog(firestore, input.userId, input.localDate, 50);
     const newProteinTotal = allTodayFood.reduce((s, e) => s + (e.proteinG || 0), 0);
     const newCarbsTotal = allTodayFood.reduce((s, e) => s + (e.carbsG || 0), 0);
     const newCaloriesTotal = allTodayFood.reduce((s, e) => s + (e.calories || 0), 0);
     const newPlantTotal = allTodayFood.reduce((s, e) => s + (e.plantMassG || 0), 0);
 
-    await healthService.updateHealthData(firestore, input.userId, {
-      dailyProteinG: newProteinTotal,
-      dailyCarbsG: newCarbsTotal,
-      dailyCaloriesIn: newCaloriesTotal,
-      dailyPlantG: newPlantTotal,
-      lastActiveDate: input.localDate,
-    });
+    // Only overwrite main health doc daily counters if primary localDate is the user's active/latest date
+    const currentHealth = await healthService.getHealthSummary(firestore, input.userId);
+    if (!currentHealth?.lastActiveDate || input.localDate >= currentHealth.lastActiveDate) {
+      await healthService.updateHealthData(firestore, input.userId, {
+        dailyProteinG: newProteinTotal,
+        dailyCarbsG: newCarbsTotal,
+        dailyCaloriesIn: newCaloriesTotal,
+        dailyPlantG: newPlantTotal,
+        lastActiveDate: input.localDate,
+      });
+    }
 
     // Also write to legacy logs for backward compat
     await healthService.logActivity(firestore, input.userId, {
       category: 'food',
-      content: `${input.name} (${input.portionG}g) — ${input.calories} cal, ${input.proteinG}g protein`,
-      metrics: [`protein_g:${input.proteinG}`, `calories:${input.calories}`, `daily_total:${newProteinTotal}`],
+      content: `${input.name} (${input.portionG}g)${allDates.length > 1 ? ` across ${allDates.length} days` : ''} — ${input.calories} cal, ${input.proteinG}g protein`,
+      metrics: [`protein_g:${input.proteinG}`, `calories:${input.calories}`, `daily_total:${newProteinTotal}`, ...(input.betaAlanineG ? [`beta_alanine_g:${input.betaAlanineG}`] : [])],
       verified: false,
     });
 
-    return `Logged: ${input.name}. Today's running totals (recalculated from all entries) -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}. Use ONLY these numbers when reporting the daily total to the client.`;
+    const datesNote = allDates.length > 1 ? ` across ${allDates.length} dates (${allDates[0]} .. ${allDates[allDates.length - 1]})` : ` on ${input.localDate}`;
+    return `Logged: ${input.name}${datesNote}. ${input.localDate} running totals (recalculated from all entries) -> Protein: ${newProteinTotal}g, Carbs: ${newCarbsTotal}g, Calories: ${newCaloriesTotal}. Use ONLY these numbers when reporting the daily total to the client.`;
   }
 );
 
@@ -858,12 +887,21 @@ RESEARCH PROTOCOL:
 - Do not mention you are searching or looking things up. Deliver results as confident CFO statements.
 - When calling get_recent_logs, always pass localDate from session context so dates are correct for the client's timezone.
 
-DATE RESOLUTION:
-- The user may log food or exercise for a DIFFERENT date than today. Examples: "yesterday's lunch", "log Tuesday's dinner", "I ate this on March 8".
-- When the user specifies a date (relative or absolute), resolve it to the correct YYYY-MM-DD and pass THAT as localDate to log_food or log_exercise — NOT today's date.
-- Resolution rules: "yesterday" = subtract 1 day from {{localDate}}. Day names like "Tuesday" = the most recent past occurrence of that day (never future). Explicit dates like "March 8" = use the year from {{localDate}}.
+DATE RESOLUTION & MULTI-DAY BACKFILLS:
+- The user may log food, supplements, or exercise for a DIFFERENT date than today, or across MULTIPLE past days at once (e.g. "add 4g beta-alanine to the last 10 days, and 3g to today").
+- When the user specifies a single past date, resolve it to YYYY-MM-DD and pass THAT as localDate to log_food or log_exercise.
+- When the user asks to log the same food or supplement across multiple days (e.g. "last 10 days"), pass the first date as localDate and the remaining YYYY-MM-DD dates in additionalDates on log_food so all days are written in a single tool call!
+- Resolution rules: "yesterday" = subtract 1 day from {{localDate}}. "last 10 days" (excluding today) = subtract 1 through 10 days from {{localDate}}. Day names like "Tuesday" = the most recent past occurrence of that day (never future). Explicit dates like "March 8" = use the year from {{localDate}}.
 - If ambiguous, confirm: "That was Tuesday the 10th, right?"
-- When logging for a past date, daily running totals returned by the tool will reflect THAT date, not today. Make this clear to the user: "Logged to Tuesday (Mar 10). Tuesday's totals: 170g protein, 1855 cal."
+- When logging for a past date, daily running totals returned by the tool will reflect THAT date, not today. Make this clear to the user.
+
+SUPPLEMENT & ERGOGENIC ASSET PROTOCOL (Beta-Alanine / Carnosine Saturation, Creatine, Electrolytes, Omega-3, Caffeine):
+- NEVER tell the client that supplements are "outside my audit scope" or that your ledger only tracks macros! You have full accounting instruments to log ergogenic supplements via log_food.
+- For zero-calorie supplements (Beta-Alanine, Creatine, Electrolytes, Black Coffee/Caffeine), call log_food with calories: 0, proteinG: 0, carbsG: 0, fatG: 0, portionG set to the gram dose, and the corresponding supplement field (betaAlanineG, creatineG, caffeineMg, omega3Mg, or hasElectrolytes: true).
+- **Beta-Alanine & Intramuscular Carnosine Saturation (carnosineSaturation in context):**
+  - Beta-alanine is the rate-limiting precursor to intramuscular **carnosine** (beta-alanyl-L-histidine), the primary intracellular H+ (lactic acid) pH buffer during high-intensity Tier 3 anaerobic efforts (60–240s bursts: basketball runs, Ultimate frisbee points, kettlebell complexes).
+  - **Clinical Saturation Benchmark:** **179g cumulative beta-alanine** (~4–6 weeks at 3.2–6.4g/day, Harris et al. / Stellingwerff et al.) elevates muscle carnosine by ~60–80%. After hitting 179g, a maintenance dose of ~1.2–2g/day holds saturation (washout is slow at ~2%/week).
+  - Always check carnosineSaturation in preloaded context (cumulativeGrams, targetGrams: 179, saturationPct, remainingGrams, daysToSaturationAt4g) and report the exact cumulative grams and saturation percentage when the user logs or asks about beta-alanine!
 
 CONSUMPTION TIME:
 - When logging food via log_food, ALWAYS set consumedAt (HH:MM, 24h format). Infer from context: "I had lunch at noon" -> "12:00", "just ate breakfast" -> use the current localTime. If the user says "earlier today" or "this morning", estimate reasonably.
