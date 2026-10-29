@@ -1,31 +1,42 @@
 /**
- * @fileOverview Entitlement, Credit Pack & Founder-Exempt Paywall Definitions.
+ * @fileOverview Entitlement, Smart Profitability Caps & Founder-Exempt Paywall Definitions.
  *
- * Philosophy (Seth Godin "Generous First" + Strict Unit-Economics Protection):
- *   1. The deterministic Daily Cockpit (VF v3.2 Taylor–Joule scoring, Alpert Eat Runway,
- *      Zero-AI 3-Day Nutritionist, 1-Tap Ticker Quick Log, Level Sprint Tracker, Wearable Sync,
- *      and CSV/JSON Ledger Export) is 100% FREE FOREVER for everyone.
- *   2. Active AI Coaching:
- *      - Anonymous guests get 5 complimentary AI preview turns before free sign-in (prevents
- *        incognito tab farming).
- *      - Signed-in free users get 15 complimentary AI Audits ("Opening Audit").
- *      - Friends & Family Shareable Credit Codes (e.g. FRIENDS25, FAMILY, BALLERS) grant a
- *        one-time +25 Bonus AI Audits (40 total, max ~$0.11 LLM cost) — once exhausted, users
- *        convert via Stripe Checkout ($12.99/mo or $79.99/yr).
- *   3. Founder Immunity: Nick Switzer (`nicholas.switzer@gmail.com`) and private master code
- *      `SWITZER` NEVER hit the paywall.
+ * Unit-Economics & Profitability Guarantees:
+ *   1. Zero-AI Cockpit (VF v3.2 Taylor–Joule scoring, Alpert Eat Runway, 3-Day Nutritionist,
+ *      1-Tap Ticker Quick Log, Level Sprint Tracker, Wearable Sync, CSV/JSON Export):
+ *      $0.00 server cost -> 100% FREE FOREVER for everyone.
+ *   2. Customer Acquisition Caps (Free & Gift Tiers):
+ *      - Unsigned-in Anonymous Guest: 3 AI turns max (~$0.009 total cost) before free sign-in.
+ *      - Signed-in Free User: 10 AI turns max (~$0.03 total cost).
+ *      - Friends & Family Credit Pack (`FRIENDS25`): +25 bonus AI turns (35 total). Turns 11-35
+ *        auto-route to `gemini-2.5-flash-lite` (4x cheaper), capping total gift cost at ~$0.05/friend!
+ *   3. Paying Subscriber Profitability Governor (`pro` / `vip`):
+ *      - First 12 AI turns/day (and first 300/month) run on full `gemini-2.5-flash`.
+ *      - Turns 13-30/day (and turns 301-450/month) auto-downshift to `gemini-2.5-flash-lite`.
+ *      - Hard monthly fair-use ceiling of 450 AI turns/30-day cycle caps worst-case LLM cost at
+ *        ~$1.08/month, guaranteeing >=82% net profit margin on Annual ($79.99/yr) and >=91% on Monthly ($12.99/mo).
+ *   4. Founder Immunity: Nick Switzer (`nicholas.switzer@gmail.com`) is exempt from all caps.
  */
 
 export type EntitlementTier = 'founder' | 'vip' | 'pro' | 'free';
 
-/** Generous free AI turn allowance for signed-in users before the AI Coach paywall appears. */
-export const FREE_AI_AUDITS_LIMIT = 15;
+/** Free AI turn allowance for signed-in users before the AI Coach paywall appears (~$0.03 CAC). */
+export const FREE_AI_AUDITS_LIMIT = 10;
 
-/** Cap for unsigned-in anonymous guests to prevent incognito token farming. */
-export const ANONYMOUS_FREE_AI_AUDITS_LIMIT = 5;
+/** Cap for unsigned-in anonymous guests to prevent incognito token farming (~$0.009 max). */
+export const ANONYMOUS_FREE_AI_AUDITS_LIMIT = 3;
 
-/** One-time bonus AI audits granted when redeeming a Friends & Family credit code/link. */
+/** One-time bonus AI audits granted when redeeming a Friends & Family credit code/link (~$0.05 total cost). */
 export const FRIENDS_BONUS_AI_AUDITS = 25;
+
+/** Daily threshold after which turns auto-downshift to gemini-2.5-flash-lite (4x cheaper). */
+export const DAILY_HIGH_SPEED_TURNS = 12;
+
+/** Monthly high-speed turns on gemini-2.5-flash before auto-downshifting to flash-lite. */
+export const PRO_MONTHLY_HIGH_SPEED_TURNS = 300;
+
+/** Hard 30-day fair-use ceiling for Pro/VIP accounts to guarantee >=82% net margin on Annual plans. */
+export const PRO_MONTHLY_AI_AUDITS_CAP = 450;
 
 /** Pricing constants for the Executive Retainer. */
 export const CFO_PRICING = {
@@ -80,6 +91,9 @@ export interface EntitlementStatus {
   bonusAudits?: number;
   redeemedGiftCode?: string;
   requiresSignIn?: boolean;
+  monthlyCapReached?: boolean;
+  /** When set, routes should use this cost-optimized model for the turn to protect margins. */
+  recommendedModel?: 'googleai/gemini-2.5-flash-lite';
   remainingFreeAudits: number | null; // null when unlimited (founder / vip / pro)
 }
 
@@ -94,6 +108,7 @@ export function resolveClientEntitlement(
     bonusAiAudits?: number;
     redeemedFounderCode?: string;
     redeemedGiftCode?: string;
+    monthlyAiAuditsUsed?: number;
   } | null,
 ): EntitlementStatus {
   if (isFounderIdentity(user) || healthData?.entitlementTier === 'founder') {
@@ -117,14 +132,17 @@ export function resolveClientEntitlement(
       : 'free';
 
   if (storedTier === 'vip' || storedTier === 'pro') {
+    const monthlyUsed = Math.max(0, Number(healthData?.monthlyAiAuditsUsed ?? 0));
+    const withinMonthlyCap = monthlyUsed < PRO_MONTHLY_AI_AUDITS_CAP;
     return {
-      allowed: true,
-      canUseAiCoach: true,
+      allowed: withinMonthlyCap,
+      canUseAiCoach: withinMonthlyCap,
       tier: storedTier,
       badgeLabel: storedTier === 'vip' ? 'Founding Partner' : 'Executive Retainer',
       isExempt: true,
       aiAuditsUsed: healthData?.aiAuditsUsed ?? 0,
-      freeLimit: FREE_AI_AUDITS_LIMIT,
+      freeLimit: PRO_MONTHLY_AI_AUDITS_CAP,
+      monthlyCapReached: !withinMonthlyCap,
       remainingFreeAudits: null,
     };
   }

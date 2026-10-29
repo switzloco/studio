@@ -2,12 +2,17 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, type VerifiedAuthToken } from '@/firebase/admin';
 import {
   ANONYMOUS_FREE_AI_AUDITS_LIMIT,
+  DAILY_HIGH_SPEED_TURNS,
   FOUNDER_EMAILS,
   FREE_AI_AUDITS_LIMIT,
   FRIENDS_BONUS_AI_AUDITS,
+  PRO_MONTHLY_AI_AUDITS_CAP,
+  PRO_MONTHLY_HIGH_SPEED_TURNS,
   type EntitlementStatus,
   type EntitlementTier,
 } from './entitlements';
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Additional founder/VIP emails or UIDs configurable via environment variables.
@@ -33,7 +38,7 @@ function isServerFounderIdentity(auth: VerifiedAuthToken): boolean {
 
 /**
  * Master Founder codes (private to Nick / App Store review).
- * Only these codes grant unlimited VIP immunity.
+ * Only these codes grant VIP status.
  */
 export function getValidFounderCodes(): Set<string> {
   const defaults = ['SWITZER', 'NICKVIP'];
@@ -47,8 +52,8 @@ export function getValidFounderCodes(): Set<string> {
 /**
  * Shareable Friends & Family Credit Pack codes (case-insensitive).
  * Each grants a ONE-TIME +25 Bonus AI Audits (`FRIENDS_BONUS_AI_AUDITS`) on top of
- * the 15 starter audits (40 total audits, max ~$0.11 LLM cost), so Nick can tell
- * friends & family to share them freely without risking an uncapped Gemini bill.
+ * the 10 starter audits (35 total audits, with bonus turns routed to gemini-2.5-flash-lite
+ * so total gift cost is capped at ~$0.05/person).
  */
 export function getValidCreditPackCodes(): Set<string> {
   const defaults = [
@@ -76,13 +81,14 @@ export function getValidCreditPackCodes(): Set<string> {
 export { FRIENDS_BONUS_AI_AUDITS };
 
 /**
- * Server-authoritative entitlement check before running paid Gemini AI flows.
+ * Server-authoritative entitlement + profitability governor check before running Gemini AI flows.
  *
- * - Founder (`nicholas.switzer@gmail.com`) is ALWAYS exempt and automatically
- *   stamped with `entitlementTier: 'founder'` in Firestore if not already set.
- * - `vip` and `pro` users are ALWAYS exempt.
- * - `free` users receive `FREE_AI_AUDITS_LIMIT` (15) complimentary AI turns
- *   (or 5 turns while unsigned-in anonymous, plus +25 if they redeemed a Friends & Family credit code).
+ * - Founder (`nicholas.switzer@gmail.com`) is ALWAYS exempt from all caps.
+ * - `pro` and `vip` users get 450 AI turns per rolling 30-day cycle (`PRO_MONTHLY_AI_AUDITS_CAP`).
+ *   Turns 1-300 run on full `gemini-2.5-flash`; turns 301-450 auto-downshift to `gemini-2.5-flash-lite`
+ *   so worst-case monthly cost is <= $1.08 (guaranteeing >=82% net margin on Annual $79.99/yr).
+ * - `free` users get 3 turns while unsigned-in anonymous, 10 turns once signed in, plus +25 bonus
+ *   turns with a Friends & Family credit code (with bonus turns >= 10 routed to `gemini-2.5-flash-lite`).
  */
 export async function checkServerEntitlement(
   auth: VerifiedAuthToken,
@@ -108,7 +114,7 @@ export async function checkServerEntitlement(
     };
   }
 
-  // 2. Read user doc for stored entitlementTier, aiAuditsUsed, and bonusAiAudits
+  // 2. Read user doc for stored entitlementTier, aiAuditsUsed, bonusAiAudits, and monthly cycle usage
   const db = getAdminFirestore();
   const userRef = db.doc(`users/${auth.uid}`);
   const snap = await userRef.get();
@@ -116,6 +122,8 @@ export async function checkServerEntitlement(
     entitlementTier?: EntitlementTier;
     aiAuditsUsed?: number;
     bonusAiAudits?: number;
+    monthlyAiAuditsUsed?: number;
+    monthlyWindowStartMs?: number;
     redeemedFounderCode?: string;
     redeemedGiftCode?: string;
     email?: string;
@@ -144,15 +152,42 @@ export async function checkServerEntitlement(
       : 'free';
   const used = Math.max(0, Number(data.aiAuditsUsed ?? 0));
 
-  if (tier === 'founder' || tier === 'vip' || tier === 'pro') {
+  if (tier === 'founder') {
     return {
       allowed: true,
       canUseAiCoach: true,
-      tier,
-      badgeLabel: tier === 'founder' ? 'Founder Immunity' : tier === 'vip' ? 'Founding Partner' : 'Executive Retainer',
+      tier: 'founder',
+      badgeLabel: 'Founder Immunity',
       isExempt: true,
       aiAuditsUsed: used,
       freeLimit: FREE_AI_AUDITS_LIMIT,
+      remainingFreeAudits: null,
+    };
+  }
+
+  if (tier === 'vip' || tier === 'pro') {
+    const now = Date.now();
+    const windowStart = Number(data.monthlyWindowStartMs ?? 0);
+    const windowExpired = !windowStart || now - windowStart >= THIRTY_DAYS_MS;
+    const monthlyUsed = windowExpired ? 0 : Math.max(0, Number(data.monthlyAiAuditsUsed ?? 0));
+    const allowed = options?.isInitGreeting
+      ? monthlyUsed <= PRO_MONTHLY_AI_AUDITS_CAP
+      : monthlyUsed < PRO_MONTHLY_AI_AUDITS_CAP;
+
+    // Auto-downshift heavy Pro usage (>300 turns/month) to flash-lite to lock in >82% margin
+    const recommendedModel =
+      monthlyUsed >= PRO_MONTHLY_HIGH_SPEED_TURNS ? 'googleai/gemini-2.5-flash-lite' : undefined;
+
+    return {
+      allowed,
+      canUseAiCoach: allowed,
+      tier,
+      badgeLabel: tier === 'vip' ? 'Founding Partner' : 'Executive Retainer',
+      isExempt: true,
+      aiAuditsUsed: used,
+      freeLimit: PRO_MONTHLY_AI_AUDITS_CAP,
+      monthlyCapReached: !allowed,
+      recommendedModel,
       remainingFreeAudits: null,
     };
   }
@@ -162,9 +197,12 @@ export async function checkServerEntitlement(
   const baseLimit = isAnonWithoutGift ? ANONYMOUS_FREE_AI_AUDITS_LIMIT : FREE_AI_AUDITS_LIMIT;
   const effectiveLimit = baseLimit + bonus;
 
-  // Do not block the initial __init__ greeting if they haven't exceeded their limit
   const remaining = Math.max(0, effectiveLimit - used);
   const allowed = options?.isInitGreeting ? used <= effectiveLimit : used < effectiveLimit;
+
+  // Once a user is into their bonus gift credits (used >= 10), route to flash-lite (4x cheaper)
+  const recommendedModel =
+    used >= FREE_AI_AUDITS_LIMIT ? 'googleai/gemini-2.5-flash-lite' : undefined;
 
   return {
     allowed,
@@ -177,15 +215,17 @@ export async function checkServerEntitlement(
     bonusAudits: bonus,
     redeemedGiftCode: data.redeemedGiftCode,
     requiresSignIn: !allowed && isAnonWithoutGift,
+    recommendedModel,
     remainingFreeAudits: remaining,
   };
 }
 
+export { DAILY_HIGH_SPEED_TURNS };
+
 /**
- * Increments `aiAuditsUsed` on the user's Firestore doc after a successful
- * paid AI turn. Never increments for Founder, VIP, or Pro accounts, and
- * does not count the automatic `__init__` session greeting against the user's
- * free allowance.
+ * Increments `aiAuditsUsed` and rolling 30-day `monthlyAiAuditsUsed` on the user's
+ * Firestore doc after a successful AI turn. Never increments for Founder, and
+ * does not count the automatic `__init__` session greeting.
  */
 export async function recordAiAuditTurn(
   auth: VerifiedAuthToken,
@@ -197,13 +237,24 @@ export async function recordAiAuditTurn(
   try {
     const db = getAdminFirestore();
     const userRef = db.doc(`users/${auth.uid}`);
-    await userRef.set(
-      {
-        aiAuditsUsed: FieldValue.increment(1),
-        lastAiAuditAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = snap.exists ? snap.data() : undefined;
+      const windowStart = Number(data?.monthlyWindowStartMs ?? 0);
+      const windowExpired = !windowStart || now - windowStart >= THIRTY_DAYS_MS;
+
+      tx.set(
+        userRef,
+        {
+          aiAuditsUsed: FieldValue.increment(1),
+          monthlyAiAuditsUsed: windowExpired ? 1 : FieldValue.increment(1),
+          monthlyWindowStartMs: windowExpired ? now : windowStart,
+          lastAiAuditAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    });
   } catch (err) {
     console.warn('[Entitlements] Failed to increment aiAuditsUsed:', err);
   }

@@ -3,7 +3,7 @@ import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personali
 import { runWithShareOffer, getShareOffer } from '@/ai/flows/share-offer-context';
 import { verifyAuthHeaderDetails, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
-import { checkServerEntitlement, recordAiAuditTurn } from '@/lib/entitlements-server';
+import { checkServerEntitlement, recordAiAuditTurn, DAILY_HIGH_SPEED_TURNS } from '@/lib/entitlements-server';
 import { adminHealthService } from '@/lib/health-service-admin';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
@@ -75,8 +75,10 @@ export async function POST(req: Request) {
     if (!entitlement.allowed) {
       return NextResponse.json(
         {
-          error: entitlement.requiresSignIn
-            ? 'Guest preview complete (5 free turns). Sign in free with Google or Email to unlock your full 15-audit starter pack or redeem a Friends & Family credit pass.'
+          error: entitlement.monthlyCapReached
+            ? `Monthly Executive AI allocation (${entitlement.freeLimit} turns/30d) reached. Your Zero-AI Cockpit, Ticker Quick-Log, and 3-Day Nutritionist remain active with zero limits until your cycle resets.`
+            : entitlement.requiresSignIn
+            ? 'Guest preview complete (3 free turns). Sign in free with Google to unlock your 10-audit starter pack or redeem a Friends & Family credit pass.'
             : `You've used all ${entitlement.freeLimit} complimentary AI Coach audits. Retain the AI CFO for unlimited coaching, or use the Zero-AI Daily Cockpit & Quick Log free forever.`,
           code: 'PAYWALL_LIMIT_REACHED',
           entitlement,
@@ -135,9 +137,12 @@ export async function POST(req: Request) {
       photoDates,
     };
 
-    const selectedModel = modelTier === 'flash-lite'
-      ? 'googleai/gemini-2.5-flash-lite'
-      : undefined;
+    const selectedModel =
+      modelTier === 'flash-lite' ||
+      entitlement.recommendedModel === 'googleai/gemini-2.5-flash-lite' ||
+      (entitlement.tier !== 'founder' && limit.dailyCount > DAILY_HIGH_SPEED_TURNS)
+        ? 'googleai/gemini-2.5-flash-lite'
+        : undefined;
 
     const encoder = new TextEncoder();
     const hasPhotos = Array.isArray(photoDataUris) && photoDataUris.length > 0;

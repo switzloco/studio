@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { ledgerAnalystPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
 import { verifyAuthHeaderDetails, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
-import { checkServerEntitlement, recordAiAuditTurn } from '@/lib/entitlements-server';
+import { checkServerEntitlement, recordAiAuditTurn, DAILY_HIGH_SPEED_TURNS } from '@/lib/entitlements-server';
 import { fetchSlimUserContext } from '@/lib/user-context';
 
 export async function POST(req: Request) {
@@ -59,12 +59,21 @@ export async function POST(req: Request) {
       chatHistory: Array.isArray(chatHistory) ? chatHistory.slice(-10) : chatHistory,
     };
 
+    const selectedModel =
+      entitlement.recommendedModel === 'googleai/gemini-2.5-flash-lite' ||
+      (entitlement.tier !== 'founder' && limit.dailyCount > DAILY_HIGH_SPEED_TURNS)
+        ? 'googleai/gemini-2.5-flash-lite'
+        : undefined;
+
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
         let hasOutput = false;
         try {
-          const { stream } = await ledgerAnalystPrompt.stream(input, { maxTurns: 8 });
+          const { stream } = await ledgerAnalystPrompt.stream(input, {
+            ...(selectedModel ? { model: selectedModel } : {}),
+            maxTurns: 8,
+          });
           for await (const chunk of stream) {
             if (chunk.text) {
               hasOutput = true;

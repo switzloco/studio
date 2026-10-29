@@ -12,17 +12,18 @@ type WindowConfig = { max: number; windowMs: number };
 type BucketConfig = { minute: WindowConfig; hour: WindowConfig; day: WindowConfig };
 
 const LIMITS: Record<RateLimitBucket, BucketConfig> = {
-  // Chat covers /api/chat and /api/ledger-chat — capped at 60/day to bound worst-case LLM spend.
+  // Chat covers /api/chat and /api/ledger-chat — capped at 30/day to guarantee
+  // >=82% gross margin even on Annual ($6.67/mo) plans.
   chat: {
-    minute: { max: 12, windowMs: 60_000 },
-    hour:   { max: 40, windowMs: 60 * 60_000 },
-    day:    { max: 60, windowMs: 24 * 60 * 60_000 },
+    minute: { max: 8,  windowMs: 60_000 },
+    hour:   { max: 20, windowMs: 60 * 60_000 },
+    day:    { max: 30, windowMs: 24 * 60 * 60_000 },
   },
-  // Transcribe is audio-token based, capped at 25/day.
+  // Transcribe is audio-token based, capped at 15/day.
   transcribe: {
-    minute: { max: 5,  windowMs: 60_000 },
-    hour:   { max: 15, windowMs: 60 * 60_000 },
-    day:    { max: 25, windowMs: 24 * 60 * 60_000 },
+    minute: { max: 4,  windowMs: 60_000 },
+    hour:   { max: 10, windowMs: 60 * 60_000 },
+    day:    { max: 15, windowMs: 24 * 60 * 60_000 },
   },
 };
 
@@ -30,7 +31,7 @@ export type RateLimitBucket = 'chat' | 'transcribe';
 export type RateLimitScope = 'minute' | 'hour' | 'day';
 
 export type RateLimitResult =
-  | { ok: true }
+  | { ok: true; dailyCount: number }
   | { ok: false; bucket: RateLimitBucket; scope: RateLimitScope; retryAfter: number };
 
 interface WindowState {
@@ -70,6 +71,6 @@ export async function checkRateLimit(uid: string, bucket: RateLimitBucket): Prom
     }
 
     tx.set(ref, { [bucket]: next, lastRequestAt: now }, { merge: true });
-    return { ok: true };
+    return { ok: true, dailyCount: next.day.count };
   });
 }

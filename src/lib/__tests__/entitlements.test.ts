@@ -5,6 +5,7 @@ import {
   FREE_AI_AUDITS_LIMIT,
   ANONYMOUS_FREE_AI_AUDITS_LIMIT,
   FRIENDS_BONUS_AI_AUDITS,
+  PRO_MONTHLY_AI_AUDITS_CAP,
 } from '../entitlements';
 
 describe('Founder Immunity, Friends & Family Credit Packs & Entitlements', () => {
@@ -42,24 +43,32 @@ describe('Founder Immunity, Friends & Family Credit Packs & Entitlements', () =>
     expect(status.remainingFreeAudits).toBeNull();
   });
 
-  it('resolves Pro tier when Executive Retainer is active', () => {
+  it('resolves Pro tier when Executive Retainer is active and enforces PRO_MONTHLY_AI_AUDITS_CAP (450)', () => {
     const status = resolveClientEntitlement(
       { email: 'subscriber@example.com', uid: 'sub-uid' },
-      { entitlementTier: 'pro', aiAuditsUsed: 100 }
+      { entitlementTier: 'pro', aiAuditsUsed: 100, monthlyAiAuditsUsed: 100 }
     );
     expect(status.tier).toBe('pro');
     expect(status.isExempt).toBe(true);
     expect(status.canUseAiCoach).toBe(true);
+
+    const cappedPro = resolveClientEntitlement(
+      { email: 'subscriber@example.com', uid: 'sub-uid' },
+      { entitlementTier: 'pro', aiAuditsUsed: 500, monthlyAiAuditsUsed: PRO_MONTHLY_AI_AUDITS_CAP }
+    );
+    expect(cappedPro.tier).toBe('pro');
+    expect(cappedPro.allowed).toBe(false);
+    expect(cappedPro.monthlyCapReached).toBe(true);
   });
 
-  it('caps unsigned-in anonymous guests at ANONYMOUS_FREE_AI_AUDITS_LIMIT (5) and sets requiresSignIn', () => {
+  it('caps unsigned-in anonymous guests at ANONYMOUS_FREE_AI_AUDITS_LIMIT (3) and sets requiresSignIn', () => {
     const anonActive = resolveClientEntitlement(
       { uid: 'anon-1', email: null, isAnonymous: true },
-      { aiAuditsUsed: 3 }
+      { aiAuditsUsed: 2 }
     );
     expect(anonActive.allowed).toBe(true);
     expect(anonActive.freeLimit).toBe(ANONYMOUS_FREE_AI_AUDITS_LIMIT);
-    expect(anonActive.remainingFreeAudits).toBe(2);
+    expect(anonActive.remainingFreeAudits).toBe(1);
 
     const anonCapped = resolveClientEntitlement(
       { uid: 'anon-2', email: null, isAnonymous: true },
@@ -79,7 +88,7 @@ describe('Founder Immunity, Friends & Family Credit Packs & Entitlements', () =>
     expect(giftedUser.isExempt).toBe(false);
     expect(giftedUser.allowed).toBe(true);
     expect(giftedUser.freeLimit).toBe(FREE_AI_AUDITS_LIMIT + FRIENDS_BONUS_AI_AUDITS);
-    expect(giftedUser.remainingFreeAudits).toBe(20);
+    expect(giftedUser.remainingFreeAudits).toBe(15);
 
     const exhaustedGiftUser = resolveClientEntitlement(
       { email: 'cousin@example.com', uid: 'cousin-1' },

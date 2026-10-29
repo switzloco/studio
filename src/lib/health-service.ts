@@ -154,6 +154,8 @@ export interface HealthData {
   aiAuditsUsed?: number;
   redeemedFounderCode?: string;
   bonusAiAudits?: number;
+  monthlyAiAuditsUsed?: number;
+  monthlyWindowStartMs?: number;
   redeemedGiftCode?: string;
   subscriptionPlan?: 'monthly' | 'annual' | 'lifetime' | 'founding_partner';
   stripeCustomerId?: string;
