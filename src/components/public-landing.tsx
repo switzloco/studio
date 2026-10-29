@@ -95,7 +95,7 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
             </Button>
           </div>
           <p className="text-xs font-medium text-muted-foreground/70">
-            No account needed to start. Sign in with Google any time to save your ledger across devices.
+            No account needed to start. Sign in with Google any time to save your ledger across devices. Native iPhone &amp; Android apps coming soon!
           </p>
 
           <div className="pt-12 flex flex-wrap justify-center gap-8 opacity-40 grayscale group-hover:grayscale-0 transition-all">
