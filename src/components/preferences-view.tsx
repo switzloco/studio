@@ -646,7 +646,16 @@ export function PreferencesView() {
                 </div>
               </div>
               <p className="text-[9px] text-muted-foreground italic leading-relaxed">
-                Body fat % drives glycogen reserve estimates. Use DEXA, BodPod, or a reliable assessment. Can also be set via coach chat.
+                Body fat % drives your Alpert Number &amp; glycogen reserve math. Best measured via{' '}
+                <a
+                  href={process.env.NEXT_PUBLIC_BODYSPEC_REFERRAL_URL || 'https://www.bodyspec.com'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary font-bold underline hover:opacity-80 not-italic"
+                >
+                  BodySpec DEXA Scan →
+                </a>{' '}
+                or set via coach chat.
               </p>
               <Button
                 onClick={handleSaveBodyComp}
