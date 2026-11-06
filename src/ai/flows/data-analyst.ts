@@ -1,5 +1,4 @@
-
-import { ai } from '@/ai/genkit';
+import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
@@ -121,9 +120,9 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
       if (status === 429 || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota')) {
         throw err;
       }
-      console.warn('[DataAnalystFlow] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
+      console.warn(`[DataAnalystFlow] Primary model failed, trying fallback model (${CFO_LITE_MODEL}):`, err?.message ?? String(err));
       result = await ai.generate({
-        model: 'googleai/gemini-2.0-flash',
+        model: CFO_LITE_MODEL,
         ...generateConfig
       });
     }

@@ -1,6 +1,6 @@
 'use server';
 
-import { ai } from '@/ai/genkit';
+import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
@@ -59,7 +59,7 @@ export async function assessSharedMeal(meal: MealSummary): Promise<WelcomeAssess
       .join(', ');
 
     const { output } = await ai.generate({
-      model: 'googleai/gemini-2.5-flash-lite',
+      model: CFO_LITE_MODEL,
       output: { schema: AssessmentSchema },
       prompt: `You are "the CFO" — a warm, witty health coach who talks about food like a financial portfolio (protein = assets, calories = budget, fiber/plants = long-term holdings). ${createdByName ? `${String(createdByName).slice(0, 50)} just shared this meal` : 'Someone just shared this meal'} with a friend, who has NEVER used the app and just opened the link. You are greeting that friend.
 

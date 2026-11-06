@@ -93,7 +93,7 @@ export interface EntitlementStatus {
   requiresSignIn?: boolean;
   monthlyCapReached?: boolean;
   /** When set, routes should use this cost-optimized model for the turn to protect margins. */
-  recommendedModel?: 'googleai/gemini-2.5-flash-lite';
+  recommendedModel?: string;
   remainingFreeAudits: number | null; // null when unlimited (founder / vip / pro)
 }
 

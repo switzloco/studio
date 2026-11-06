@@ -1,5 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, type VerifiedAuthToken } from '@/firebase/admin';
+import { CFO_LITE_MODEL } from '@/ai/genkit';
 import {
   ANONYMOUS_FREE_AI_AUDITS_LIMIT,
   DAILY_HIGH_SPEED_TURNS,
@@ -176,7 +177,7 @@ export async function checkServerEntitlement(
 
     // Auto-downshift heavy Pro usage (>300 turns/month) to flash-lite to lock in >82% margin
     const recommendedModel =
-      monthlyUsed >= PRO_MONTHLY_HIGH_SPEED_TURNS ? 'googleai/gemini-2.5-flash-lite' : undefined;
+      monthlyUsed >= PRO_MONTHLY_HIGH_SPEED_TURNS ? CFO_LITE_MODEL : undefined;
 
     return {
       allowed,
@@ -202,7 +203,7 @@ export async function checkServerEntitlement(
 
   // Once a user is into their bonus gift credits (used >= 10), route to flash-lite (4x cheaper)
   const recommendedModel =
-    used >= FREE_AI_AUDITS_LIMIT ? 'googleai/gemini-2.5-flash-lite' : undefined;
+    used >= FREE_AI_AUDITS_LIMIT ? CFO_LITE_MODEL : undefined;
 
   return {
     allowed,

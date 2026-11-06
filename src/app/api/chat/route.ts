@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cfoChatPrompt, PersonalizedAICoachingInput } from '@/ai/flows/personalized-ai-coaching';
+import { CFO_LITE_MODEL } from '@/ai/genkit';
 import { runWithShareOffer, getShareOffer } from '@/ai/flows/share-offer-context';
 import { verifyAuthHeaderDetails, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -139,9 +140,9 @@ export async function POST(req: Request) {
 
     const selectedModel =
       modelTier === 'flash-lite' ||
-      entitlement.recommendedModel === 'googleai/gemini-2.5-flash-lite' ||
+      Boolean(entitlement.recommendedModel) ||
       (entitlement.tier !== 'founder' && limit.dailyCount > DAILY_HIGH_SPEED_TURNS)
-        ? 'googleai/gemini-2.5-flash-lite'
+        ? CFO_LITE_MODEL
         : undefined;
 
     const encoder = new TextEncoder();

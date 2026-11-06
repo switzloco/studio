@@ -27,6 +27,7 @@
     --input: 231 30% 85%;
     --ring: 231 48% 48%;
     --radius: 0.75rem;
+    --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
   .dark {
     --background: 231 40% 5%;
@@ -78,4 +79,4 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
-}
+}

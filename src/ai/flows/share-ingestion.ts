@@ -7,7 +7,7 @@
  * → /incoming-share page → /api/ingest-share → this flow → Firestore.
  */
 
-import { ai } from '@/ai/genkit';
+import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -154,9 +154,9 @@ export const shareIngestionFlow = ai.defineFlow(
           ...generateConfig
         });
       } catch (err: any) {
-        console.warn('[ShareIngestion] Primary model failed, trying fallback model (gemini-2.0-flash):', err?.message ?? String(err));
+        console.warn(`[ShareIngestion] Primary model failed, trying fallback model (${CFO_LITE_MODEL}):`, err?.message ?? String(err));
         llmResult = await ai.generate({
-          model: 'googleai/gemini-2.0-flash',
+          model: CFO_LITE_MODEL,
           ...generateConfig
         });
       }

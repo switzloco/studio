@@ -1,20 +1,25 @@
 import {genkit} from 'genkit';
-import {googleAI} from '@genkit-ai/google-genai';
+import {googleAI, vertexAI} from '@genkit-ai/google-genai';
 
 /**
- * @fileOverview Genkit initialization for the Gemini 3 Flash engine.
+ * @fileOverview Genkit initialization for the Gemini 3.5 Flash engine on Vertex AI.
  * Optimized for speed and complex analytical reasoning in fitness auditing.
  *
+ * Uses Vertex AI Express Mode with GOOGLE_GENAI_API_KEY so inference bills directly
+ * to the GCP Blaze billing account (immune to AI Studio 402 prepayment credit depletion).
+ *
  * The model is env-overridable via CFO_MODEL so the engine can be swapped
- * without a code change (defaults to Gemini 3 Flash).
+ * without a code change (defaults to vertexai/gemini-3.5-flash).
  */
 
-// Gemini 2.5 Flash — multimodal, fast, supported by @genkit-ai/google-genai 1.36.
-// Override via CFO_MODEL (e.g. 'googleai/gemini-3-flash-preview' for Gemini 3 preview).
-export const CFO_MODEL = process.env.CFO_MODEL ?? 'googleai/gemini-2.5-flash';
+export const CFO_MODEL = process.env.CFO_MODEL ?? 'vertexai/gemini-3.5-flash';
+export const CFO_LITE_MODEL = process.env.CFO_LITE_MODEL ?? 'vertexai/gemini-3.5-flash-lite';
 
 export const ai = genkit({
-  plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
+  plugins: [
+    vertexAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY }),
+    googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY }),
+  ],
   model: CFO_MODEL,
 });
 

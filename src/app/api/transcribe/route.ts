@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ai, SAFETY_SETTINGS } from '@/ai/genkit';
+import { ai, SAFETY_SETTINGS, CFO_LITE_MODEL } from '@/ai/genkit';
 import { verifyAuthHeaderDetails } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { checkServerEntitlement } from '@/lib/entitlements-server';
@@ -43,9 +43,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Audio too large (max ~5 MB)' }, { status: 413 });
     }
 
-    // Use gemini-2.5-flash-lite for pure speech-to-text (cuts transcription cost by 72%)
+    // Use CFO_LITE_MODEL (gemini-3.5-flash-lite) for pure speech-to-text (cuts transcription cost by 72%)
     const { text } = await ai.generate({
-      model: 'googleai/gemini-2.5-flash-lite',
+      model: CFO_LITE_MODEL,
       config: { safetySettings: SAFETY_SETTINGS },
       prompt: [
         { media: { url: audioDataUri } },

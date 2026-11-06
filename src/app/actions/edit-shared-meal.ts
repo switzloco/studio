@@ -1,6 +1,6 @@
 'use server';
 
-import { ai } from '@/ai/genkit';
+import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { checkRateLimit } from '@/lib/rate-limit';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
@@ -54,9 +54,9 @@ export async function editSharedMeal(
       return { success: false, error: `Busy right now — please try again in ${limit.retryAfter}s.` };
     }
 
-    // 3. Use gemini-2.5-flash-lite (72% lower token cost) for simple arithmetic portion edits
+    // 3. Use CFO_LITE_MODEL (72% lower token cost) for simple arithmetic portion edits
     const { output } = await ai.generate({
-      model: 'googleai/gemini-2.5-flash-lite',
+      model: CFO_LITE_MODEL,
       output: { schema: EditResponseSchema },
       prompt: `You are editing a meal's food items based on a user's natural language request.
 
