@@ -18,7 +18,7 @@ describe('estimateCostUsd', () => {
   });
 
   it('matches flash-lite before flash and discounts cached tokens', () => {
-    const c = estimateCostUsd('vertexai/gemini-3.5-flash-lite', { inputTokens: 10_000, cachedTokens: 4_000, outputTokens: 500, thoughtsTokens: 0 });
+    const c = estimateCostUsd('vertexai/gemini-3.1-flash-lite', { inputTokens: 10_000, cachedTokens: 4_000, outputTokens: 500, thoughtsTokens: 0 });
     // 6k*0.10 + 4k*0.025 + 500*0.40 per 1M
     expect(c).toBeCloseTo((600 + 100 + 200) / 1_000_000, 9);
   });

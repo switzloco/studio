@@ -13,7 +13,7 @@ import {googleAI, vertexAI} from '@genkit-ai/google-genai';
  */
 
 export const CFO_MODEL = process.env.CFO_MODEL ?? 'vertexai/gemini-3.5-flash';
-export const CFO_LITE_MODEL = process.env.CFO_LITE_MODEL ?? 'vertexai/gemini-3.5-flash-lite';
+export const CFO_LITE_MODEL = process.env.CFO_LITE_MODEL ?? 'vertexai/gemini-3.1-flash-lite';
 
 export const ai = genkit({
   plugins: [

@@ -7,13 +7,15 @@ import { dispatchOutreachForUser } from '@/lib/outreach-service';
 import { pollGmailOutreachReplies } from '@/lib/outreach-gmail-inbound';
 
 /**
- * @fileOverview Hourly cron endpoint for 3x/day Morning, Midday, and Night outreach.
+ * @fileOverview 5-minute cron endpoint for inbound Gmail reply polling + 3x/day outreach.
  *
- * Schedule once per hour (e.g. `0 * * * *` in Cloud Scheduler):
+ * Schedule every 5 minutes in Cloud Scheduler:
  *   GET /api/cron/outreach-dispatch?secret=<CRON_SECRET>
  *
- * Evaluates each enrolled user's local timezone hour against their configured
- * `morningHour` (default 7), `middayHour` (default 12), and `nightHour` (default 19).
+ * Polls Gmail IMAP (`[Gmail]/All Mail` via `X-GM-RAW`) for replies to `+cfo@` and
+ * evaluates each enrolled user's local timezone hour against their configured
+ * `morningHour` (default 7), `middayHour` (default 12), and `nightHour` (default 19),
+ * deduplicating each window via `lastDispatchedKey`.
  */
 
 export const dynamic = 'force-dynamic';

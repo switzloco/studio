@@ -326,7 +326,7 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     expect(payload.components).toHaveLength(2);
   });
 
-  it('strips quoted email threads and detects explicit STOP replies without LLM calls', () => {
+  it('strips quoted email threads (including Gmail 2-line wrapped attributions) and detects explicit STOP replies without LLM calls', () => {
     const rawEmail = [
       '3 eggs and sourdough toast',
       '',
@@ -335,6 +335,19 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     ].join('\n');
 
     expect(extractCleanReplyText(rawEmail)).toBe('3 eggs and sourdough toast');
+
+    const wrappedGmailReply = [
+      'I had 1/4 costco hot dog, 3 oz costco pepperoni pizza, 1 nurri shake',
+      '',
+      'On Thu, Nov 12, 2026 at 7:12\u202fPM the CFO <nicholas.switzer@gmail.com>',
+      'wrote:',
+      '',
+      '> WELCOME TO THE CFO DAILY BRIEFING ($0)',
+    ].join('\r\n');
+
+    expect(extractCleanReplyText(wrappedGmailReply)).toBe(
+      'I had 1/4 costco hot dog, 3 oz costco pepperoni pizza, 1 nurri shake',
+    );
     expect(isExplicitStopKeyword('STOP')).toBe(true);
     expect(isExplicitStopKeyword('unsubscribe!')).toBe(true);
     expect(isExplicitStopKeyword('3 eggs')).toBe(false);

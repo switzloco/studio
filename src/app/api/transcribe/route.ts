@@ -44,7 +44,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Audio too large (max ~5 MB)' }, { status: 413 });
     }
 
-    // Use CFO_LITE_MODEL (gemini-3.5-flash-lite) for pure speech-to-text (cuts transcription cost by 72%)
+    // Use CFO_LITE_MODEL (gemini-3.1-flash-lite) for pure speech-to-text (cuts transcription cost by 72%)
     const { text } = await ai.generate({
       model: CFO_LITE_MODEL,
       config: { safetySettings: SAFETY_SETTINGS },

@@ -8,6 +8,8 @@
  * and replies with an updated Eat-By confirmation email.
  */
 
+import { createHash } from 'crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 import { ImapFlow } from 'imapflow';
 import { getAdminFirestore } from '@/firebase/admin';
 import {
@@ -104,6 +106,15 @@ export function extractPlainTextFromRawMime(rawBuffer: Buffer): string {
   return decoded.trim();
 }
 
+function buildGmailReceiptId(messageIdHeader: string | undefined, msgUid: number): string {
+  const cleanMsgId = (messageIdHeader || '').trim().toLowerCase();
+  if (cleanMsgId) {
+    const digest = createHash('sha256').update(cleanMsgId).digest('hex').slice(0, 24);
+    return `gmail_mid_${digest}`;
+  }
+  return `gmail_uid_${msgUid}`;
+}
+
 export async function pollGmailOutreachReplies(): Promise<{
   polled: boolean;
   processed: number;
@@ -118,6 +129,8 @@ export async function pollGmailOutreachReplies(): Promise<{
     host: 'imap.gmail.com',
     port: 993,
     secure: true,
+    socketTimeout: 20_000,
+    greetingTimeout: 10_000,
     auth: {
       user: gmail.user,
       pass: gmail.appPassword,
@@ -125,26 +138,47 @@ export async function pollGmailOutreachReplies(): Promise<{
     logger: false,
   });
 
+  // Prevent unhandled error event crashes if socket drops mid-poll
+  client.on('error', (err) => {
+    console.warn('[GmailInbound] IMAP socket error:', err?.message ?? String(err));
+  });
+
   let processed = 0;
   let errors = 0;
 
   try {
     await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
+
+    // Open '[Gmail]/All Mail' so BOTH external replies (INBOX) AND self-replies
+    // from the sender account itself (\Sent) are captured, even if viewed in Gmail.
+    let lock;
     try {
-      const uids = await client.search(
-        {
-          seen: false,
-          to: gmail.plusReplyTo,
-        },
-        { uid: true },
-      );
+      lock = await client.getMailboxLock('[Gmail]/All Mail');
+    } catch {
+      lock = await client.getMailboxLock('INBOX');
+    }
+
+    try {
+      let uids: number[] | false | undefined;
+      try {
+        // Gmail X-GM-RAW indexed search executes in ~250ms instead of scanning all headers
+        uids = await client.search(
+          { gmraw: `to:${gmail.plusReplyTo} newer_than:2d` } as any,
+          { uid: true },
+        );
+      } catch {
+        uids = await client.search(
+          { seen: false, to: gmail.plusReplyTo },
+          { uid: true },
+        );
+      }
 
       if (!uids || uids.length === 0) {
         return { polled: true, processed: 0, errors: 0 };
       }
 
-      const targetUids = uids.slice(0, 15);
+      // Newest messages first, capped at 15 per poll
+      const targetUids = [...uids].sort((a, b) => b - a).slice(0, 15);
       const db = getAdminFirestore();
 
       for (const msgUid of targetUids) {
@@ -154,7 +188,15 @@ export async function pollGmailOutreachReplies(): Promise<{
             {
               uid: true,
               envelope: true,
-              headers: ['to', 'delivered-to', 'auto-submitted', 'x-autoreply'],
+              headers: [
+                'message-id',
+                'to',
+                'delivered-to',
+                'from',
+                'subject',
+                'auto-submitted',
+                'x-autoreply',
+              ],
               source: { maxLength: 65536 },
             },
             { uid: true },
@@ -162,16 +204,25 @@ export async function pollGmailOutreachReplies(): Promise<{
 
           if (!msg || !msg.source) continue;
 
-          const headerText = msg.headers ? msg.headers.toString('utf8').toLowerCase() : '';
-          // Safety guard 1: strictly require "+cfo@" in To / Delivered-To
-          if (!headerText.includes('+cfo@')) {
+          const headerText = msg.headers ? msg.headers.toString('utf8') : '';
+          const headerLower = headerText.toLowerCase();
+
+          // Safety guard 1: strictly require "+cfo@" in To / Delivered-To or envelope.to
+          const envToMatch = (msg.envelope?.to ?? []).some((addr) =>
+            (addr.address || '').toLowerCase().includes('+cfo@'),
+          );
+          if (!envToMatch && !headerLower.includes('+cfo@')) {
             continue;
           }
 
-          // Mark Seen immediately so retries never double-log
-          await client.messageFlagsAdd(String(msgUid), ['\\Seen'], { uid: true });
+          // Safety guard 2: never re-ingest our own outbound briefings ("From: the CFO <...>")
+          const fromEntry = msg.envelope?.from?.[0];
+          const fromName = (fromEntry?.name || '').trim().toLowerCase();
+          if (fromName === 'the cfo' || /^from:\s*"?the cfo"?\s*</im.test(headerText)) {
+            continue;
+          }
 
-          // Safety guard 2: skip vacation / bounce auto-responders
+          // Safety guard 3: skip vacation / bounce auto-responders
           if (
             /auto-submitted:\s*(?!no\b)/i.test(headerText) ||
             /x-autoreply:/i.test(headerText)
@@ -179,13 +230,10 @@ export async function pollGmailOutreachReplies(): Promise<{
             continue;
           }
 
-          const fromAddr = msg.envelope?.from?.[0]?.address?.trim().toLowerCase();
+          const fromAddr = fromEntry?.address?.trim().toLowerCase();
           if (!fromAddr || fromAddr.includes('mailer-daemon') || fromAddr.includes('noreply')) {
             continue;
           }
-
-          const plainText = extractPlainTextFromRawMime(msg.source);
-          if (!plainText) continue;
 
           const userSnap = await db
             .collection('users')
@@ -196,10 +244,43 @@ export async function pollGmailOutreachReplies(): Promise<{
           if (userSnap.empty) continue;
 
           const userId = userSnap.docs[0].id;
+          const messageIdMatch = headerText.match(/^message-id:\s*(.+)$/im);
+          const messageId = messageIdMatch?.[1]?.trim() || msg.envelope?.messageId;
+          const receiptId = buildGmailReceiptId(messageId, msgUid);
+          const receiptRef = db.doc(`users/${userId}/outreach_actions/${receiptId}`);
+
+          // Idempotency guard: guarantee each Gmail reply is processed at most once
+          const existingReceipt = await receiptRef.get();
+          if (existingReceipt.exists) {
+            continue;
+          }
+
+          const plainText = extractPlainTextFromRawMime(msg.source);
+          if (!plainText) continue;
+
+          // Claim receipt + mark \Seen before LLM/email execution so retries never double-log
+          await receiptRef.set({
+            source: 'gmail_imap',
+            msgUid,
+            messageId: messageId ?? null,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+          await client.messageFlagsAdd(String(msgUid), ['\\Seen'], { uid: true }).catch(() => {});
+
           const result = await processOutreachFreeTextMeal({
             uid: userId,
             rawText: plainText,
+            now: msg.envelope?.date instanceof Date ? msg.envelope.date : undefined,
           });
+
+          await receiptRef.set(
+            {
+              status: result.status,
+              headline: result.headline,
+              foodId: result.loggedFoodId ?? null,
+            },
+            { merge: true },
+          );
 
           await sendOutreachReplyConfirmationEmail({
             to: fromAddr,
@@ -207,6 +288,13 @@ export async function pollGmailOutreachReplies(): Promise<{
             subject: `the CFO: ${result.headline}`,
             headline: result.headline,
             detail: result.detail,
+            loggedFoodId: result.loggedFoodId,
+            localDate: result.localDate,
+            loggedMacros: result.loggedMacros,
+            updatedHeadline: result.updatedHeadline,
+            updatedBody: result.updatedBody,
+            metricsLine: result.metricsLine,
+            statusTone: result.statusTone,
           });
 
           processed++;

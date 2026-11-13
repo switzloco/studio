@@ -73,6 +73,13 @@ export async function POST(request: NextRequest) {
     subject: `the CFO: ${result.headline}`,
     headline: result.headline,
     detail: result.detail,
+    loggedFoodId: result.loggedFoodId,
+    localDate: result.localDate,
+    loggedMacros: result.loggedMacros,
+    updatedHeadline: result.updatedHeadline,
+    updatedBody: result.updatedBody,
+    metricsLine: result.metricsLine,
+    statusTone: result.statusTone,
   });
 
   return NextResponse.json({

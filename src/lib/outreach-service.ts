@@ -29,7 +29,7 @@ import {
   sendOutreachWelcomeEmail,
 } from './outreach-email';
 import { sendOutreachDiscordDM } from './outreach-discord';
-import { parseOutreachMealText } from '@/ai/flows/outreach-meal-parser';
+import { extractCleanReplyText, parseOutreachMealText } from '@/ai/flows/outreach-meal-parser';
 import { backfillScoreHistory } from './score-history-sync';
 import { FOUNDER_EMAILS } from './entitlements';
 
@@ -707,6 +707,19 @@ export async function processOutreachFreeTextMeal(params: {
   headline: string;
   detail: string;
   loggedFoodId?: string;
+  loggedMealName?: string;
+  loggedMacros?: {
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    portionG: number;
+  };
+  updatedHeadline?: string;
+  updatedBody?: string;
+  metricsLine?: string;
+  statusTone?: 'good' | 'soon' | 'urgent';
+  localDate?: string;
 }> {
   const db = getAdminFirestore();
   const [health, prefs] = await Promise.all([
@@ -790,24 +803,40 @@ export async function processOutreachFreeTextMeal(params: {
   await refreshDailyFoodCounters(params.uid, clock.localDate);
   const { composed } = await buildLiveUserOutreach({ uid: params.uid });
 
+  const roundedMacros = {
+    portionG: Math.max(1, Math.round(parsed.portionG || 250)),
+    calories: Math.max(0, Math.round(parsed.calories || 0)),
+    proteinG: Math.max(0, Math.round(parsed.proteinG || 0)),
+    carbsG: Math.max(0, Math.round(parsed.carbsG || 0)),
+    fatG: Math.max(0, Math.round(parsed.fatG || 0)),
+  };
+
+  const cleanUserMessage = extractCleanReplyText(params.rawText) || params.rawText.trim();
   const nowTs = Date.now();
   await appendOutreachTranscript(params.uid, clock.localDate, [
     {
       role: 'user',
-      content: params.rawText.trim(),
+      content: cleanUserMessage,
       ts: nowTs,
     },
     {
       role: 'model',
-      content: `**Logged ${parsed.name}** (${Math.round(parsed.calories)} kcal · ${Math.round(parsed.proteinG)}g protein).\n\n**${composed.headline}** — ${composed.body}`,
+      content: `**Logged ${parsed.name}** (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g protein · ${roundedMacros.carbsG}g carbs · ${roundedMacros.fatG}g fat).\n\n**${composed.headline}** — ${composed.body}`,
       ts: nowTs + 1,
     },
   ]);
 
   return {
     status: 'logged',
-    headline: `Logged ${parsed.name} (${Math.round(parsed.calories)} kcal · ${Math.round(parsed.proteinG)}g P)`,
+    headline: `Logged ${parsed.name} (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g P)`,
     detail: `${composed.headline} — ${composed.body}`,
     loggedFoodId: foodId,
+    loggedMealName: parsed.name,
+    loggedMacros: roundedMacros,
+    updatedHeadline: composed.headline,
+    updatedBody: composed.body,
+    metricsLine: composed.metricsLine,
+    statusTone: composed.statusTone,
+    localDate: clock.localDate,
   };
 }

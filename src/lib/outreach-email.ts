@@ -258,7 +258,8 @@ export async function sendOutreachEmail(params: {
 }
 
 /**
- * Sends a short transactional confirmation email (e.g. after inbound reply meal log or stop command).
+ * Sends a transactional confirmation email (e.g. after an inbound reply meal log or stop command)
+ * with macro breakdown, updated live Eat-By runway, and a 1-tap [Undo This Entry] button.
  */
 export async function sendOutreachReplyConfirmationEmail(params: {
   to: string;
@@ -266,20 +267,120 @@ export async function sendOutreachReplyConfirmationEmail(params: {
   subject: string;
   headline: string;
   detail: string;
+  loggedFoodId?: string;
+  localDate?: string;
+  loggedMacros?: {
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+  };
+  updatedHeadline?: string;
+  updatedBody?: string;
+  metricsLine?: string;
+  statusTone?: 'good' | 'soon' | 'urgent';
 }): Promise<{ success: boolean }> {
   const unsubscribeUrl = buildOutreachActionUrl({ uid: params.uid, action: 'unsubscribe' });
+  const pause7dUrl = buildOutreachActionUrl({
+    uid: params.uid,
+    action: 'pause_7d',
+    date: params.localDate,
+  });
+
+  const undoUrl =
+    params.loggedFoodId && params.localDate
+      ? buildOutreachActionUrl({
+          uid: params.uid,
+          action: 'undo_food',
+          date: params.localDate,
+          foodId: params.loggedFoodId,
+        })
+      : null;
+
+  const toneColors = {
+    good: { bg: '#ecfdf5', border: '#10b981', pill: '#059669' },
+    soon: { bg: '#fffbeb', border: '#f59e0b', pill: '#d97706' },
+    urgent: { bg: '#fef2f2', border: '#ef4444', pill: '#dc2626' },
+  } as const;
+  const palette = toneColors[params.statusTone ?? 'good'];
+
+  const macroStripHtml = params.loggedMacros
+    ? `<div style="font-size:13px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:9px 12px;margin-bottom:14px;">
+         +${params.loggedMacros.calories} kcal &nbsp;&middot;&nbsp; ${params.loggedMacros.proteinG}g protein &nbsp;&middot;&nbsp; ${params.loggedMacros.carbsG}g carbs &nbsp;&middot;&nbsp; ${params.loggedMacros.fatG}g fat
+       </div>`
+    : '';
+
+  const liveRunwayHtml =
+    params.updatedHeadline && params.updatedBody
+      ? `<div style="font-size:11px;font-weight:800;letter-spacing:0.1em;color:${palette.pill};text-transform:uppercase;margin-bottom:6px;">
+           Updated Live Status
+         </div>
+         <div style="background:${palette.bg};border-left:4px solid ${palette.border};border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+           <div style="font-size:17px;font-weight:800;line-height:1.3;color:#0f172a;margin-bottom:5px;">
+             ${escapeHtml(params.updatedHeadline)}
+           </div>
+           <div style="font-size:14px;line-height:1.5;color:#334155;">
+             ${escapeHtml(params.updatedBody)}
+           </div>
+         </div>`
+      : `<div style="font-size:14px;color:#334155;line-height:1.5;margin-bottom:12px;">${escapeHtml(params.detail)}</div>`;
+
+  const metricsHtml = params.metricsLine
+    ? `<div style="font-size:12px;font-weight:600;color:#475569;background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:14px;">
+         ${escapeHtml(params.metricsLine)}
+       </div>`
+    : '';
+
+  const actionsRowHtml = undoUrl
+    ? `<div style="margin-bottom:16px;">
+         <a href="${undoUrl}" style="display:inline-block;margin:4px 8px 4px 0;padding:9px 14px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;background:#ffffff;color:#b91c1c;border:1px solid #fecaca;">Undo This Entry</a>
+         <a href="${SITE_URL}" style="display:inline-block;margin:4px 0;padding:9px 14px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;background:#0f172a;color:#ffffff;border:1px solid #0f172a;">Open CFO Ledger</a>
+       </div>`
+    : '';
+
+  const html = `<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:16px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <div style="max-width:540px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:22px;">
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;color:#059669;text-transform:uppercase;margin-bottom:6px;">
+        the CFO &middot; LEDGER UPDATED
+      </div>
+      <div style="font-size:19px;font-weight:800;line-height:1.3;color:#0f172a;margin-bottom:10px;">
+        ${escapeHtml(params.headline)}
+      </div>
+      ${macroStripHtml}
+      ${liveRunwayHtml}
+      ${metricsHtml}
+      ${actionsRowHtml}
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
+        Reply again anytime to log another item &middot; <a href="${pause7dUrl}" style="color:#64748b;text-decoration:underline;">Pause 7 Days</a> &middot; <a href="${unsubscribeUrl}" style="color:#dc2626;font-weight:700;text-decoration:underline;">1-Click Cancel</a>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+  const textLines = [
+    `the CFO — ${params.headline}`,
+    ...(params.loggedMacros
+      ? [
+          `+${params.loggedMacros.calories} kcal · ${params.loggedMacros.proteinG}g protein · ${params.loggedMacros.carbsG}g carbs · ${params.loggedMacros.fatG}g fat`,
+        ]
+      : []),
+    '',
+    params.updatedHeadline && params.updatedBody
+      ? `${params.updatedHeadline}\n${params.updatedBody}`
+      : params.detail,
+    ...(params.metricsLine ? ['', params.metricsLine] : []),
+    ...(undoUrl ? ['', `Undo This Entry: ${undoUrl}`] : []),
+    `Open CFO Ledger: ${SITE_URL}`,
+    `1-Click Cancel: ${unsubscribeUrl}`,
+  ];
 
   const res = await deliverRawOutreachEmail({
     to: params.to,
     subject: params.subject,
-    html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;padding:16px;color:#0f172a;">
-      <div style="font-size:17px;font-weight:800;margin-bottom:6px;">${escapeHtml(params.headline)}</div>
-      <div style="font-size:14px;color:#334155;line-height:1.5;">${escapeHtml(params.detail)}</div>
-      <div style="margin-top:16px;font-size:11px;color:#94a3b8;">
-        <a href="${unsubscribeUrl}" style="color:#dc2626;">1-Click Cancel</a> · <a href="${SITE_URL}" style="color:#64748b;">Open CFO App</a>
-      </div>
-    </div>`,
-    text: `${params.headline}\n\n${params.detail}\n\n1-Click Cancel: ${unsubscribeUrl}`,
+    html,
+    text: textLines.join('\n'),
     headers: {
       'List-Unsubscribe': `<${unsubscribeUrl}>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
