@@ -37,6 +37,8 @@ import { healthService, HealthData, UserPreferences } from '@/lib/health-service
 import { resolveClientEntitlement } from '@/lib/entitlements';
 import { redeemFounderCodeAction } from '@/app/actions/entitlements';
 import { PaywallModal } from '@/components/paywall-modal';
+import { LocalAiTelemetryBar } from '@/components/local-ai-telemetry-bar';
+import { QuarterlyEarningsModal } from '@/components/quarterly-earnings-modal';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
@@ -581,6 +583,7 @@ export default function Home() {
         auditsUsed={entitlement.aiAuditsUsed}
         freeLimit={entitlement.freeLimit}
       />
+      <QuarterlyEarningsModal />
       <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary text-white rounded-xl shadow-md">
@@ -652,6 +655,7 @@ export default function Home() {
           </DropdownMenu>
         </div>
       </header>
+      <LocalAiTelemetryBar />
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col h-full overflow-hidden">

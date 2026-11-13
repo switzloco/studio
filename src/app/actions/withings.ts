@@ -6,8 +6,6 @@ import { adminHealthService } from '@/lib/health-service-admin';
 import { syncWithingsData as _syncWithingsData } from '@/lib/withings-sync';
 import type { WithingsSyncResult } from '@/lib/withings-sync';
 
-export type { WithingsSyncResult };
-
 const WITHINGS_AUTH_BASE = 'https://account.withings.com';
 
 /**

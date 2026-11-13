@@ -49,6 +49,10 @@ import { ChatHistoryLog } from './chat-history-log';
 import { ProteinChart } from './protein-chart';
 import { ShareMealButton } from './share-meal-button';
 import { MySharesSection } from './my-shares-section';
+import { HybridTickerTerminal } from './hybrid-ticker-terminal';
+import { ExecutionReceiptBadge } from './execution-receipt-badge';
+import { useHybridAi } from './hybrid-ai-provider';
+import { CFO_CLASS_META, type CfoLedgerClass } from '@/lib/usda-local-reconciler';
 import { inferScoringRelease } from '@/lib/scoring-releases';
 import {
   computeDailyLevelPointsMap,
@@ -101,6 +105,10 @@ type LedgerEntry = {
   startedAt?: string;
   endedAt?: string;
   durationHours?: number;
+  // Hybrid AI execution telemetry
+  inferenceSource?: 'ON_DEVICE' | 'IN_CLOUD';
+  inferenceLatencyMs?: number;
+  cfoClass?: CfoLedgerClass;
 };
 
 function resolveRawTime(time?: string, ts?: unknown): string {
@@ -172,6 +180,7 @@ export function HistoryView() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }, []);
   const yesterdayIso = useMemo(() => shiftIsoDate(todayIso, -1), [todayIso]);
+  const { setEarningsModalOpen } = useHybridAi();
 
   // Drag-and-Drop Timing & Timeline Popup state
   const [timingEditor, setTimingEditor] = useState<{
@@ -293,6 +302,9 @@ export function HistoryView() {
           omega3Mg: f.omega3Mg,
           hasElectrolytes: f.hasElectrolytes,
           supplementBadges: suppBadges,
+          inferenceSource: f.inferenceSource,
+          inferenceLatencyMs: f.inferenceLatencyMs,
+          cfoClass: f.cfoClass,
         });
       }
     }
@@ -323,6 +335,9 @@ export function HistoryView() {
           estimatedCaloriesBurned: e.estimatedCaloriesBurned,
           pointsDelta: e.pointsDelta,
           notes: e.notes,
+          inferenceSource: e.inferenceSource,
+          inferenceLatencyMs: e.inferenceLatencyMs,
+          cfoClass: e.cfoClass,
         });
       }
     }
@@ -704,15 +719,29 @@ export function HistoryView() {
 
   return (
     <div className="p-6 sm:p-10 space-y-10 pb-24 h-full overflow-y-auto bg-background">
-      <div className="flex items-center justify-between px-1">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div className="space-y-2">
           <h2 className="text-3xl font-black tracking-tighter uppercase italic text-foreground">Portfolio History</h2>
           <p className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.3em]">Historical Asset Audit</p>
         </div>
-        <div className="p-4 bg-emerald-100 rounded-2xl shadow-sm">
-          <TrendingUp className="w-6 h-6 text-emerald-600" />
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setEarningsModalOpen(true)}
+            data-testid="ledger-earnings-call-btn"
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-300 shadow-md transition-colors"
+          >
+            <TrendingUp className="w-4 h-4 text-amber-400" />
+            <span>RUN 30-DAY EARNINGS CALL</span>
+          </button>
+          <div className="p-4 bg-emerald-100 rounded-2xl shadow-sm">
+            <TrendingUp className="w-6 h-6 text-emerald-600" />
+          </div>
         </div>
       </div>
+
+      {/* Bloomberg / CRT Hybrid Ticker Tape & Multimodal Expense Receipt Auditor */}
+      <HybridTickerTerminal healthData={healthData} />
 
       {/* Ledger Analyst — inline query agent */}
       <LedgerChat />
@@ -1036,6 +1065,20 @@ export function HistoryView() {
                                     {badge}
                                   </span>
                                 ))}
+
+                                {entry.cfoClass && CFO_CLASS_META[entry.cfoClass] && (
+                                  <span className="font-mono text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-900 text-emerald-300 border border-emerald-500/40">
+                                    {CFO_CLASS_META[entry.cfoClass].shortTag}
+                                  </span>
+                                )}
+
+                                {entry.inferenceSource && (
+                                  <ExecutionReceiptBadge
+                                    compact
+                                    inferenceSource={entry.inferenceSource}
+                                    latencyMs={entry.inferenceLatencyMs}
+                                  />
+                                )}
                               </div>
                               <p
                                 className={`text-sm text-muted-foreground font-medium group-hover:text-foreground transition-colors ${

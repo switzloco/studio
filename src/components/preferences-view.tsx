@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders, Search, Trash2, Utensils, Tag, ShieldCheck, Sparkles } from "lucide-react";
+import { Calendar, Construction, Target, Save, Plus, X, Briefcase, Fingerprint, Check, Loader2, Trophy, Activity, MessageSquare, Sliders, Search, Trash2, Utensils, Tag, ShieldCheck, Sparkles, Cpu, Lock, Zap } from "lucide-react";
 import { resolveClientEntitlement } from "@/lib/entitlements";
 import { PaywallModal } from "@/components/paywall-modal";
 import { Switch } from "@/components/ui/switch";
@@ -23,6 +23,8 @@ import { Share2, Send } from 'lucide-react';
 import { isNativeShell } from '@/lib/auth-environment';
 import { signOut } from 'firebase/auth';
 import { OutreachSettingsCard } from '@/components/outreach-settings-card';
+import { useHybridAi } from '@/components/hybrid-ai-provider';
+import { ExecutionReceiptBadge } from '@/components/execution-receipt-badge';
 
 // Rank tiers — financial seniority ladder matching the app's portfolio metaphor
 const RANKS = [
@@ -43,6 +45,19 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function PreferencesView() {
   const { user } = useUser();
+  const {
+    nanoStatus,
+    isWarmingNano,
+    nanoDownloadPct,
+    warmNanoError,
+    warmNano,
+    isOnline,
+    secPrivacyLock,
+    setSecPrivacyLock,
+    remoteConfig,
+    appCheck,
+    recentReceipts,
+  } = useHybridAi();
   const auth = useAuth();
   const db = useFirestore();
   const { toast } = useToast();
@@ -346,6 +361,146 @@ export function PreferencesView() {
           <Briefcase className="w-6 h-6 text-primary" />
         </div>
       </div>
+
+      {/* Bloomberg / CRT Hybrid AI Engine, SEC Insider Privacy Lock & Remote Config Telemetry */}
+      <section
+        data-testid="settings-hybrid-ai-card"
+        className="rounded-2xl border border-emerald-500/40 bg-slate-950 p-6 font-mono text-emerald-300 shadow-[0_0_28px_rgba(16,185,129,0.12)] space-y-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-500/25 pb-4">
+          <div className="flex items-center gap-2.5">
+            <Cpu className="w-5 h-5 text-emerald-400" />
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-emerald-200">
+                HYBRID AI ENGINE // SEC PRIVACY TERMINAL
+              </h3>
+              <p className="text-[10px] text-emerald-500">
+                Firebase AI Logic Hybrid SDK (Chrome Gemini Nano + Dynamic Remote Config Cloud Routing)
+              </p>
+            </div>
+          </div>
+          <span className="rounded border border-emerald-500/40 bg-emerald-950/60 px-2.5 py-1 text-[10px] font-bold uppercase">
+            {nanoStatus === 'available'
+              ? 'NANO ENGINE: ONLINE'
+              : isWarmingNano
+                ? `DOWNLOADING NANO: ${nanoDownloadPct ?? 0}%`
+                : nanoStatus === 'downloadable'
+                  ? 'NANO ENGINE: READY TO WARM'
+                  : 'CLOUD HYBRID ACTIVE'}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-emerald-500/25 bg-slate-900/80 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-xs font-bold uppercase text-emerald-200">
+                Chrome Built-in AI (`window.LanguageModel`)
+              </p>
+              <p className="text-[11px] text-emerald-400/80">
+                Pre-warms on-device Gemini Nano weights for $0.00 gas, sub-second offline Ticker Tape &amp; Receipt parsing.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={warmNano}
+              disabled={isWarmingNano || nanoStatus === 'available'}
+              data-testid="settings-warm-nano-btn"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-500/20 hover:bg-emerald-500/30 px-3.5 py-2 text-[11px] font-black uppercase tracking-wider text-emerald-200 transition-colors disabled:opacity-50"
+            >
+              {isWarmingNano ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span>
+                {nanoStatus === 'available'
+                  ? 'NANO ENGINE: ONLINE'
+                  : isWarmingNano
+                    ? `DOWNLOADING NANO: ${nanoDownloadPct ?? 0}%`
+                    : 'WARM LOCAL NANO ENGINE'}
+              </span>
+            </button>
+          </div>
+
+          {(isWarmingNano || nanoDownloadPct !== null) && (
+            <div className="space-y-1">
+              <div className="h-2 w-full rounded bg-black overflow-hidden border border-emerald-500/30">
+                <div
+                  className="h-full bg-emerald-400 transition-all duration-200"
+                  style={{ width: `${nanoDownloadPct ?? 0}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-amber-300">
+                {nanoStatus === 'available'
+                  ? 'NANO ENGINE: ONLINE — On-device inference verified.'
+                  : `DOWNLOADING NANO: ${nanoDownloadPct ?? 0}%`}
+              </p>
+            </div>
+          )}
+
+          {warmNanoError && (
+            <p className="text-[10px] text-amber-300 border border-amber-500/30 bg-amber-950/30 rounded px-2.5 py-1.5">
+              {warmNanoError}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-emerald-500/25 bg-slate-900/80 p-4">
+          <div className="space-y-1">
+            <p className="text-xs font-bold uppercase text-emerald-200 flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              SEC PRIVACY LOCK (STRICT ON-DEVICE)
+            </p>
+            <p className="text-[11px] text-emerald-400/80 leading-relaxed">
+              Enforces <code className="text-amber-300">InferenceMode.ONLY_ON_DEVICE</code> across biometric audits, Ticker Tape parsing, and Meal Photo Receipts so raw personal health data never leaves this browser.
+            </p>
+          </div>
+          <Switch
+            checked={secPrivacyLock}
+            onCheckedChange={setSecPrivacyLock}
+            data-testid="settings-sec-lock-switch"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[10px]">
+          <div className="rounded-lg border border-emerald-500/20 bg-black/50 p-2.5">
+            <p className="text-emerald-600 uppercase">RC Cloud Model</p>
+            <p className="font-bold text-amber-300 mt-0.5 truncate">{remoteConfig.cfoCloudModel}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-500/20 bg-black/50 p-2.5">
+            <p className="text-emerald-600 uppercase">RC Persona Strictness</p>
+            <p className="font-bold text-emerald-200 mt-0.5 truncate">{remoteConfig.cfoPersonaStrictness}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-500/20 bg-black/50 p-2.5">
+            <p className="text-emerald-600 uppercase">RC Default Mode</p>
+            <p className="font-bold text-emerald-200 mt-0.5 truncate">{remoteConfig.hybridDefaultMode}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-500/20 bg-black/50 p-2.5">
+            <p className="text-emerald-600 uppercase">App Check &amp; Network</p>
+            <p className="font-bold text-emerald-200 mt-0.5 truncate">
+              {appCheck.status.toUpperCase()} · {isOnline ? 'ONLINE' : 'OFFLINE'}
+            </p>
+          </div>
+        </div>
+
+        {recentReceipts.length > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <p className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">
+              Recent Hybrid Execution Receipts
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {recentReceipts.slice(0, 4).map((r) => (
+                <ExecutionReceiptBadge
+                  key={r.id}
+                  compact
+                  inferenceSource={r.inferenceSource}
+                  latencyMs={r.latencyMs}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Rank / Leveling Card */}
       {(() => {

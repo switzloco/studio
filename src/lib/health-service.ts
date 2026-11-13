@@ -1,6 +1,97 @@
 
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, where, Firestore, serverTimestamp, arrayUnion, FieldValue, Timestamp, deleteDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  getDocFromCache,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+  getDocsFromCache,
+  where,
+  Firestore,
+  serverTimestamp,
+  arrayUnion,
+  FieldValue,
+  Timestamp,
+  deleteDoc,
+  type DocumentReference,
+  type DocumentData,
+  type Query,
+} from 'firebase/firestore';
 import type { FoodLogEntry, ExerciseLogEntry, UserProfile } from './food-exercise-types';
+
+function isBrowserOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+/**
+ * Commits a Firestore write in an offline-first manner.
+ * With `persistentLocalCache`, `setDoc`/`updateDoc`/`deleteDoc` synchronously enqueue
+ * the mutation in IndexedDB and fire local `onSnapshot` hooks (`useDoc`/`useCollection`),
+ * while the returned Promise waits for Cloud server acknowledgement.
+ * When Chrome is in Offline Mode (or on high-latency links), we resolve optimistically
+ * so the UI never hangs waiting on a disconnected socket.
+ */
+async function commitFirestoreWrite(writePromise: Promise<unknown>): Promise<void> {
+  if (typeof window === 'undefined') {
+    await writePromise;
+    return;
+  }
+
+  const guarded = writePromise.catch((err) => {
+    if (err && (err as { code?: string }).code === 'permission-denied') {
+      throw err;
+    }
+    console.warn('[Firestore Offline Queue] Write queued locally:', err);
+  });
+
+  if (isBrowserOffline()) {
+    await Promise.race([
+      guarded,
+      new Promise<void>((resolve) => setTimeout(resolve, 60)),
+    ]);
+    return;
+  }
+
+  await Promise.race([
+    guarded,
+    new Promise<void>((resolve) => setTimeout(resolve, 3500)),
+  ]);
+}
+
+async function getDocOfflineSafe(docRef: DocumentReference<DocumentData>) {
+  if (isBrowserOffline()) {
+    try {
+      return await getDocFromCache(docRef);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return await getDoc(docRef);
+  } catch {
+    try {
+      return await getDocFromCache(docRef);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function getDocsOfflineSafe(q: Query<DocumentData>) {
+  if (isBrowserOffline()) {
+    return getDocsFromCache(q);
+  }
+  try {
+    return await getDocs(q);
+  } catch {
+    return getDocsFromCache(q);
+  }
+}
 
 /**
  * @fileOverview Health service for managing fitness portfolio data in Firestore.
@@ -265,6 +356,8 @@ export interface UserPreferences {
   levelHistory?: LevelConfig[];
   /** Gemini model tier preference for chat ('flash' default or 'flash-lite' economy). */
   aiModelTier?: 'flash' | 'flash-lite';
+  /** Strict On-Device SEC Insider Privacy Lock (`InferenceMode.ONLY_ON_DEVICE`). */
+  secPrivacyLock?: boolean;
   /** Automated free 3x/day Email & Discord outreach configuration. */
   outreach?: OutreachPreferences;
 }
@@ -304,8 +397,8 @@ export interface WithingsCredentials {
 export const healthService = {
   async getHealthSummary(db: Firestore, userId: string): Promise<HealthData | null> {
     const docRef = doc(db, 'users', userId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) return docSnap.data() as HealthData;
+    const docSnap = await getDocOfflineSafe(docRef);
+    if (docSnap && docSnap.exists()) return docSnap.data() as HealthData;
 
     const initialData: HealthData = {
       steps: 0,
@@ -331,7 +424,7 @@ export const healthService = {
       lastActiveDate: new Date().toISOString().split('T')[0],
       createdAt: serverTimestamp(),
     };
-    await setDoc(docRef, initialData);
+    await commitFirestoreWrite(setDoc(docRef, initialData));
     return initialData;
   },
 
@@ -339,21 +432,21 @@ export const healthService = {
     const docRef = doc(db, 'users', userId);
     // setDoc with merge works whether or not the document already exists;
     // updateDoc throws "No document to update" if the doc is missing.
-    await setDoc(docRef, { ...updates, updatedAt: serverTimestamp() }, { merge: true });
+    await commitFirestoreWrite(setDoc(docRef, { ...updates, updatedAt: serverTimestamp() }, { merge: true }));
   },
 
   async recordEquityEvent(db: Firestore, userId: string, entry: HistoryEntry): Promise<void> {
     const docRef = doc(db, 'users', userId);
-    await updateDoc(docRef, {
+    await commitFirestoreWrite(updateDoc(docRef, {
       history: arrayUnion(entry),
       updatedAt: serverTimestamp()
-    });
+    }));
   },
 
   async getUserPreferences(db: Firestore, userId: string): Promise<UserPreferences | null> {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) return docSnap.data() as UserPreferences;
+    const docSnap = await getDocOfflineSafe(docRef);
+    if (docSnap && docSnap.exists()) return docSnap.data() as UserPreferences;
 
     const defaultPrefs: UserPreferences = {
       weeklySchedule: JSON.stringify({
@@ -370,13 +463,13 @@ export const healthService = {
       profile: {},
       autoChatEnabled: false,
     };
-    await setDoc(docRef, defaultPrefs, { merge: true });
+    await commitFirestoreWrite(setDoc(docRef, defaultPrefs, { merge: true }));
     return defaultPrefs;
   },
 
   async updateUserPreferences(db: Firestore, userId: string, updates: Partial<UserPreferences>): Promise<void> {
     const docRef = doc(db, 'users', userId, 'preferences', 'settings');
-    await setDoc(docRef, updates, { merge: true });
+    await commitFirestoreWrite(setDoc(docRef, updates, { merge: true }));
   },
 
   async saveFitbitCredentials(db: Firestore, userId: string, creds: FitbitCredentials): Promise<void> {
@@ -429,13 +522,14 @@ export const healthService = {
 
   async logActivity(db: Firestore, userId: string, log: Omit<HealthLog, 'userId' | 'timestamp'>) {
     const logsRef = collection(db, 'users', userId, 'logs');
-    await addDoc(logsRef, { ...log, userId, timestamp: serverTimestamp() });
+    const docRef = doc(logsRef);
+    await commitFirestoreWrite(setDoc(docRef, { ...log, userId, timestamp: serverTimestamp() }));
   },
 
   async queryLogs(db: Firestore, userId: string, category?: string, limitCount: number = 10): Promise<HealthLog[]> {
     const logsRef = collection(db, 'users', userId, 'logs');
     let q = query(logsRef, orderBy('timestamp', 'desc'), limit(limitCount));
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocsOfflineSafe(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as HealthLog);
   },
 
@@ -443,10 +537,11 @@ export const healthService = {
 
   async logFood(db: Firestore, userId: string, entry: Omit<FoodLogEntry, 'timestamp'>): Promise<string> {
     const ref = collection(db, 'users', userId, 'food_log');
+    const docRef = doc(ref);
     const clean = Object.fromEntries(
       Object.entries({ ...entry, timestamp: serverTimestamp() }).filter(([, v]) => v !== undefined)
     );
-    const docRef = await addDoc(ref, clean);
+    await commitFirestoreWrite(setDoc(docRef, clean));
     return docRef.id;
   },
 
@@ -459,7 +554,7 @@ export const healthService = {
     } else {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocsOfflineSafe(q);
     return snapshot.docs
       .map(d => ({ ...d.data(), id: d.id }) as FoodLogEntry)
       .filter(e => !e.ignored);
@@ -467,18 +562,19 @@ export const healthService = {
 
   async setFoodEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<void> {
     const docRef = doc(db, 'users', userId, 'food_log', entryId);
-    await setDoc(docRef, { ignored }, { merge: true });
+    await commitFirestoreWrite(setDoc(docRef, { ignored }, { merge: true }));
   },
 
   // --- Structured Exercise Log ---
 
   async logExercise(db: Firestore, userId: string, entry: Omit<ExerciseLogEntry, 'timestamp'>): Promise<string> {
     const ref = collection(db, 'users', userId, 'exercise_log');
+    const docRef = doc(ref);
     // Strip undefined fields — Firestore rejects documents containing undefined values.
     const clean = Object.fromEntries(
       Object.entries({ ...entry, timestamp: serverTimestamp() }).filter(([, v]) => v !== undefined)
     );
-    const docRef = await addDoc(ref, clean);
+    await commitFirestoreWrite(setDoc(docRef, clean));
     return docRef.id;
   },
 
@@ -490,7 +586,7 @@ export const healthService = {
     } else {
       q = query(ref, orderBy('timestamp', 'desc'), limit(limitCount));
     }
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocsOfflineSafe(q);
     return snapshot.docs
       .map(d => ({ ...d.data(), id: d.id }) as ExerciseLogEntry)
       .filter(e => !e.ignored);
@@ -498,7 +594,7 @@ export const healthService = {
 
   async setExerciseEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<void> {
     const docRef = doc(db, 'users', userId, 'exercise_log', entryId);
-    await setDoc(docRef, { ignored }, { merge: true });
+    await commitFirestoreWrite(setDoc(docRef, { ignored }, { merge: true }));
   },
 
   /**
@@ -529,7 +625,7 @@ export const healthService = {
         consumedAt: newTime,
       };
       if (meal) updates.meal = meal;
-      await setDoc(docRef, updates, { merge: true });
+      await commitFirestoreWrite(setDoc(docRef, updates, { merge: true }));
 
       if (oldDate === activeTodayIso || newDate === activeTodayIso) {
         const todaysEntries = await this.queryFoodLog(db, userId, activeTodayIso, 100);
@@ -546,10 +642,10 @@ export const healthService = {
       }
     } else if (type === 'exercise') {
       const docRef = doc(db, 'users', userId, 'exercise_log', id);
-      await setDoc(docRef, { date: newDate, performedAt: newTime }, { merge: true });
+      await commitFirestoreWrite(setDoc(docRef, { date: newDate, performedAt: newTime }, { merge: true }));
     } else if (type === 'fast') {
       const docRef = doc(db, 'users', userId, 'fast_log', id);
-      await setDoc(docRef, { date: newDate, startedAt: newTime }, { merge: true });
+      await commitFirestoreWrite(setDoc(docRef, { date: newDate, startedAt: newTime }, { merge: true }));
     }
   },
 

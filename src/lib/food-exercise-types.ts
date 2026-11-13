@@ -30,6 +30,10 @@ export interface FoodLogEntry {
   hasSeedOils?: boolean;       // true if meal contains heavy seed oils / deep-fried
   ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
   consumedAt?: string;         // HH:MM (24h) — when the user actually ate, from conversation context
+  /** Hybrid AI execution metadata for CRT audit receipt badges */
+  inferenceSource?: 'ON_DEVICE' | 'IN_CLOUD';
+  inferenceLatencyMs?: number;
+  cfoClass?: 'CAPITAL_ASSET_INFLOW' | 'LIABILITY_EXPOSURE' | 'CAPITAL_CAPEX' | 'OPERATING_FUEL';
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD" for date-range queries
 }
@@ -85,6 +89,10 @@ export interface ExerciseLogEntry {
   notes?: string;
   ignored?: boolean;           // soft-delete flag — entry excluded from totals when true
   performedAt?: string;        // HH:MM (24h) — when the user actually exercised, from conversation context
+  /** Hybrid AI execution metadata for CRT audit receipt badges */
+  inferenceSource?: 'ON_DEVICE' | 'IN_CLOUD';
+  inferenceLatencyMs?: number;
+  cfoClass?: 'CAPITAL_ASSET_INFLOW' | 'LIABILITY_EXPOSURE' | 'CAPITAL_CAPEX' | 'OPERATING_FUEL';
   timestamp: FieldValue | Timestamp;
   date: string; // "YYYY-MM-DD"
 }
@@ -113,6 +121,8 @@ export interface ChatMessage {
   content: string;
   hasImages?: boolean;   // true when the original message carried photos (base64 never stored)
   ts?: number;           // epoch ms when the message was recorded (ordering / display)
+  inferenceSource?: 'ON_DEVICE' | 'IN_CLOUD';
+  inferenceLatencyMs?: number;
 }
 
 /**

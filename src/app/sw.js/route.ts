@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 
 // Build ID injected at build time via NEXT_PUBLIC_BUILD_ID (set in next.config.ts).
 // Changing this value busts the service worker cache on every deploy.
-const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev';
+const IS_DEV_ENV = process.env.NODE_ENV !== 'production';
+const BUILD_ID = IS_DEV_ENV
+  ? 'dev-live-v5'
+  : (process.env.NEXT_PUBLIC_BUILD_ID ?? 'prod');
 
 const SW_BODY = `/// <reference lib="webworker" />
 
 const CACHE_NAME = 'cfo-${BUILD_ID}';
+const IS_DEV = ${IS_DEV_ENV ? 'true' : 'false'};
 
 const PRECACHE_URLS = [
   '/',
@@ -68,6 +72,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (IS_DEV) {
+    // In local Next.js dev mode, never cache unhashed /_next/static chunks so HMR/edits stay fresh,
+    // while still falling back to CacheStorage if DevTools Offline throttling is toggled on.
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+    );
+    return;
+  }
+
   if (
     url.pathname.startsWith('/_next/') ||
     url.pathname.startsWith('/icons/') ||
@@ -102,11 +121,13 @@ self.addEventListener('fetch', (event) => {
 `;
 
 export async function GET() {
-  return new NextResponse(SW_BODY, {
-    headers: {
-      'Content-Type': 'application/javascript',
-      'Service-Worker-Allowed': '/',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/javascript',
+    'Service-Worker-Allowed': '/',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+  };
+  if (IS_DEV_ENV) {
+    headers['Clear-Site-Data'] = '"cache"';
+  }
+  return new NextResponse(SW_BODY, { headers });
 }

@@ -6,10 +6,10 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles, Lock, Unlock, Terminal, TrendingUp } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
 import { useToast } from "@/hooks/use-toast";
-import { useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
+import { useFirebaseApp, useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences } from '@/lib/health-service';
@@ -18,6 +18,16 @@ import { ShareMealButton } from '@/components/share-meal-button';
 import { resolveClientEntitlement } from '@/lib/entitlements';
 import { PaywallModal } from '@/components/paywall-modal';
 import { OutreachInlinePrompt } from '@/components/outreach-inline-prompt';
+import { useHybridAi } from '@/components/hybrid-ai-provider';
+import { ExecutionReceiptBadge, SecComplianceAlertPanel } from '@/components/execution-receipt-badge';
+import { HybridTickerTerminal } from '@/components/hybrid-ticker-terminal';
+import {
+  dataUriToInlineImage,
+  runHybridCoachTurn,
+  SecPrivacyLockBlockedError,
+  type NormalizedInferenceSource,
+  type SecComplianceAlert,
+} from '@/lib/hybrid-ai';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -34,6 +44,9 @@ interface Message {
   content: string;
   images?: string[];
   shareOffer?: ChatShareOffer;
+  inferenceSource?: NormalizedInferenceSource;
+  inferenceLatencyMs?: number;
+  secAlert?: SecComplianceAlert;
 }
 
 /**
@@ -135,11 +148,21 @@ export interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
+  const firebaseApp = useFirebaseApp();
   const { user } = useUser();
   const db = useFirestore();
+  const {
+    secPrivacyLock,
+    setSecPrivacyLock,
+    warmNano,
+    isOnline,
+    recordReceipt,
+    setEarningsModalOpen,
+  } = useHybridAi();
   const [messages, setMessages] = useState<Message[]>([]);
   const [initDone, setInitDone] = useState(false);
   const [coachingRequested, setCoachingRequested] = useState(false);
+  const [showTickerDrawer, setShowTickerDrawer] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
@@ -209,11 +232,24 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
       }
       if (cancelled) return;
 
-      // 2. No transcript for today — run the greeting (respecting the auto-chat gate).
+      // 2. No transcript for today — run the greeting (respecting the auto-chat gate & SEC Privacy Lock / Offline).
       if (!autoChatEnabled && !coachingRequested) return;
+      if (secPrivacyLock || !isOnline) {
+        setInitDone(true);
+        setMessages([
+          {
+            role: 'model',
+            content: secPrivacyLock
+              ? '**SEC INSIDER PRIVACY LOCK ACTIVE (`InferenceMode.ONLY_ON_DEVICE`)**\n\nBiometric telemetry is strictly sandboxed inside this browser. Submit any weight, visceral fat, meal, or recovery query below for a local Gemini Nano audit.'
+              : '**OFFLINE TERMINAL READY (`InferenceMode.PREFER_ON_DEVICE`)**\n\nNetwork connection is offline. Local IndexedDB Ledger and Chrome Gemini Nano Hybrid Parser remain operational.',
+          },
+        ]);
+        return;
+      }
       setInitDone(true);
 
       setIsLoading(true);
+      const initStartedAt = performance.now();
       try {
         const sanitizedHealth = healthData ? JSON.parse(JSON.stringify(healthData)) : {};
 
@@ -261,6 +297,8 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
           setMessages(prev => {
             const updated = [...prev];
             updated[updated.length - 1].content = streamText;
+            updated[updated.length - 1].inferenceSource = 'IN_CLOUD';
+            updated[updated.length - 1].inferenceLatencyMs = Math.round(performance.now() - initStartedAt);
             return updated;
           });
         }
@@ -274,7 +312,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
 
     runInit();
     return () => { cancelled = true; };
-  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested, db]);
+  }, [healthData, healthLoading, prefs, prefsLoading, initDone, user, autoChatEnabled, coachingRequested, db, secPrivacyLock, isOnline]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -424,6 +462,54 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
     const fullMessage = exifContext + userMessage;
 
+    // Hybrid AI Client Path: Strict On-Device SEC Privacy Lock (`ONLY_ON_DEVICE`) or Offline Mode (`PREFER_ON_DEVICE`)
+    if (secPrivacyLock || !isOnline) {
+      try {
+        const hybridRes = await runHybridCoachTurn({
+          firebaseApp,
+          userMessage: fullMessage,
+          secPrivacyLock,
+          healthData,
+          preferences: prefs,
+          attachedImages: photos.map((p) => dataUriToInlineImage(p.dataUri)),
+        });
+        recordReceipt(hybridRes.receipt);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'model',
+            content: hybridRes.replyText,
+            inferenceSource: hybridRes.receipt.inferenceSource,
+            inferenceLatencyMs: hybridRes.receipt.latencyMs,
+          },
+        ]);
+      } catch (err) {
+        if (err instanceof SecPrivacyLockBlockedError) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'model',
+              content: '',
+              secAlert: err.alert,
+            },
+          ]);
+        } else {
+          const msg = err instanceof Error ? err.message : 'Local Hybrid AI audit unavailable.';
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'model',
+              content: `**Offline / Hybrid Audit Notice**\n\n${msg}`,
+            },
+          ]);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    const requestStartedAt = performance.now();
     try {
       const idToken = await user.getIdToken();
       const payload = {
@@ -484,11 +570,14 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         });
       }
 
-      // After the stream closes, attach any agent-surfaced share offer.
+      // After the stream closes, attach any agent-surfaced share offer + execution receipt badge.
+      const totalLatencyMs = Math.round(performance.now() - requestStartedAt);
       const { text, offer } = parseShareOffer(streamText);
       setMessages(prev => {
         const updated = [...prev];
         updated[updated.length - 1].content = text;
+        updated[updated.length - 1].inferenceSource = 'IN_CLOUD';
+        updated[updated.length - 1].inferenceLatencyMs = totalLatencyMs;
         if (offer) updated[updated.length - 1].shareOffer = offer;
         return updated;
       });
@@ -702,10 +791,66 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     </div>
   );
 
+  const HybridCoachToolbar = (
+    <div className="border-b border-emerald-500/30 bg-slate-950 px-3 py-2 font-mono shrink-0 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowTickerDrawer((prev) => !prev)}
+            data-testid="coach-ticker-drawer-btn"
+            className="inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-950/50 hover:bg-emerald-900/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300 transition-colors"
+          >
+            <Terminal className="w-3 h-3 text-emerald-400" />
+            <span>{showTickerDrawer ? 'HIDE TICKER & RECEIPT BAR' : 'TICKER TAPE & RECEIPT AUDITOR'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSecPrivacyLock(!secPrivacyLock)}
+            data-testid="coach-sec-lock-btn"
+            className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+              secPrivacyLock
+                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-500/50'
+            }`}
+          >
+            {secPrivacyLock ? (
+              <>
+                <Lock className="w-3 h-3 text-emerald-300" />
+                <span>SEC PRIVACY LOCK (STRICT ON-DEVICE)</span>
+              </>
+            ) : (
+              <>
+                <Unlock className="w-3 h-3 text-amber-400" />
+                <span>SEC PRIVACY LOCK: OFF</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setEarningsModalOpen(true)}
+          data-testid="coach-earnings-call-btn"
+          className="inline-flex items-center gap-1.5 rounded border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300 transition-colors"
+        >
+          <TrendingUp className="w-3 h-3 text-amber-400" />
+          <span>RUN 30-DAY EARNINGS CALL</span>
+        </button>
+      </div>
+
+      {showTickerDrawer && (
+        <HybridTickerTerminal compact healthData={healthData} />
+      )}
+    </div>
+  );
+
   // Idle screen when auto-chat is disabled and no messages yet
   if (!autoChatEnabled && messages.length === 0 && !isLoading) {
     return (
       <div className="flex flex-col flex-1 h-0">
+        {HybridCoachToolbar}
         <PaywallModal
           isOpen={paywallOpen}
           onClose={() => setPaywallOpen(false)}
@@ -767,6 +912,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
 
   return (
     <div className="flex flex-col flex-1 h-0">
+      {HybridCoachToolbar}
       <PaywallModal
         isOpen={paywallOpen}
         onClose={() => setPaywallOpen(false)}
@@ -778,25 +924,41 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         <div className="flex flex-col gap-4">
           {messages.map((m, i) => (
             <div key={i} className={m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}>
-              <div className="flex items-center gap-2 mb-1 px-1">
+              <div className="flex flex-wrap items-center gap-2 mb-1 px-1">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase">{m.role === 'model' ? 'the CFO' : 'User'}</span>
-              </div>
-              <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}>
-                {m.images && m.images.length > 0 && (
-                  <div className={`mb-2 ${m.images.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
-                    {m.images.map((img, j) => (
-                      <Image key={j} src={img} alt={`Photo ${j + 1}`} width={400} height={300} className="rounded-lg border w-full h-auto" unoptimized />
-                    ))}
-                  </div>
-                )}
-                {m.role === 'model' ? (
-                  <div className="prose prose-sm prose-slate max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-strong:text-primary prose-headings:text-primary">
-                    <ReactMarkdown>{m.content}</ReactMarkdown>
-                  </div>
-                ) : (
-                  m.content
+                {m.role === 'model' && m.inferenceSource && (
+                  <ExecutionReceiptBadge
+                    compact
+                    inferenceSource={m.inferenceSource}
+                    latencyMs={m.inferenceLatencyMs}
+                  />
                 )}
               </div>
+              {m.secAlert ? (
+                <SecComplianceAlertPanel
+                  alert={m.secAlert}
+                  onWarmNano={warmNano}
+                  onDisableLock={() => setSecPrivacyLock(false)}
+                  className="max-w-xl"
+                />
+              ) : (
+                <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}>
+                  {m.images && m.images.length > 0 && (
+                    <div className={`mb-2 ${m.images.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
+                      {m.images.map((img, j) => (
+                        <Image key={j} src={img} alt={`Photo ${j + 1}`} width={400} height={300} className="rounded-lg border w-full h-auto" unoptimized />
+                      ))}
+                    </div>
+                  )}
+                  {m.role === 'model' ? (
+                    <div className="prose prose-sm prose-slate max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-strong:text-primary prose-headings:text-primary">
+                      <ReactMarkdown>{m.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    m.content
+                  )}
+                </div>
+              )}
               {m.role === 'model' && m.shareOffer && (
                 <div className="mt-1.5 px-1">
                   <ShareMealButton

@@ -6,8 +6,6 @@ import { adminHealthService } from '@/lib/health-service-admin';
 import { syncOuraData as _syncOuraData } from '@/lib/oura-sync';
 import type { OuraSyncResult } from '@/lib/oura-sync';
 
-export type { OuraSyncResult };
-
 const OURA_AUTH_BASE = 'https://cloud.ouraring.com';
 
 /**

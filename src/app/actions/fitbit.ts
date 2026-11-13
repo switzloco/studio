@@ -11,8 +11,6 @@ import { backfillScoreHistory } from '@/lib/score-history-sync';
 import { fitbitService } from '@/lib/fitbit-service';
 import type { SyncResult } from '@/lib/fitbit-sync';
 
-export type { SyncResult };
-
 export async function rescoreRecentDays(userId: string, localDate: string, days = 14): Promise<{ ok: boolean; scoredDays: number }> {
   return backfillScoreHistory(userId, localDate, days);
 }

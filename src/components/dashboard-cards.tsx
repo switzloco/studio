@@ -37,12 +37,16 @@ import {
 } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
-import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, rescoreRecentDays, SyncResult } from '@/app/actions/fitbit';
-import { syncOuraData, disconnectOura, getOuraAuthUrl, OuraSyncResult } from '@/app/actions/oura';
+import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, rescoreRecentDays } from '@/app/actions/fitbit';
+import type { SyncResult } from '@/lib/fitbit-sync';
+import { syncOuraData, disconnectOura, getOuraAuthUrl } from '@/app/actions/oura';
+import type { OuraSyncResult } from '@/lib/oura-sync';
 import { syncWithingsData, disconnectWithings, getWithingsAuthUrl } from '@/app/actions/withings';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { OutreachInlinePrompt } from './outreach-inline-prompt';
+import { HybridTickerTerminal } from './hybrid-ticker-terminal';
+import { useHybridAi } from './hybrid-ai-provider';
 import { computeAlpertNumber, calculateDailyVFScore, computeFastingHoursFromFoodLogs } from '@/lib/vf-scoring';
 import { computeAlpertPace, computeEatRunway } from '@/lib/alpert-pace';
 import {
@@ -116,6 +120,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { setEarningsModalOpen } = useHybridAi();
 
   const prefsRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
@@ -1200,6 +1205,14 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setEarningsModalOpen(true)}
+            data-testid="metrics-earnings-call-btn"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 shadow-sm transition-colors"
+          >
+            <span>RUN 30-DAY EARNINGS CALL</span>
+          </button>
           {!isViewingToday && (
             <Button
               variant="ghost"
@@ -1286,6 +1299,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           )}
         </div>
       </div>
+
+      {/* ── Bloomberg / CRT Hybrid Ticker Tape & Multimodal Receipt Auditor ── */}
+      <HybridTickerTerminal
+        healthData={data}
+        targetDateIso={selectedDateStr}
+      />
 
       {/* ── ROW 1: Daily Cockpit (VF Score + Calories + 3-Signal "Should I Eat Now?" & Protein To Go) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
