@@ -163,6 +163,12 @@ export async function pollDiscordOutreachReplies(): Promise<{
         );
         if (!text && !hasImageAttachments) continue;
 
+        // Founder Mode bridge bypass: messages prefixed with !vibe or !agy are routed to
+        // the founder's local Antigravity IDE bridge and ignored by the nutrition logger.
+        if (/^!(vibe|agy)\b/i.test(text)) {
+          continue;
+        }
+
         // Idempotency receipt per Discord message ID
         const receiptRef = db.doc(`users/${uid}/outreach_actions/discord_mid_${msg.id}`);
         const claimed = await db.runTransaction(async (tx) => {
