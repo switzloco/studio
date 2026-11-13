@@ -18,7 +18,27 @@ export const ParsedOutreachMealSchema = z.object({
     .describe('True if the message or attached photo shows food, drink, alcohol, or supplements consumed; false if unrelated or a pure question.'),
   isStopCommand: z
     .boolean()
-    .describe('True if the user is asking to stop, cancel, pause, or unsubscribe from messages.'),
+    .describe('True if the user is asking to stop, cancel, pause, opt out, or says "don\'t message me".'),
+  scheduleMorningHour: z
+    .number()
+    .optional()
+    .describe('If the user asks to change their morning briefing time, the new 24-hour integer (5–11).'),
+  scheduleMiddayHour: z
+    .number()
+    .optional()
+    .describe('If the user asks to change their midday briefing time, the new 24-hour integer (11–16).'),
+  scheduleNightHour: z
+    .number()
+    .optional()
+    .describe('If the user asks to change their evening/night briefing time, the new 24-hour integer (17–22).'),
+  scheduleCadence: z
+    .enum(['3x', 'morning_only'])
+    .optional()
+    .describe('If the user asks to switch to 1x/day morning-only ("morning_only") or 3x/day ("3x").'),
+  scheduleTimezone: z
+    .string()
+    .optional()
+    .describe('If the user asks to change their timezone (e.g. Eastern -> America/New_York, Central -> America/Chicago, Mountain -> America/Denver, Pacific -> America/Los_Angeles), the IANA timezone.'),
   name: z
     .string()
     .describe('Concise combined meal label, e.g. "3 Eggs + Sourdough Toast" or "1/4 Costco Hot Dog + 3 oz Pepperoni Pizza + Nurri Shake". Empty string if isFoodLog=false.'),
@@ -79,18 +99,24 @@ export function extractCleanReplyText(rawText: string): string {
  */
 export function isExplicitStopKeyword(cleanText: string): boolean {
   const lower = cleanText.trim().toLowerCase();
-  return /^(stop|unsubscribe|cancel|quit|end|off|pause)\b[.!]*$/i.test(lower);
+  if (/^(stop|unsubscribe|cancel|quit|end|off|pause|opt\s*out|remove\s*me)\b[.!]*$/i.test(lower)) {
+    return true;
+  }
+  return /\b(don'?t|do\s+not|stop)\s+(message|dm|ping|email|text|contact)(?:ing)?\s+me\b/i.test(
+    lower,
+  );
 }
 
 const OUTREACH_MEAL_SYSTEM = `You are "the CFO" — a direct, numbers-first Chief Fitness Officer replying to a client's quick email or Discord update.
 Convert their meal text and/or attached meal or nutrition-label photo(s) into ONE summed macro entry, plus a sharp 1-sentence agentReply.
 
 RULES:
-1. If the user asks to unsubscribe, stop, or cancel messages, set isStopCommand=true, isFoodLog=false, and agentReply="Done — your automated briefings are canceled."
-2. If photos are attached, read nutrition labels or estimate plate portions visually with high precision and sum everything shown + mentioned into ONE combined entry.
-3. Respect exact fractions, weights, and restaurant/branded specs (e.g. "1/4 costco hot dog" = 0.25x a full 570 kcal / 24g P Costco beef hot dog & bun; "3 oz costco pepperoni pizza" = 85g portion ~220 kcal / 11.5g P, NOT a full 8.9 oz slice; "1 nurri shake" = Nurri 11 fl oz ultra-filtered milk shake = 150 kcal, 30g P, 3g C, 2.5g F).
-4. Keep portionG, calories, proteinG, carbsG, and fatG realistic and internally consistent (4*P + 4*C + 9*F + 7*alcohol_g ≈ calories).
-5. If the user asks a quick question without logging food, set isFoodLog=false and answer directly in agentReply in 1–2 concise sentences.`;
+1. If the user asks to unsubscribe, stop, cancel messages, or says "don't message me", set isStopCommand=true, isFoodLog=false, and agentReply="Done — your automated briefings are canceled."
+2. If the user asks to customize their briefing schedule (e.g. "message me at 8am, 1pm, and 8pm", "only ping me in the morning", "I'm on Eastern time"), populate scheduleMorningHour / scheduleMiddayHour / scheduleNightHour / scheduleCadence / scheduleTimezone accordingly and confirm the new schedule in agentReply.
+3. If photos are attached, read nutrition labels or estimate plate portions visually with high precision and sum everything shown + mentioned into ONE combined entry.
+4. Respect exact fractions, weights, and restaurant/branded specs (e.g. "1/4 costco hot dog" = 0.25x a full 570 kcal / 24g P Costco beef hot dog & bun; "3 oz costco pepperoni pizza" = 85g portion ~220 kcal / 11.5g P, NOT a full 8.9 oz slice; "1 nurri shake" = Nurri 11 fl oz ultra-filtered milk shake = 150 kcal, 30g P, 3g C, 2.5g F).
+5. Keep portionG, calories, proteinG, carbsG, and fatG realistic and internally consistent (4*P + 4*C + 9*F + 7*alcohol_g ≈ calories).
+6. If the user asks a quick question without logging food, set isFoodLog=false and answer directly in agentReply in 1–2 concise sentences.`;
 
 export interface OutreachImageAttachment {
   dataUri: string;

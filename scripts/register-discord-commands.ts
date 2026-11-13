@@ -39,6 +39,24 @@ const COMMANDS = [
         type: 3, // STRING
         required: false,
       },
+      {
+        name: 'morning_hour',
+        description: 'Morning briefing hour in 24h time (5–10, default: 7)',
+        type: 4, // INTEGER
+        required: false,
+      },
+      {
+        name: 'midday_hour',
+        description: 'Midday briefing hour in 24h time (11–15, default: 12)',
+        type: 4, // INTEGER
+        required: false,
+      },
+      {
+        name: 'night_hour',
+        description: 'Evening briefing hour in 24h time (17–21, default: 19)',
+        type: 4, // INTEGER
+        required: false,
+      },
     ],
   },
   {

@@ -866,6 +866,34 @@ export async function processOutreachFreeTextMeal(params: {
     };
   }
 
+  // Apply natural-language schedule updates ("ping me at 8am", "morning only", "I'm on EST")
+  if (
+    parsed.scheduleMorningHour !== undefined ||
+    parsed.scheduleMiddayHour !== undefined ||
+    parsed.scheduleNightHour !== undefined ||
+    parsed.scheduleCadence !== undefined ||
+    parsed.scheduleTimezone !== undefined
+  ) {
+    await saveUserOutreachSettings({
+      uid: params.uid,
+      outreach: {
+        ...(outreach ?? {}),
+        enabled: true,
+        ...(parsed.scheduleMorningHour !== undefined
+          ? { morningHour: parsed.scheduleMorningHour }
+          : {}),
+        ...(parsed.scheduleMiddayHour !== undefined
+          ? { middayHour: parsed.scheduleMiddayHour }
+          : {}),
+        ...(parsed.scheduleNightHour !== undefined
+          ? { nightHour: parsed.scheduleNightHour }
+          : {}),
+        ...(parsed.scheduleCadence !== undefined ? { cadence: parsed.scheduleCadence } : {}),
+        ...(parsed.scheduleTimezone ? { timezone: parsed.scheduleTimezone } : {}),
+      },
+    });
+  }
+
   if (!parsed.isFoodLog || !parsed.name) {
     const { composed } = await buildLiveUserOutreach({ uid: params.uid });
     const replyLine =

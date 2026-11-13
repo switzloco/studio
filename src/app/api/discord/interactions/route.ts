@@ -117,6 +117,9 @@ export async function POST(request: NextRequest) {
     if (cmdName === 'start') {
       const tz = String(getOpt('timezone') || 'America/Los_Angeles');
       const emailOpt = String(getOpt('email') || '').trim().toLowerCase();
+      const morningHour = getOpt('morning_hour') !== undefined ? Number(getOpt('morning_hour')) : undefined;
+      const middayHour = getOpt('midday_hour') !== undefined ? Number(getOpt('midday_hour')) : undefined;
+      const nightHour = getOpt('night_hour') !== undefined ? Number(getOpt('night_hour')) : undefined;
 
       let matchedUid: string | null = null;
       let existingChannel: 'email' | 'discord' | 'both' = 'discord';
@@ -156,6 +159,9 @@ export async function POST(request: NextRequest) {
           discordUserId,
           discordChannelId: dmChannelId,
           timezone: tz,
+          ...(morningHour !== undefined ? { morningHour } : {}),
+          ...(middayHour !== undefined ? { middayHour } : {}),
+          ...(nightHour !== undefined ? { nightHour } : {}),
         },
       });
 

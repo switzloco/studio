@@ -191,7 +191,14 @@ export async function pollDiscordOutreachReplies(): Promise<{
           continue;
         }
 
-        if (!hasImageAttachments && lowerText === '/stop') {
+        if (
+          !hasImageAttachments &&
+          (lowerText === '/stop' ||
+            /^(stop|unsubscribe|cancel|quit|off|opt\s*out|remove\s*me)\b[.!]*$/i.test(text) ||
+            /\b(don'?t|do\s+not|stop)\s+(message|dm|ping|email|text|contact)(?:ing)?\s+me\b/i.test(
+              text,
+            ))
+        ) {
           const stopRes = await executeOutreachQuickAction({ uid, action: 'unsubscribe' });
           await sendDiscordDmReply({
             channelId,
