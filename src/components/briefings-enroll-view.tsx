@@ -220,11 +220,11 @@ export function BriefingsEnrollView() {
             <div className="space-y-3 pt-1">
               <div className="rounded-2xl border bg-emerald-50/70 border-emerald-500/30 p-4 space-y-1">
                 <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-emerald-800">
-                  <span>7:00 AM · Morning Briefing</span>
-                  <span>Good From Yesterday</span>
+                  <span>7:00 AM · Morning Check-In</span>
+                  <span>Fueled Until Lunch</span>
                 </div>
                 <p className="text-sm font-black text-slate-900">
-                  You&apos;re good from yesterday — Ride fat burn until 12:30 PM
+                  Last night&apos;s fuel holds — eat by 12:30 PM
                 </p>
                 <p className="text-xs text-slate-600">
                   Liver glycogen covers morning output cleanly while fat oxidation runs at 68 kcal/hr.
@@ -250,7 +250,7 @@ export function BriefingsEnrollView() {
                   <span>Overnight Check</span>
                 </div>
                 <p className="text-sm font-black text-slate-900">
-                  You&apos;re good through 8:00 AM tomorrow — Close the kitchen
+                  Fueled through 8:00 AM tomorrow — close the kitchen
                 </p>
                 <p className="text-xs text-slate-600">
                   Sleep fat oxidation covers overnight BMR cleanly. Projected VF Score: +135 pts.

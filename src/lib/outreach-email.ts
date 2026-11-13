@@ -168,9 +168,13 @@ export function renderOutreachEmailHtml(params: {
        </div>`
     : '';
 
+  const preheaderText = `${composed.lastFoodLine} What else did you have? Reply in plain English or attach a photo.`;
   const html = `<!DOCTYPE html>
 <html>
   <body style="margin:0;padding:16px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#f8fafc;">
+      ${escapeHtml(preheaderText)}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;
+    </div>
     <div style="max-width:540px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <span style="font-size:11px;font-weight:800;letter-spacing:0.12em;color:${palette.pill};text-transform:uppercase;">

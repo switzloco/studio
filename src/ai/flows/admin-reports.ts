@@ -107,19 +107,52 @@ export async function sendFounderUserSummaryNow(params?: {
   const stateRef = db.doc('admin_state/user_summary_3d');
   const nowMs = Date.now();
 
+  let previousLastSentAtMs = 0;
   if (!force) {
-    const snap = await stateRef.get();
-    const lastSentAtMs = Number(snap.data()?.lastSentAtMs || 0);
-    if (lastSentAtMs > 0) {
-      const hoursElapsed = (nowMs - lastSentAtMs) / (3600 * 1000);
-      if (hoursElapsed < MIN_HOURS_BETWEEN_SENDS) {
+    const gate = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const data = snap.data();
+      const lastSentAtMs = Number(data?.lastSentAtMs || 0);
+      previousLastSentAtMs = lastSentAtMs;
+      if (lastSentAtMs > 0) {
+        const hoursElapsed = (nowMs - lastSentAtMs) / (3600 * 1000);
+        if (hoursElapsed < MIN_HOURS_BETWEEN_SENDS) {
+          return {
+            claimed: false as const,
+            hoursSinceLast: Number(hoursElapsed.toFixed(1)),
+            nextDueInHours: Number((72 - hoursElapsed).toFixed(1)),
+          };
+        }
+      }
+      if (
+        data?.status === 'sending' &&
+        nowMs - Number(data.claimedAtMs || 0) < 10 * 60 * 1000
+      ) {
         return {
-          ok: true,
-          skipped: true,
-          hoursSinceLast: Number(hoursElapsed.toFixed(1)),
-          nextDueInHours: Number((72 - hoursElapsed).toFixed(1)),
+          claimed: false as const,
+          hoursSinceLast: 0,
+          nextDueInHours: 72,
         };
       }
+      tx.set(
+        stateRef,
+        {
+          status: 'sending',
+          claimedAtMs: nowMs,
+          lastSentAtMs: nowMs,
+        },
+        { merge: true },
+      );
+      return { claimed: true as const };
+    });
+
+    if (!gate.claimed) {
+      return {
+        ok: true,
+        skipped: true,
+        hoursSinceLast: gate.hoursSinceLast,
+        nextDueInHours: gate.nextDueInHours,
+      };
     }
   }
 
@@ -132,10 +165,19 @@ export async function sendFounderUserSummaryNow(params?: {
   if (emailRes.success) {
     await stateRef.set(
       {
+        status: 'sent',
         lastSentAtMs: nowMs,
         lastSentIso: new Date(nowMs).toISOString(),
         periodDays: metrics.periodDays,
         updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } else if (!force) {
+    await stateRef.set(
+      {
+        status: 'failed',
+        lastSentAtMs: previousLastSentAtMs,
       },
       { merge: true },
     );

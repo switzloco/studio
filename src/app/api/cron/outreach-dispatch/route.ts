@@ -143,3 +143,5 @@ export async function GET(request: NextRequest) {
     failed,
   });
 }
+
+export const POST = GET;

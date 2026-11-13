@@ -146,8 +146,9 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.goodFromYesterday).toBe(true);
-    expect(msg.headline).toContain("You're good from yesterday");
-    expect(msg.headline).toMatch(/Eat by/i);
+    expect(msg.subject).toMatch(/^Morning Check-In: Fueled until/i);
+    expect(msg.headline).toContain("Last night's fuel holds");
+    expect(msg.headline).toMatch(/eat by/i);
   });
 
   it('Morning: gives a crisp early Eat-By / Eat Now prompt after a deep deficit yesterday', () => {
@@ -189,7 +190,7 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.goodFromYesterday).toBe(false);
-    expect(msg.headline).toMatch(/Eat (by|Now)/i);
+    expect(msg.headline).toMatch(/(by|eat ~40g protein now)/i);
   });
 
   it('Midday: recognizes recent lunch and tells user when to eat next', () => {
@@ -211,11 +212,12 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
       ],
     });
 
-    expect(msg.headline).toContain('Good from your last meal');
-    expect(msg.headline).toMatch(/Eat next by/i);
+    expect(msg.subject).toMatch(/^Midday Check-In: Fueled until/i);
+    expect(msg.headline).toContain('Last meal is still working');
+    expect(msg.headline).toMatch(/eat next by/i);
   });
 
-  it('Night: confirms "good through 8:00 AM tomorrow" when energy & protein targets are met', () => {
+  it('Night: confirms "fueled through 8:00 AM tomorrow" when energy & protein targets are met', () => {
     const msg = composeOutreachDispatch({
       window: 'night',
       localDate: '2026-11-11',
@@ -229,7 +231,7 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.safeThroughTomorrowMorning).toBe(true);
-    expect(msg.headline).toContain("You're good through 8:00 AM tomorrow");
+    expect(msg.headline).toContain('Fueled through 8:00 AM tomorrow');
   });
 
   it('evaluates quiet-user auto-sunset thresholds at 5 and 10 days', () => {

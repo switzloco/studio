@@ -270,6 +270,15 @@ export async function dispatchOutreachForUser(params: {
 
   const clock = resolveLocalClock(params.now ?? new Date(), outreach.timezone);
   const dispatchKey = `${clock.localDate}:${params.window}`;
+  const settingsRef = db.doc(`users/${params.uid}/preferences/settings`);
+  const lockRef = db.doc(
+    `users/${params.uid}/outreach_actions/dispatch_${clock.localDate}_${params.window}`,
+  );
+  const previousDispatchedKey = outreach.lastDispatchedKey ?? null;
+
+  // Evaluate quiet-user auto-sunset policy
+  let effectiveCadence = outreach.cadence;
+  let autoSunsetNotice: 'downshifted_to_morning' | null = null;
 
   if (!params.force) {
     if (outreach.pausedUntilDate && outreach.pausedUntilDate >= clock.localDate) {
@@ -278,13 +287,7 @@ export async function dispatchOutreachForUser(params: {
     if (outreach.lastDispatchedKey === dispatchKey) {
       return { status: 'skipped', reason: 'already_dispatched' };
     }
-  }
 
-  // Evaluate quiet-user auto-sunset policy
-  let effectiveCadence = outreach.cadence;
-  let autoSunsetNotice: 'downshifted_to_morning' | null = null;
-
-  if (!params.force) {
     const sunset = evaluateAutoSunset({
       localDate: clock.localDate,
       lastInteractionDate: outreach.lastInteractionDate,
@@ -292,16 +295,26 @@ export async function dispatchOutreachForUser(params: {
     });
 
     if (sunset.decision === 'auto_pause') {
-      await db.doc(`users/${params.uid}/preferences/settings`).set(
-        {
-          outreach: {
-            ...outreach,
-            enabled: false,
-            autoPausedAt: new Date().toISOString(),
+      const claimedPause = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(settingsRef);
+        const live = snap.data()?.outreach;
+        if (!live?.enabled) return false;
+        tx.set(
+          settingsRef,
+          {
+            outreach: {
+              ...live,
+              enabled: false,
+              autoPausedAt: new Date().toISOString(),
+            },
           },
-        },
-        { merge: true },
-      );
+          { merge: true },
+        );
+        return true;
+      });
+      if (!claimedPause) {
+        return { status: 'skipped', reason: 'outreach_disabled' };
+      }
       await adminHealthService.updateHealthData(db, params.uid, { outreachEnabled: false });
 
       if (outreach.email && (outreach.channel === 'email' || outreach.channel === 'both')) {
@@ -320,20 +333,76 @@ export async function dispatchOutreachForUser(params: {
     if (sunset.decision === 'downshift_to_morning') {
       effectiveCadence = 'morning_only';
       autoSunsetNotice = 'downshifted_to_morning';
-      await db.doc(`users/${params.uid}/preferences/settings`).set(
-        {
-          outreach: {
-            ...outreach,
-            cadence: 'morning_only',
-            autoDownshiftedAt: new Date().toISOString(),
-          },
-        },
-        { merge: true },
-      );
     }
 
     if (effectiveCadence === 'morning_only' && params.window !== 'morning') {
+      if (autoSunsetNotice === 'downshifted_to_morning') {
+        await settingsRef.set(
+          {
+            outreach: {
+              ...outreach,
+              cadence: 'morning_only',
+              autoDownshiftedAt: new Date().toISOString(),
+            },
+          },
+          { merge: true },
+        );
+      }
       return { status: 'skipped', reason: 'morning_only_cadence' };
+    }
+
+    // Atomic single-winner claim BEFORE sending SMTP/Discord (prevents duplicate sends on cold-start proxy retries)
+    const claimResult = await db.runTransaction(async (tx) => {
+      const [lockSnap, freshSettingsSnap] = await Promise.all([
+        tx.get(lockRef),
+        tx.get(settingsRef),
+      ]);
+      const liveOutreach = freshSettingsSnap.data()?.outreach ?? outreach;
+      if (!liveOutreach?.enabled) return 'outreach_disabled' as const;
+      if (liveOutreach.pausedUntilDate && liveOutreach.pausedUntilDate >= clock.localDate) {
+        return 'paused' as const;
+      }
+      if (liveOutreach.lastDispatchedKey === dispatchKey) {
+        return 'already_dispatched' as const;
+      }
+
+      const lockData = lockSnap.data();
+      const nowMs = Date.now();
+      if (lockData?.status === 'sent') {
+        return 'already_dispatched' as const;
+      }
+      if (
+        lockData?.status === 'sending' &&
+        nowMs - Number(lockData.claimedAtMs || 0) < 10 * 60 * 1000
+      ) {
+        return 'already_dispatched' as const;
+      }
+
+      tx.set(lockRef, {
+        type: 'scheduled_dispatch',
+        dispatchKey,
+        status: 'sending',
+        claimedAtMs: nowMs,
+      });
+      tx.set(
+        settingsRef,
+        {
+          outreach: adminHealthService.deepClean({
+            ...liveOutreach,
+            cadence: effectiveCadence,
+            ...(autoSunsetNotice === 'downshifted_to_morning'
+              ? { autoDownshiftedAt: new Date().toISOString() }
+              : {}),
+            lastDispatchedKey: dispatchKey,
+          }),
+        },
+        { merge: true },
+      );
+      return 'claimed' as const;
+    });
+
+    if (claimResult !== 'claimed') {
+      return { status: 'skipped', reason: claimResult };
     }
   }
 
@@ -391,6 +460,23 @@ export async function dispatchOutreachForUser(params: {
   }
 
   if (!anySent) {
+    if (!params.force) {
+      await Promise.all([
+        lockRef.delete().catch(() => undefined),
+        settingsRef
+          .set(
+            {
+              outreach: adminHealthService.deepClean({
+                ...outreach,
+                cadence: effectiveCadence,
+                lastDispatchedKey: previousDispatchedKey ?? FieldValue.delete(),
+              }),
+            },
+            { merge: true },
+          )
+          .catch(() => undefined),
+      ]);
+    }
     return {
       status: 'failed',
       reason: errors.join('; ') || 'No configured delivery channel succeeded',
@@ -398,17 +484,25 @@ export async function dispatchOutreachForUser(params: {
     };
   }
 
-  await db.doc(`users/${params.uid}/preferences/settings`).set(
-    {
-      outreach: adminHealthService.deepClean({
-        ...outreach,
-        cadence: effectiveCadence,
-        discordChannelId: cachedDiscordChannelId,
-        lastDispatchedKey: dispatchKey,
-      }),
-    },
-    { merge: true },
-  );
+  await Promise.all([
+    !params.force
+      ? lockRef.set(
+          { status: 'sent', sentAtMs: Date.now() },
+          { merge: true },
+        )
+      : Promise.resolve(),
+    settingsRef.set(
+      {
+        outreach: adminHealthService.deepClean({
+          ...outreach,
+          cadence: effectiveCadence,
+          discordChannelId: cachedDiscordChannelId,
+          lastDispatchedKey: dispatchKey,
+        }),
+      },
+      { merge: true },
+    ),
+  ]);
 
   const windowTitle = params.isWelcome
     ? 'Welcome Briefing'
