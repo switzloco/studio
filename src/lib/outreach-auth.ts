@@ -18,7 +18,8 @@ export type OutreachActionType =
   | 'dinner_standard'
   | 'still_fasting'
   | 'kitchen_closed'
-  | 'undo_food';
+  | 'undo_food'
+  | 'view_ledger';
 
 export interface OutreachTokenPayload {
   uid: string;
@@ -68,7 +69,8 @@ export function signOutreachToken(
     payload.action === 'unsubscribe' ||
     payload.action === 'pause_7d' ||
     payload.action === 'morning_only' ||
-    payload.action === 'resume_3x';
+    payload.action === 'resume_3x' ||
+    payload.action === 'view_ledger';
 
   const defaultTtl = isControlAction ? 365 * 24 * 3600 : 7 * 24 * 3600;
   const exp = payload.exp ?? Math.floor(Date.now() / 1000) + (payload.ttlSeconds ?? defaultTtl);

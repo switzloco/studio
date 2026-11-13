@@ -2,10 +2,12 @@ import { after, NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
 import {
+  buildDiscordLedgerStatusPayload,
   openDiscordDmChannel,
   sendOutreachDiscordDM,
   verifyDiscordSignature,
 } from '@/lib/outreach-discord';
+import { buildOutreachActionUrl } from '@/lib/outreach-email';
 import { fetchDiscordImageAttachments } from '@/lib/outreach-discord-inbound';
 import type { OutreachActionType } from '@/lib/outreach-auth';
 import type { OutreachWindow } from '@/lib/health-service';
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest) {
 
       const { composed } = await buildLiveUserOutreach({ uid });
       await sendOutreachDiscordDM({
+        uid,
         discordUserId,
         discordChannelId: dmChannelId,
         cadence: '3x',
@@ -207,11 +210,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (cmdName === 'status') {
-      const { composed } = await buildLiveUserOutreach({ uid });
+      const { composed, todayFoods, proteinGoal } = await buildLiveUserOutreach({ uid });
+      const statusPayload = buildDiscordLedgerStatusPayload({
+        uid,
+        composed,
+        todayFoods,
+        proteinGoal,
+      });
       return NextResponse.json({
         type: 4,
         data: {
-          content: `**${composed.headline}**\n${composed.body}\n\`${composed.metricsLine}\``,
+          ...statusPayload,
           flags: EPHEMERAL_FLAG,
         },
       });
@@ -246,22 +255,21 @@ export async function POST(request: NextRequest) {
             rawText: mealText,
             photoDataUris,
           });
-          const components =
-            parsedRes.loggedFoodId && parsedRes.localDate
-              ? [
-                  {
-                    type: 1,
-                    components: [
-                      {
-                        type: 2,
-                        style: 2,
-                        label: 'Undo Entry',
-                        custom_id: `outreach:undo:${parsedRes.loggedFoodId}:${parsedRes.localDate}`,
-                      },
-                    ],
-                  },
-                ]
-              : undefined;
+          const rowButtons: Array<Record<string, unknown>> = [];
+          if (parsedRes.loggedFoodId && parsedRes.localDate) {
+            rowButtons.push({
+              type: 2,
+              style: 2,
+              label: 'Undo Entry',
+              custom_id: `outreach:undo:${parsedRes.loggedFoodId}:${parsedRes.localDate}`,
+            });
+          }
+          rowButtons.push({
+            type: 2,
+            style: 5,
+            label: 'View Ledger',
+            url: buildOutreachActionUrl({ uid, action: 'view_ledger' }),
+          });
           await fetch(
             `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`,
             {
@@ -269,7 +277,7 @@ export async function POST(request: NextRequest) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 content: `**${parsedRes.headline}**\n${parsedRes.agentReply || parsedRes.detail}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
-                ...(components ? { components } : {}),
+                components: [{ type: 1, components: rowButtons }],
               }),
             },
           );

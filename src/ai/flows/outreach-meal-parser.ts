@@ -39,6 +39,10 @@ export const ParsedOutreachMealSchema = z.object({
     .string()
     .optional()
     .describe('If the user asks to change their timezone (e.g. Eastern -> America/New_York, Central -> America/Chicago, Mountain -> America/Denver, Pacific -> America/Los_Angeles), the IANA timezone.'),
+  removeFoodId: z
+    .string()
+    .optional()
+    .describe('If the user asks to delete/remove a specific meal from Today\'s Ledger, set this to that meal\'s exact id from the provided ledger list.'),
   name: z
     .string()
     .describe('Concise combined meal label, e.g. "3 Eggs + Sourdough Toast" or "1/4 Costco Hot Dog + 3 oz Pepperoni Pizza + Nurri Shake". Empty string if isFoodLog=false.'),
@@ -116,7 +120,7 @@ RULES:
 3. If photos are attached, read nutrition labels or estimate plate portions visually with high precision and sum everything shown + mentioned into ONE combined entry.
 4. Respect exact fractions, weights, and restaurant/branded specs (e.g. "1/4 costco hot dog" = 0.25x a full 570 kcal / 24g P Costco beef hot dog & bun; "3 oz costco pepperoni pizza" = 85g portion ~220 kcal / 11.5g P, NOT a full 8.9 oz slice; "1 nurri shake" = Nurri 11 fl oz ultra-filtered milk shake = 150 kcal, 30g P, 3g C, 2.5g F).
 5. Keep portionG, calories, proteinG, carbsG, and fatG realistic and internally consistent (4*P + 4*C + 9*F + 7*alcohol_g ≈ calories).
-6. If the user asks a quick question without logging food, set isFoodLog=false and answer directly in agentReply in 1–2 concise sentences.`;
+6. If the user asks a question about their ledger, dupes, macros, or what to eat next without logging new food, set isFoodLog=false and answer directly in agentReply using the provided Today's Ledger context (list the exact entries and totals so they can verify). If they ask to delete/remove a logged entry, set removeFoodId to its id and confirm in agentReply.`;
 
 export interface OutreachImageAttachment {
   dataUri: string;
@@ -128,6 +132,15 @@ export async function parseOutreachMealText(params: {
   rawText: string;
   localTime: string;
   photoDataUris?: OutreachImageAttachment[];
+  todayFoods?: Array<{
+    id?: string;
+    name: string;
+    calories: number;
+    proteinG: number;
+    plantMassG?: number;
+    consumedAt?: string;
+  }>;
+  proteinGoal?: number;
 }): Promise<ParsedOutreachMeal> {
   const cleanText = extractCleanReplyText(params.rawText);
   const photos = (params.photoDataUris ?? []).slice(0, 3);
@@ -163,9 +176,20 @@ export async function parseOutreachMealText(params: {
     };
   }
 
+  const ledgerLines = (params.todayFoods ?? []).map(
+    (f, idx) =>
+      `#${idx + 1} [id=${f.id || 'none'}] ${f.consumedAt || ''} ${f.name} (${f.calories} kcal, ${f.proteinG}g P${f.plantMassG ? `, ${f.plantMassG}g plants` : ''})`,
+  );
+  const totalKcal = (params.todayFoods ?? []).reduce((s, f) => s + (f.calories || 0), 0);
+  const totalP = (params.todayFoods ?? []).reduce((s, f) => s + (f.proteinG || 0), 0);
+  const ledgerContext =
+    ledgerLines.length > 0
+      ? `Today's Active Ledger (${ledgerLines.length} entry/entries, total ${totalKcal} kcal, ${totalP}g / ${params.proteinGoal ?? 150}g protein):\n${ledgerLines.join('\n')}`
+      : `Today's Active Ledger: 0 entries logged today (0 kcal, 0g / ${params.proteinGoal ?? 150}g protein).`;
+
   const textPrompt = cleanText
-    ? `Local time: ${params.localTime}\nClient reply: "${cleanText}"`
-    : `Local time: ${params.localTime}\nClient attached ${photos.length} meal/nutrition-label photo(s) with no text — identify and log what is shown.`;
+    ? `Local time: ${params.localTime}\n${ledgerContext}\nClient message: "${cleanText}"`
+    : `Local time: ${params.localTime}\n${ledgerContext}\nClient attached ${photos.length} meal/nutrition-label photo(s) with no text — identify and log what is shown.`;
 
   const promptParts = hasPhotos
     ? [

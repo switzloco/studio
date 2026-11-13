@@ -11,7 +11,7 @@ import type {
   OutreachPreferences,
   OutreachWindow,
 } from './health-service';
-import { inferMealFromTime, type ChatMessage } from './food-exercise-types';
+import { inferMealFromTime, type ChatMessage, type FoodLogEntry } from './food-exercise-types';
 import {
   addIsoDays,
   normalizeTimezone,
@@ -213,6 +213,10 @@ export async function buildLiveUserOutreach(params: {
   composed: ComposedOutreachMessage;
   outreach: OutreachPreferences | undefined;
   localTime: string;
+  localDate: string;
+  todayFoods: FoodLogEntry[];
+  yesterdayFoods: FoodLogEntry[];
+  proteinGoal: number;
 }> {
   const db = getAdminFirestore();
   const [health, prefs] = await Promise.all([
@@ -243,7 +247,15 @@ export async function buildLiveUserOutreach(params: {
     autoSunsetNotice: params.autoSunsetNotice,
   });
 
-  return { composed, outreach, localTime: clock.localTime };
+  return {
+    composed,
+    outreach,
+    localTime: clock.localTime,
+    localDate: clock.localDate,
+    todayFoods,
+    yesterdayFoods,
+    proteinGoal: prefs?.targets?.proteinGoal ?? 150,
+  };
 }
 
 /**
@@ -444,6 +456,7 @@ export async function dispatchOutreachForUser(params: {
     (outreach.discordUserId || outreach.discordChannelId)
   ) {
     const discordRes = await sendOutreachDiscordDM({
+      uid: params.uid,
       discordUserId: outreach.discordUserId,
       discordChannelId: outreach.discordChannelId,
       cadence: effectiveCadence,
@@ -849,11 +862,21 @@ export async function processOutreachFreeTextMeal(params: {
     };
   }
 
+  const todayFoodsBeforeParse = await adminHealthService.queryFoodLog(
+    db,
+    params.uid,
+    clock.localDate,
+    50,
+  );
+  const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
+
   const parsed = await parseOutreachMealText({
     uid: params.uid,
     rawText: params.rawText,
     localTime: clock.localTime,
     photoDataUris: params.photoDataUris,
+    todayFoods: todayFoodsBeforeParse,
+    proteinGoal,
   });
 
   if (parsed.isStopCommand) {
@@ -863,6 +886,25 @@ export async function processOutreachFreeTextMeal(params: {
       headline: 'Briefings Canceled',
       detail: 'You are unsubscribed and will receive no further automated briefings.',
       agentReply: parsed.agentReply,
+    };
+  }
+
+  // Handle natural-language request to delete/remove a specific meal from Today's Ledger
+  if (parsed.removeFoodId) {
+    const undoRes = await executeOutreachQuickAction({
+      uid: params.uid,
+      action: 'undo_food',
+      foodId: parsed.removeFoodId,
+      date: clock.localDate,
+    });
+    return {
+      status: 'replied',
+      headline: undoRes.updatedHeadline || undoRes.title,
+      detail: parsed.agentReply || undoRes.detail,
+      agentReply: parsed.agentReply || undoRes.detail,
+      updatedHeadline: undoRes.updatedHeadline,
+      updatedBody: undoRes.updatedBody,
+      localDate: clock.localDate,
     };
   }
 

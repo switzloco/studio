@@ -10,6 +10,8 @@
 import crypto from 'crypto';
 import type { ComposedOutreachMessage } from './outreach-composer';
 import type { OutreachCadence } from './health-service';
+import type { FoodLogEntry } from './food-exercise-types';
+import { buildOutreachActionUrl } from './outreach-email';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const ED25519_SPKI_PREFIX_HEX = '302a300506032b6570032100';
@@ -41,10 +43,11 @@ export function verifyDiscordSignature(params: {
 }
 
 export function buildDiscordOutreachPayload(params: {
+  uid?: string;
   cadence: OutreachCadence;
   composed: ComposedOutreachMessage;
 }) {
-  const { cadence, composed } = params;
+  const { uid, cadence, composed } = params;
   const colors = {
     good: 0x10b981,
     soon: 0xf59e0b,
@@ -57,7 +60,7 @@ export function buildDiscordOutreachPayload(params: {
     night: 'the CFO · Evening Closeout',
   } as const;
 
-  const quickButtons = composed.quickActions.slice(0, 3).map((btn) => ({
+  const quickButtons: Array<Record<string, unknown>> = composed.quickActions.slice(0, 3).map((btn) => ({
     type: 2, // BUTTON
     style: btn.style === 'primary' ? 1 : 2, // 1 = Primary (Blurple), 2 = Secondary (Grey)
     label: btn.label.slice(0, 80),
@@ -75,7 +78,16 @@ export function buildDiscordOutreachPayload(params: {
   const toggleAction = cadence === '3x' ? 'morning_only' : 'resume_3x';
   const toggleLabel = cadence === '3x' ? 'Morning-Only (1x)' : 'Resume 3x/Day';
 
-  const controlButtons = [
+  const controlButtons: Array<Record<string, unknown>> = [];
+  if (uid) {
+    controlButtons.push({
+      type: 2,
+      style: 5, // LINK BUTTON
+      label: 'View Ledger',
+      url: buildOutreachActionUrl({ uid, action: 'view_ledger' }),
+    });
+  }
+  controlButtons.push(
     {
       type: 2,
       style: 2,
@@ -94,7 +106,7 @@ export function buildDiscordOutreachPayload(params: {
       label: 'Cancel Pings',
       custom_id: `outreach:ctrl:unsubscribe:${composed.localDate}`,
     },
-  ];
+  );
 
   const descriptionParts = [
     composed.autoSunsetBanner ? `_${composed.autoSunsetBanner}_\n` : '',
@@ -118,6 +130,85 @@ export function buildDiscordOutreachPayload(params: {
       { type: 1, components: quickButtons },
       { type: 1, components: controlButtons },
     ],
+  };
+}
+
+function renderProgressBar(current: number, goal: number, width = 10): string {
+  const ratio = Math.max(0, Math.min(1, current / Math.max(1, goal)));
+  const filled = Math.round(ratio * width);
+  return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
+}
+
+export function buildDiscordLedgerStatusPayload(params: {
+  uid: string;
+  composed: ComposedOutreachMessage;
+  todayFoods: FoodLogEntry[];
+  proteinGoal: number;
+}) {
+  const { uid, composed, todayFoods, proteinGoal } = params;
+  const colors = {
+    good: 0x10b981,
+    soon: 0xf59e0b,
+    urgent: 0xef4444,
+  } as const;
+
+  const totalKcal = Math.round(todayFoods.reduce((s, f) => s + (f.calories || 0), 0));
+  const totalProtein = Math.round(todayFoods.reduce((s, f) => s + (f.proteinG || 0), 0));
+  const totalPlants = Math.round(todayFoods.reduce((s, f) => s + (f.plantMassG || 0), 0));
+
+  const proteinBar = `${renderProgressBar(totalProtein, proteinGoal)} ${totalProtein}g / ${proteinGoal}g`;
+  const plantBar = `${renderProgressBar(totalPlants, 800)} ${totalPlants}g / 800g`;
+
+  const mealLines =
+    todayFoods.length > 0
+      ? todayFoods
+          .map(
+            (f, idx) =>
+              `**#${idx + 1}** · \`${f.consumedAt || 'today'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P${f.plantMassG ? ` · ${Math.round(f.plantMassG)}g plants` : ''})`,
+          )
+          .join('\n')
+      : '_No meals on today\'s ledger yet._';
+
+  const row1: Array<Record<string, unknown>> = [
+    {
+      type: 2,
+      style: 5, // LINK BUTTON
+      label: 'Open Web Ledger',
+      url: buildOutreachActionUrl({ uid, action: 'view_ledger' }),
+    },
+    {
+      type: 2,
+      style: 3,
+      label: 'Log Meal',
+      custom_id: `outreach:modal:log_meal:${composed.localDate}`,
+    },
+  ];
+
+  // Add 1-tap Remove #N buttons for up to 3 meals right inside Discord
+  todayFoods.slice(0, 3).forEach((f, idx) => {
+    if (f.id) {
+      row1.push({
+        type: 2,
+        style: 2,
+        label: `Remove #${idx + 1}`,
+        custom_id: `outreach:undo:${f.id}:${composed.localDate}`,
+      });
+    }
+  });
+
+  return {
+    embeds: [
+      {
+        author: { name: `the CFO · Live Ledger (${composed.localDate})` },
+        title: composed.headline,
+        description: `${composed.body}\n\n**Protein:** \`${proteinBar}\`\n**Plants:** \`${plantBar}\`\n**Calories In:** \`${totalKcal} kcal\`\n\n**Today's Logged Entries (${todayFoods.length}):**\n${mealLines}`,
+        color: colors[composed.statusTone],
+        footer: {
+          text: 'Tap Remove # to delete an entry, or Open Web Ledger for full view',
+        },
+      },
+    ],
+    components: [{ type: 1, components: row1 }],
   };
 }
 
@@ -160,6 +251,7 @@ export async function openDiscordDmChannel(discordUserId: string): Promise<{
  * Sends a Morning/Midday/Night CFO dispatch to a Discord user via cached channel or fresh DM.
  */
 export async function sendOutreachDiscordDM(params: {
+  uid?: string;
   discordUserId?: string;
   discordChannelId?: string;
   cadence: OutreachCadence;
@@ -185,6 +277,7 @@ export async function sendOutreachDiscordDM(params: {
   }
 
   const payload = buildDiscordOutreachPayload({
+    uid: params.uid,
     cadence: params.cadence,
     composed: params.composed,
   });
@@ -215,6 +308,7 @@ export async function sendOutreachDiscordDM(params: {
  * including a 1-tap [Undo Entry] button whenever a meal was logged.
  */
 export async function sendDiscordDmReply(params: {
+  uid?: string;
   channelId: string;
   replyToMessageId?: string;
   headline: string;
@@ -236,21 +330,27 @@ export async function sendDiscordDmReply(params: {
     params.lastFoodLine ? `_${params.lastFoodLine}_` : '',
   ].filter(Boolean);
 
+  const actionRowButtons: Array<Record<string, unknown>> = [];
+  if (params.loggedFoodId && params.localDate) {
+    actionRowButtons.push({
+      type: 2,
+      style: 2,
+      label: 'Undo Entry',
+      custom_id: `outreach:undo:${params.loggedFoodId}:${params.localDate}`,
+    });
+  }
+  if (params.uid) {
+    actionRowButtons.push({
+      type: 2,
+      style: 5, // LINK BUTTON
+      label: 'View Ledger',
+      url: buildOutreachActionUrl({ uid: params.uid, action: 'view_ledger' }),
+    });
+  }
+
   const components =
-    params.loggedFoodId && params.localDate
-      ? [
-          {
-            type: 1,
-            components: [
-              {
-                type: 2,
-                style: 2,
-                label: 'Undo Entry',
-                custom_id: `outreach:undo:${params.loggedFoodId}:${params.localDate}`,
-              },
-            ],
-          },
-        ]
+    actionRowButtons.length > 0
+      ? [{ type: 1, components: actionRowButtons }]
       : undefined;
 
   try {

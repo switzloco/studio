@@ -189,6 +189,7 @@ export async function pollDiscordOutreachReplies(): Promise<{
         if (!hasImageAttachments && (lowerText.startsWith('/start') || lowerText === '/status')) {
           const { composed } = await buildLiveUserOutreach({ uid });
           await sendOutreachDiscordDM({
+            uid,
             discordUserId: outreach.discordUserId || '',
             discordChannelId: channelId,
             cadence: outreach.cadence ?? '3x',
@@ -231,6 +232,7 @@ export async function pollDiscordOutreachReplies(): Promise<{
         }
 
         await sendDiscordDmReply({
+          uid,
           channelId,
           replyToMessageId: msg.id,
           headline: parseRes.headline,

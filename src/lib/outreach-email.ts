@@ -210,7 +210,9 @@ export function renderOutreachEmailHtml(params: {
       </div>
 
       <div style="font-size:12px;color:#64748b;line-height:1.5;border-top:1px solid #f1f5f9;padding-top:12px;">
-        Full ledger &amp; charts: <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a>
+        <a href="${buildOutreachActionUrl({ uid, action: 'view_ledger' })}" style="color:#059669;font-weight:700;text-decoration:underline;">View Live Personal Ledger</a>
+        &nbsp;·&nbsp;
+        <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a>
       </div>
 
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
