@@ -9,6 +9,7 @@
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from './health-service-admin';
 import {
+  buildDiscordLedgerStatusPayload,
   openDiscordDmChannel,
   sendDiscordDmReply,
   sendOutreachDiscordDM,
@@ -186,7 +187,28 @@ export async function pollDiscordOutreachReplies(): Promise<{
         processed++;
 
         const lowerText = text.toLowerCase();
-        if (!hasImageAttachments && (lowerText.startsWith('/start') || lowerText === '/status')) {
+        if (!hasImageAttachments && lowerText === '/status') {
+          const { composed, todayFoods, yesterdayFoods, proteinGoal } =
+            await buildLiveUserOutreach({ uid });
+          const statusPayload = buildDiscordLedgerStatusPayload({
+            uid,
+            composed,
+            todayFoods,
+            yesterdayFoods,
+            proteinGoal,
+          });
+          await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(statusPayload),
+          });
+          continue;
+        }
+
+        if (!hasImageAttachments && lowerText.startsWith('/start')) {
           const { composed } = await buildLiveUserOutreach({ uid });
           await sendOutreachDiscordDM({
             uid,

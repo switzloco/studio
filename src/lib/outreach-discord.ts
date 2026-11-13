@@ -143,9 +143,10 @@ export function buildDiscordLedgerStatusPayload(params: {
   uid: string;
   composed: ComposedOutreachMessage;
   todayFoods: FoodLogEntry[];
+  yesterdayFoods?: FoodLogEntry[];
   proteinGoal: number;
 }) {
-  const { uid, composed, todayFoods, proteinGoal } = params;
+  const { uid, composed, todayFoods, yesterdayFoods = [], proteinGoal } = params;
   const colors = {
     good: 0x10b981,
     soon: 0xf59e0b,
@@ -167,7 +168,19 @@ export function buildDiscordLedgerStatusPayload(params: {
               `**#${idx + 1}** · \`${f.consumedAt || 'today'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P${f.plantMassG ? ` · ${Math.round(f.plantMassG)}g plants` : ''})`,
           )
           .join('\n')
-      : '_No meals on today\'s ledger yet._';
+      : '_No meals logged today yet._';
+
+  const yesterdayBlock =
+    yesterdayFoods.length > 0
+      ? `\n\n**Yesterday's Logged Entries (${yesterdayFoods.length}):**\n` +
+        yesterdayFoods
+          .slice(0, 5)
+          .map(
+            (f) =>
+              `• \`${f.consumedAt || 'yest'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P)`,
+          )
+          .join('\n')
+      : '';
 
   const row1: Array<Record<string, unknown>> = [
     {
@@ -201,7 +214,7 @@ export function buildDiscordLedgerStatusPayload(params: {
       {
         author: { name: `the CFO · Live Ledger (${composed.localDate})` },
         title: composed.headline,
-        description: `${composed.body}\n\n**Protein:** \`${proteinBar}\`\n**Plants:** \`${plantBar}\`\n**Calories In:** \`${totalKcal} kcal\`\n\n**Today's Logged Entries (${todayFoods.length}):**\n${mealLines}`,
+        description: `${composed.body}\n\n**Protein:** \`${proteinBar}\`\n**Plants:** \`${plantBar}\`\n**Calories In:** \`${totalKcal} kcal\`\n\n**Today's Logged Entries (${todayFoods.length}):**\n${mealLines}${yesterdayBlock}`,
         color: colors[composed.statusTone],
         footer: {
           text: 'Tap Remove # to delete an entry, or Open Web Ledger for full view',

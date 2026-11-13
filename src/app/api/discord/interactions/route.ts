@@ -210,11 +210,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (cmdName === 'status') {
-      const { composed, todayFoods, proteinGoal } = await buildLiveUserOutreach({ uid });
+      const { composed, todayFoods, yesterdayFoods, proteinGoal } = await buildLiveUserOutreach({ uid });
       const statusPayload = buildDiscordLedgerStatusPayload({
         uid,
         composed,
         todayFoods,
+        yesterdayFoods,
         proteinGoal,
       });
       return NextResponse.json({
