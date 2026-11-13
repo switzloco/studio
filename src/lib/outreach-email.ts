@@ -408,8 +408,10 @@ export function renderOutreachWelcomeEmailHtml(params: {
   middayHour?: number;
   nightHour?: number;
   composed: ComposedOutreachMessage;
+  recipientFirstName?: string;
 }): { subject: string; html: string; text: string; unsubscribeUrl: string } {
-  const { uid, cadence, timezone, composed } = params;
+  const { uid, cadence, timezone, composed, recipientFirstName } = params;
+  const cleanFirstName = recipientFirstName?.trim();
   const fmtHour = (h: number) => {
     const clean = ((h % 24) + 24) % 24;
     if (clean === 0) return '12:00 AM';
@@ -433,6 +435,7 @@ export function renderOutreachWelcomeEmailHtml(params: {
 
   const unsubscribeUrl = buildOutreachActionUrl({ uid, action: 'unsubscribe' });
   const pause7dUrl = buildOutreachActionUrl({ uid, action: 'pause_7d', date: composed.localDate });
+  const viewLedgerUrl = buildOutreachActionUrl({ uid, action: 'view_ledger' });
   const toggleCadenceAction: OutreachActionType =
     cadence === '3x' ? 'morning_only' : 'resume_3x';
   const toggleCadenceLabel =
@@ -455,7 +458,12 @@ export function renderOutreachWelcomeEmailHtml(params: {
     })
     .join('');
 
-  const subject = `Welcome to the CFO Briefing · ${composed.headline}`;
+  const subject = cleanFirstName
+    ? `Welcome aboard, ${cleanFirstName}! Your CFO Briefing · ${composed.headline}`
+    : `Welcome to the CFO Briefing · ${composed.headline}`;
+  const greetingTitle = cleanFirstName
+    ? `Welcome aboard, ${cleanFirstName} — your automated "Eat-By" clock is live ($0).`
+    : `Your automated "Eat-By" clock is live ($0).`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -465,10 +473,16 @@ export function renderOutreachWelcomeEmailHtml(params: {
         the CFO · WELCOME &amp; FIRST LIVE BRIEFING
       </div>
       <div style="font-size:21px;font-weight:900;line-height:1.25;color:#0f172a;margin-bottom:8px;">
-        Your automated &ldquo;Eat-By&rdquo; clock is live ($0).
+        ${escapeHtml(greetingTitle)}
       </div>
-      <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:18px;">
-        Briefings arrive at <strong>${escapeHtml(scheduleSummary)}</strong> answering one question: <strong>when to eat next — or whether you&apos;re already good.</strong>
+      <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:14px;">
+        No app or login required — everything works right inside your inbox. Briefings arrive at <strong>${escapeHtml(scheduleSummary)}</strong> answering one question: <strong>what your body is mostly burning right now (fat, carbs, or muscle) and when to eat next.</strong>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px;line-height:1.55;color:#334155;">
+        <div style="font-weight:800;color:#0f172a;margin-bottom:4px;">How it works in 10 seconds:</div>
+        1. <strong>Just hit Reply</strong> in plain English whenever you eat (e.g. <em>&ldquo;3 eggs, sourdough toast, and coffee at 9am&rdquo;</em>) or attach a meal / nutrition-label photo.<br/>
+        2. <strong>Ask or adjust anytime</strong> — reply with <em>&ldquo;remove the toast&rdquo;</em>, <em>&ldquo;ping me at 8am EST&rdquo;</em>, or <em>&ldquo;morning only&rdquo;</em> and the CFO updates on the spot.<br/>
+        3. <strong>Zero-login web ledger</strong> — tap <a href="${viewLedgerUrl}" style="color:#059669;font-weight:700;text-decoration:underline;">View Live Personal Ledger</a> anytime to see your itemized meals or remove an entry in one tap.
       </div>
 
       <div style="font-size:11px;font-weight:800;letter-spacing:0.1em;color:${palette.pill};text-transform:uppercase;margin-bottom:6px;">
@@ -500,7 +514,9 @@ export function renderOutreachWelcomeEmailHtml(params: {
       </div>
 
       <div style="font-size:12px;color:#475569;line-height:1.55;border-top:1px solid #f1f5f9;padding-top:12px;">
-        Optional visual dashboard &amp; wearables: Sign in anytime at <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a> with this email to sync Google Health, Oura, or Withings.
+        <a href="${viewLedgerUrl}" style="color:#059669;font-weight:700;text-decoration:underline;">View Live Personal Ledger</a>
+        &nbsp;·&nbsp;
+        Optional visual dashboard &amp; wearables at <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a>
       </div>
 
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
@@ -517,15 +533,22 @@ export function renderOutreachWelcomeEmailHtml(params: {
 </html>`;
 
   const text = [
-    'WELCOME TO THE CFO DAILY BRIEFING ($0)',
+    cleanFirstName
+      ? `WELCOME ABOARD, ${cleanFirstName.toUpperCase()} — THE CFO DAILY BRIEFING ($0)`
+      : 'WELCOME TO THE CFO DAILY BRIEFING ($0)',
     `Schedule: ${scheduleSummary}`,
+    '',
+    'How it works in 10 seconds:',
+    '1. Just hit Reply in plain English whenever you eat (or attach a meal/label photo).',
+    '2. Ask or adjust anytime ("remove the toast", "ping me at 8am", "morning only").',
+    `3. View your live personal ledger (no login required): ${viewLedgerUrl}`,
     '',
     '--- RIGHT NOW: YOUR LIVE STATUS ---',
     composed.headline,
     composed.body,
     '',
     composed.lastFoodLine,
-    'What else did you have? Hit Reply in plain English — or attach a meal or nutrition-label photo — and I will update your clock automatically.',
+    'What have you had so far today? Hit Reply in plain English — or attach a meal or nutrition-label photo — and I will update your clock automatically.',
     '',
     composed.metricsLine,
     '',
@@ -534,6 +557,7 @@ export function renderOutreachWelcomeEmailHtml(params: {
       (btn) => `- ${btn.label}: ${buildOutreachActionUrl({ uid, action: btn.action, date: composed.localDate, window: composed.window })}`,
     ),
     '',
+    `View Live Personal Ledger: ${viewLedgerUrl}`,
     `Optional dashboard & wearables (Google Health, Oura, Withings): ${SITE_URL}`,
     `Share with a friend: ${SITE_URL}/briefings`,
     `${toggleCadenceLabel}: ${toggleCadenceUrl}`,
@@ -553,6 +577,7 @@ export async function sendOutreachWelcomeEmail(params: {
   middayHour?: number;
   nightHour?: number;
   composed: ComposedOutreachMessage;
+  recipientFirstName?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const { subject, html, text, unsubscribeUrl } = renderOutreachWelcomeEmailHtml(params);
 

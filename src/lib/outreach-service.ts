@@ -267,6 +267,7 @@ export async function dispatchOutreachForUser(params: {
   now?: Date;
   force?: boolean;
   isWelcome?: boolean;
+  recipientFirstName?: string;
 }): Promise<{
   status: 'sent' | 'skipped' | 'auto_paused' | 'failed';
   reason?: string;
@@ -440,6 +441,7 @@ export async function dispatchOutreachForUser(params: {
           middayHour: outreach.middayHour,
           nightHour: outreach.nightHour,
           composed,
+          recipientFirstName: params.recipientFirstName,
         })
       : await sendOutreachEmail({
           to: outreach.email,
@@ -862,13 +864,17 @@ export async function processOutreachFreeTextMeal(params: {
     };
   }
 
-  const todayFoodsBeforeParse = await adminHealthService.queryFoodLog(
-    db,
-    params.uid,
-    clock.localDate,
-    50,
-  );
+  const yesterdayIso = addIsoDays(clock.localDate, -1);
+  const [todayFoodsBeforeParse, yesterdayFoodsBeforeParse] = await Promise.all([
+    adminHealthService.queryFoodLog(db, params.uid, clock.localDate, 50),
+    adminHealthService.queryFoodLog(db, params.uid, yesterdayIso, 50),
+  ]);
   const proteinGoal = prefs?.targets?.proteinGoal ?? 150;
+  const clientDisplayName =
+    (prefs as any)?.profile?.title ||
+    (prefs as any)?.profile?.displayName ||
+    (health as any)?.displayName ||
+    undefined;
 
   const parsed = await parseOutreachMealText({
     uid: params.uid,
@@ -876,7 +882,9 @@ export async function processOutreachFreeTextMeal(params: {
     localTime: clock.localTime,
     photoDataUris: params.photoDataUris,
     todayFoods: todayFoodsBeforeParse,
+    yesterdayFoods: yesterdayFoodsBeforeParse,
     proteinGoal,
+    clientDisplayName,
   });
 
   if (parsed.isStopCommand) {
@@ -889,13 +897,14 @@ export async function processOutreachFreeTextMeal(params: {
     };
   }
 
-  // Handle natural-language request to delete/remove a specific meal from Today's Ledger
+  // Handle natural-language request to delete/remove a specific meal from Today's or Yesterday's Ledger
   if (parsed.removeFoodId) {
+    const matchedYesterday = yesterdayFoodsBeforeParse.some((f) => f.id === parsed.removeFoodId);
     const undoRes = await executeOutreachQuickAction({
       uid: params.uid,
       action: 'undo_food',
       foodId: parsed.removeFoodId,
-      date: clock.localDate,
+      date: matchedYesterday ? yesterdayIso : clock.localDate,
     });
     return {
       status: 'replied',
@@ -936,7 +945,31 @@ export async function processOutreachFreeTextMeal(params: {
     });
   }
 
-  if (!parsed.isFoodLog || !parsed.name) {
+  const entriesToLog =
+    parsed.entries && parsed.entries.length > 0
+      ? parsed.entries.filter((e) => e && e.name?.trim())
+      : parsed.isFoodLog && parsed.name?.trim()
+        ? [
+            {
+              name: parsed.name.trim(),
+              portionG: parsed.portionG,
+              calories: parsed.calories,
+              proteinG: parsed.proteinG,
+              carbsG: parsed.carbsG,
+              fatG: parsed.fatG,
+              fiberG: parsed.fiberG,
+              plantMassG: parsed.plantMassG,
+              alcoholDrinks: parsed.alcoholDrinks,
+              hasSeedOils: parsed.hasSeedOils,
+              dayOffset: parsed.dayOffset ?? 0,
+              consumedAt: parsed.consumedAt || clock.localTime,
+              meal: parsed.meal,
+              source: parsed.source,
+            },
+          ]
+        : [];
+
+  if (!parsed.isFoodLog || entriesToLog.length === 0) {
     const { composed } = await buildLiveUserOutreach({ uid: params.uid });
     const replyLine =
       parsed.agentReply ||
@@ -955,22 +988,37 @@ export async function processOutreachFreeTextMeal(params: {
     };
   }
 
-  const foodId = await adminHealthService.logFood(db, params.uid, {
-    name: parsed.name,
-    portionG: Math.max(1, Math.round(parsed.portionG || 250)),
-    calories: Math.max(0, Math.round(parsed.calories || 0)),
-    proteinG: Math.max(0, Math.round(parsed.proteinG || 0)),
-    carbsG: Math.max(0, Math.round(parsed.carbsG || 0)),
-    fatG: Math.max(0, Math.round(parsed.fatG || 0)),
-    fiberG: Math.max(0, Math.round(parsed.fiberG || 0)),
-    plantMassG: parsed.plantMassG ? Math.round(parsed.plantMassG) : undefined,
-    alcoholDrinks: parsed.alcoholDrinks ?? 0,
-    hasSeedOils: parsed.hasSeedOils ?? false,
-    source: parsed.source,
-    meal: parsed.meal ?? inferMealFromTime(parsed.consumedAt || clock.localTime),
-    consumedAt: parsed.consumedAt || clock.localTime,
-    date: clock.localDate,
-  });
+  const loggedIds: string[] = [];
+  const loggedDateSet = new Set<string>();
+  const entryLabels: string[] = [];
+
+  for (const item of entriesToLog) {
+    const isYesterday = Boolean(item.dayOffset && item.dayOffset < 0);
+    const targetDate = isYesterday ? yesterdayIso : clock.localDate;
+    const resolvedConsumedAt = item.consumedAt || (isYesterday ? '20:30' : clock.localTime);
+    const id = await adminHealthService.logFood(db, params.uid, {
+      name: item.name,
+      portionG: Math.max(1, Math.round(item.portionG || 250)),
+      calories: Math.max(0, Math.round(item.calories || 0)),
+      proteinG: Math.max(0, Math.round(item.proteinG || 0)),
+      carbsG: Math.max(0, Math.round(item.carbsG || 0)),
+      fatG: Math.max(0, Math.round(item.fatG || 0)),
+      fiberG: Math.max(0, Math.round(item.fiberG || 0)),
+      plantMassG: item.plantMassG ? Math.round(item.plantMassG) : undefined,
+      alcoholDrinks: item.alcoholDrinks ?? 0,
+      hasSeedOils: item.hasSeedOils ?? false,
+      source: item.source ?? parsed.source ?? 'user_estimate',
+      meal: item.meal ?? inferMealFromTime(resolvedConsumedAt),
+      consumedAt: resolvedConsumedAt,
+      date: targetDate,
+    });
+    loggedIds.push(id);
+    loggedDateSet.add(targetDate);
+    entryLabels.push(isYesterday ? `${item.name} (Yesterday)` : item.name);
+  }
+
+  const primaryFoodId = loggedIds[loggedIds.length - 1];
+  const combinedLabel = entryLabels.join(' · ');
 
   await db.doc(`users/${params.uid}/preferences/settings`).set(
     {
@@ -984,21 +1032,40 @@ export async function processOutreachFreeTextMeal(params: {
     { merge: true },
   );
 
+  // Refresh counters and score history for all affected dates (including yesterday if backdated)
+  if (loggedDateSet.has(yesterdayIso) && !loggedDateSet.has(clock.localDate)) {
+    await refreshDailyFoodCounters(params.uid, yesterdayIso);
+  }
   await refreshDailyFoodCounters(params.uid, clock.localDate);
   const { composed } = await buildLiveUserOutreach({ uid: params.uid });
 
   const roundedMacros = {
-    portionG: Math.max(1, Math.round(parsed.portionG || 250)),
-    calories: Math.max(0, Math.round(parsed.calories || 0)),
-    proteinG: Math.max(0, Math.round(parsed.proteinG || 0)),
-    carbsG: Math.max(0, Math.round(parsed.carbsG || 0)),
-    fatG: Math.max(0, Math.round(parsed.fatG || 0)),
+    portionG: Math.max(
+      1,
+      Math.round(entriesToLog.reduce((s, e) => s + (e.portionG || 0), 0) || 250),
+    ),
+    calories: Math.max(
+      0,
+      Math.round(entriesToLog.reduce((s, e) => s + (e.calories || 0), 0)),
+    ),
+    proteinG: Math.max(
+      0,
+      Math.round(entriesToLog.reduce((s, e) => s + (e.proteinG || 0), 0)),
+    ),
+    carbsG: Math.max(
+      0,
+      Math.round(entriesToLog.reduce((s, e) => s + (e.carbsG || 0), 0)),
+    ),
+    fatG: Math.max(
+      0,
+      Math.round(entriesToLog.reduce((s, e) => s + (e.fatG || 0), 0)),
+    ),
   };
 
   const hasAttachedPhotos = (params.photoDataUris?.length ?? 0) > 0;
   const cleanUserMessage =
     extractCleanReplyText(params.rawText) ||
-    (hasAttachedPhotos ? `[Attached meal photo: ${parsed.name}]` : params.rawText.trim());
+    (hasAttachedPhotos ? `[Attached meal photo: ${combinedLabel}]` : params.rawText.trim());
   const nowTs = Date.now();
   await appendOutreachTranscript(params.uid, clock.localDate, [
     {
@@ -1009,24 +1076,24 @@ export async function processOutreachFreeTextMeal(params: {
     },
     {
       role: 'model',
-      content: `**Logged ${parsed.name}** (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g protein · ${roundedMacros.carbsG}g carbs · ${roundedMacros.fatG}g fat).${parsed.agentReply ? ` ${parsed.agentReply}` : ''}\n\n**${composed.headline}** — ${composed.body}`,
+      content: `**Logged ${combinedLabel}** (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g protein · ${roundedMacros.carbsG}g carbs · ${roundedMacros.fatG}g fat).${parsed.agentReply ? ` ${parsed.agentReply}` : ''}\n\n**${composed.headline}** — ${composed.body}`,
       ts: nowTs + 1,
     },
   ]);
 
   return {
     status: 'logged',
-    headline: `Logged: ${parsed.name}`,
+    headline: `Logged: ${combinedLabel}`,
     detail: `${composed.headline} — ${composed.body}`,
     agentReply: parsed.agentReply,
     lastFoodLine: composed.lastFoodLine,
-    loggedFoodId: foodId,
-    loggedMealName: parsed.name,
+    loggedFoodId: primaryFoodId,
+    loggedMealName: combinedLabel,
     loggedMacros: roundedMacros,
     updatedHeadline: composed.headline,
     updatedBody: composed.body,
     metricsLine: composed.metricsLine,
     statusTone: composed.statusTone,
-    localDate: clock.localDate,
+    localDate: loggedDateSet.size === 1 && loggedDateSet.has(yesterdayIso) ? yesterdayIso : clock.localDate,
   };
 }
