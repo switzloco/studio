@@ -357,26 +357,26 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     if (bufferedFromYesterday && eatByClean !== 'Now') {
       goodFromYesterday = true;
       statusTone = 'good';
-      headline = `Last night's fuel holds — eat by ${eatByClean}`;
-      subject = `Morning Check-In: Fueled until ${eatByClean}`;
+      headline = `Mostly burning body fat now — eat before ${eatByClean} to protect muscle`;
+      subject = `Morning Check-In: Burning fat — eat before ${eatByClean}`;
       const surplusNote =
         yesterdaySurplusKcal >= 100
-          ? `Yesterday left a +${yesterdaySurplusKcal} kcal fuel cushion, so your morning glycogen buffer is topped off.`
-          : `Overnight sleep burn was covered cleanly with ${Math.max(0, rx.usableNonFatBufferKcal)} kcal of morning buffer left.`;
-      body = `${surplusNote} Fat faucet is open at ${runway.fatFaucetHourlyKcal} kcal/hr — ride the fast and plan ~40–45g protein by ${eatByClean}.`;
+          ? `Yesterday left a +${yesterdaySurplusKcal} kcal fuel cushion, so your morning buffer is topped off.`
+          : `Overnight sleep burn was covered cleanly with ${Math.max(0, rx.usableNonFatBufferKcal)} kcal of buffer left.`;
+      body = `${surplusNote} You're mostly burning body fat right now (~${runway.fatFaucetHourlyKcal} kcal/hr) and won't risk dipping into muscle until ~${eatByClean} — have ~40–45g protein before then.`;
     } else if (eatByClean === 'Now' || runway.status === 'eat_now') {
       statusTone = 'urgent';
-      headline = `Overnight tank is low — eat ~40g protein now`;
+      headline = `Starting to dip into muscle — eat ~40g protein now`;
       subject = `Morning Check-In: Have ~40g protein soon`;
-      body = `Carrying a -${Math.max(runway.overnightCarryoverKcal, runway.currentDeficitKcal)} kcal fasted deficit into this morning. A ~200 kcal / 40g protein pulse right now blocks muscle loss and buys +${rx.psmfPulseGainHours}h of pure fat burn.`;
+      body = `Your overnight buffer is tapped out (-${Math.max(runway.overnightCarryoverKcal, runway.currentDeficitKcal)} kcal deficit), so waiting longer starts burning muscle alongside fat. Have ~40g lean protein now to switch back to pure fat burn (+${rx.psmfPulseGainHours}h runway).`;
     } else {
       statusTone = rx.hoursUntilOptimalEat <= 2.5 ? 'soon' : 'good';
-      headline = `Plan ~40g lean protein by ${eatByClean}`;
-      subject = `Morning Check-In: First meal by ${eatByClean}`;
+      headline = `Mostly burning body fat — eat ~40g protein before ${eatByClean}`;
+      subject = `Morning Check-In: First meal before ${eatByClean}`;
       body =
         runway.overnightCarryoverKcal > 0
-          ? `Carrying -${runway.overnightCarryoverKcal} kcal from yesterday's deficit with ~${Math.max(0, rx.usableNonFatBufferKcal)} kcal buffer left. Hit ~40g lean protein by ${eatByClean} (+${rx.psmfPulseGainHours}h fat-burn runway).`
-          : `Fat faucet is running at ${runway.fatFaucetHourlyKcal} kcal/hr. Anchor your first ~40–45g protein meal by ${eatByClean} to protect lean mass.`;
+          ? `You're mostly burning body fat right now (~${Math.max(0, rx.usableNonFatBufferKcal)} kcal buffer left after yesterday's -${runway.overnightCarryoverKcal} kcal deficit). Eat ~40g lean protein before ${eatByClean} — after that point you start dipping into muscle.`
+          : `You're mostly burning body fat right now (~${runway.fatFaucetHourlyKcal} kcal/hr). Eat your first ~40–45g protein meal before ${eatByClean} so you don't start dipping into muscle.`;
     }
 
     quickActions = [
@@ -391,22 +391,19 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     if (recentlyFed && eatByClean !== 'Now') {
       statusTone = 'good';
       const fatPeakClean = cleanClockLabel(rx.fatPeakTimeLabel);
-      headline = `Still digesting last meal — fueled until ${eatByClean}`;
-      subject = `Midday Check-In: Fueled until ${eatByClean}`;
-      body = `Your body is still digesting your last meal (fat burn reaches full speed around ${fatPeakClean}). Hold off on snacks and aim for ~45g protein by ${eatByClean} (${runway.proteinToGoG}g left today).`;
+      headline = `Mostly burning meal energy now (shifts to fat ~${fatPeakClean}) — muscle-safe until ${eatByClean}`;
+      subject = `Midday Check-In: Muscle-safe until ${eatByClean}`;
+      body = `You're mostly running on your last meal's carbs & fuel right now, shifting back to mostly body-fat burn around ${fatPeakClean}. You won't risk losing muscle until ~${eatByClean} — have your next ~45g protein meal any time between ${fatPeakClean} and ${eatByClean} (${runway.proteinToGoG}g protein left today).`;
     } else if (eatByClean === 'Now' || runway.status === 'eat_now') {
       statusTone = 'urgent';
-      headline = `Midday window is open — eat ~45g protein now`;
+      headline = `Starting to dip into muscle — eat ~45g protein now`;
       subject = `Midday Check-In: Time for ~45g protein`;
-      body = `Your non-fat buffer is tapped out (${runway.currentDeficitKcal} kcal deficit so far). Log ~45g lean protein now to shield muscle while keeping fat oxidation high.`;
+      body = `Your energy buffer is tapped out (${runway.currentDeficitKcal} kcal deficit so far), so waiting longer starts burning muscle alongside fat. Have ~45g lean protein now to protect muscle while keeping fat burn going.`;
     } else {
       statusTone = rx.hoursUntilOptimalEat <= 2 ? 'soon' : 'good';
-      headline =
-        todayCaloriesIn === 0
-          ? `Fast is holding strong — eat by ${eatByClean}`
-          : `Right on pace — eat next by ${eatByClean}`;
-      subject = `Midday Check-In: Next meal by ${eatByClean}`;
-      body = `Fat faucet is open at ${runway.fatFaucetHourlyKcal} kcal/hr with ~${Math.max(0, rx.usableNonFatBufferKcal)} kcal buffer remaining. Target ~45g protein by ${eatByClean} (${runway.proteinToGoG}g left toward ${proteinGoal}g).`;
+      headline = `Mostly burning body fat now — eat before ${eatByClean} to protect muscle`;
+      subject = `Midday Check-In: Eat before ${eatByClean}`;
+      body = `You're running mostly on body fat right now (~${runway.fatFaucetHourlyKcal} kcal/hr, ~${Math.max(0, rx.usableNonFatBufferKcal)} kcal buffer left). Eat ~45g protein before ${eatByClean} — waiting past ${eatByClean} starts dipping into muscle (${runway.proteinToGoG}g left toward ${proteinGoal}g).`;
     }
 
     quickActions = [
@@ -420,23 +417,23 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     const nightDeadline = input.hoursElapsed >= 20.25 ? 'before bed' : 'by 8:30 PM';
     if (runway.safeThrough8amTomorrow && runway.proteinToGoG <= 25) {
       statusTone = 'good';
-      headline = `Fueled through 8:00 AM tomorrow — close the kitchen`;
+      headline = `Muscle-safe through 8:00 AM tomorrow — close the kitchen`;
       subject = `Evening Check-In: Kitchen closed (VF ${scoreStr})`;
-      body = `Sleep fat oxidation (${runway.fatFaucetPerMinKcal} kcal/min) covers ~80% of overnight BMR, waking you at 8:00 AM with +${runway.kcalBufferAt8amTomorrow} kcal buffer. Projected VF Score: ${scoreStr} pts.`;
+      body = `Overnight sleep runs mostly on body fat (~${runway.fatFaucetPerMinKcal} kcal/min) and your buffer easily clears 8:00 AM (+${runway.kcalBufferAt8amTomorrow} kcal) without touching muscle. Projected VF Score: ${scoreStr} pts.`;
     } else if (!runway.safeThrough8amTomorrow) {
       statusTone = runway.status === 'eat_now' ? 'urgent' : 'soon';
       const neededKcal = Math.max(200, runway.kcalNeededFor8amTomorrow);
       const neededProt = Math.min(50, Math.max(35, runway.proteinToGoG));
-      headline = `Add ~${neededProt}g protein (~${neededKcal} kcal) ${nightDeadline}`;
+      headline = `Add ~${neededProt}g protein (~${neededKcal} kcal) ${nightDeadline} to avoid overnight muscle loss`;
       subject = `Evening Check-In: Have ~${neededProt}g protein ${nightDeadline}`;
-      body = `Current buffer breaches overnight (${breachClean}) before 8:00 AM wake-up. One lean ${neededProt}g protein meal ${nightDeadline} locks in overnight recovery (VF Score so far: ${scoreStr}).`;
+      body = `Without more fuel, your buffer runs out around ${breachClean} and starts dipping into muscle overnight. One lean ${neededProt}g protein meal ${nightDeadline} keeps you burning mostly fat through 8:00 AM (VF Score so far: ${scoreStr}).`;
     } else {
       // Calorie buffer clears 8 AM, but protein asset target is still notably short
       statusTone = 'soon';
       const pulseProt = Math.min(45, runway.proteinToGoG);
-      headline = `Calories are set — add ~${pulseProt}g lean protein ${nightDeadline}`;
+      headline = `Calories clear 8:00 AM — add ~${pulseProt}g lean protein ${nightDeadline}`;
       subject = `Evening Check-In: ~${pulseProt}g protein ${nightDeadline} (VF ${scoreStr})`;
-      body = `Calorie buffer already clears 8:00 AM (+${runway.kcalBufferAt8amTomorrow} kcal), so skip heavy carbs/fats — just add ~${pulseProt}g lean protein ${nightDeadline} to protect muscle (${todayProteinG}/${proteinGoal}g logged).`;
+      body = `Your energy buffer already clears 8:00 AM (+${runway.kcalBufferAt8amTomorrow} kcal), so skip heavy carbs/fats — just add ~${pulseProt}g lean protein ${nightDeadline} to protect muscle overnight (${todayProteinG}/${proteinGoal}g logged).`;
     }
 
     quickActions = [

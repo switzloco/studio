@@ -147,9 +147,9 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.goodFromYesterday).toBe(true);
-    expect(msg.subject).toMatch(/^Morning Check-In: Fueled until/i);
-    expect(msg.headline).toContain("Last night's fuel holds");
-    expect(msg.headline).toMatch(/eat by/i);
+    expect(msg.subject).toMatch(/^Morning Check-In: Burning fat/i);
+    expect(msg.headline).toContain('Mostly burning body fat now');
+    expect(msg.headline).toMatch(/eat before/i);
   });
 
   it('Morning: gives a crisp early Eat-By / Eat Now prompt after a deep deficit yesterday', () => {
@@ -191,7 +191,7 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.goodFromYesterday).toBe(false);
-    expect(msg.headline).toMatch(/(by|eat ~40g protein now)/i);
+    expect(msg.headline).toMatch(/(before|eat ~40g protein now)/i);
   });
 
   it('Midday: recognizes recent lunch and tells user when to eat next', () => {
@@ -213,9 +213,9 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
       ],
     });
 
-    expect(msg.subject).toMatch(/^Midday Check-In: Fueled until/i);
-    expect(msg.headline).toContain('Still digesting last meal');
-    expect(msg.headline).toMatch(/fueled until/i);
+    expect(msg.subject).toMatch(/^Midday Check-In: Muscle-safe until/i);
+    expect(msg.headline).toContain('Mostly burning meal energy now');
+    expect(msg.headline).toMatch(/muscle-safe until/i);
   });
 
   it('Night: confirms "fueled through 8:00 AM tomorrow" when energy & protein targets are met', () => {
@@ -232,7 +232,7 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.safeThroughTomorrowMorning).toBe(true);
-    expect(msg.headline).toContain('Fueled through 8:00 AM tomorrow');
+    expect(msg.headline).toContain('Muscle-safe through 8:00 AM tomorrow');
   });
 
   it('evaluates quiet-user auto-sunset thresholds at 5 and 10 days', () => {
