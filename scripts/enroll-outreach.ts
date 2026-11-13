@@ -86,6 +86,7 @@ async function enrollEmail(rawEmail: string, timezone = 'America/Los_Angeles') {
       uid,
       window: currentWin,
       force: true,
+      isWelcome: true,
     });
     liveEmailSent = dispatched.status === 'sent';
     sendNote = dispatched.status === 'sent' ? 'Sent live welcome briefing email!' : (dispatched.reason || 'Failed');

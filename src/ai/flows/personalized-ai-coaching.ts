@@ -894,6 +894,7 @@ const configureOutreachBriefingsTool = ai.defineTool(
       uid: input.userId,
       window: windowNow,
       force: true,
+      isWelcome: !prev?.enabled,
     });
     const composed =
       dispatchRes.composed ??

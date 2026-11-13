@@ -11,7 +11,11 @@ import {
   composeOutreachDispatch,
   evaluateAutoSunset,
 } from '../outreach-composer';
-import { renderOutreachEmailHtml, resolveGmailOutreachConfig } from '../outreach-email';
+import {
+  renderOutreachEmailHtml,
+  renderOutreachWelcomeEmailHtml,
+  resolveGmailOutreachConfig,
+} from '../outreach-email';
 import { extractPlainTextFromRawMime } from '../outreach-gmail-inbound';
 import {
   buildDiscordOutreachPayload,
@@ -269,6 +273,16 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     expect(rendered.unsubscribeUrl).toContain('/api/outreach/action?token=');
     expect(rendered.html).toContain('1-Click Cancel');
     expect(rendered.html).toContain('Switch to Morning-Only');
+
+    const welcome = renderOutreachWelcomeEmailHtml({
+      uid: 'user_abc',
+      cadence: '3x',
+      timezone: 'America/Los_Angeles',
+      composed,
+    });
+    expect(welcome.subject).toContain('Welcome to the CFO Briefing');
+    expect(welcome.html).toContain('How to Use This in 5 Seconds');
+    expect(welcome.html).toContain('/briefings');
   });
 
   it('verifies valid Ed25519 Discord signatures and rejects forged payloads', () => {

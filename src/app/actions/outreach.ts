@@ -24,6 +24,9 @@ export async function enrollPublicOutreachAction(data: {
   weightLbs?: number;
   cadence?: OutreachCadence;
   timezone?: string;
+  morningHour?: number;
+  middayHour?: number;
+  nightHour?: number;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -101,6 +104,15 @@ export async function enrollPublicOutreachAction(data: {
         email: email || undefined,
         discordUserId: discordUserId || undefined,
         timezone,
+        ...(data.morningHour != null
+          ? { morningHour: Math.max(4, Math.min(11, Math.round(data.morningHour))) }
+          : {}),
+        ...(data.middayHour != null
+          ? { middayHour: Math.max(11, Math.min(16, Math.round(data.middayHour))) }
+          : {}),
+        ...(data.nightHour != null
+          ? { nightHour: Math.max(17, Math.min(22, Math.round(data.nightHour))) }
+          : {}),
       },
       weightKg,
       proteinGoal,
@@ -112,6 +124,7 @@ export async function enrollPublicOutreachAction(data: {
       uid,
       window: windowNow,
       force: true,
+      isWelcome: true,
     });
 
     const composed =
@@ -201,6 +214,7 @@ export async function updateMyOutreachSettingsAction(
         uid: auth.uid,
         window: windowNow,
         force: true,
+        isWelcome: true,
       });
       const composed =
         dispatchRes.composed ??

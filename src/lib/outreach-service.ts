@@ -23,7 +23,11 @@ import {
   evaluateAutoSunset,
   type ComposedOutreachMessage,
 } from './outreach-composer';
-import { sendOutreachEmail, sendOutreachReplyConfirmationEmail } from './outreach-email';
+import {
+  sendOutreachEmail,
+  sendOutreachReplyConfirmationEmail,
+  sendOutreachWelcomeEmail,
+} from './outreach-email';
 import { sendOutreachDiscordDM } from './outreach-discord';
 import { parseOutreachMealText } from '@/ai/flows/outreach-meal-parser';
 import { backfillScoreHistory } from './score-history-sync';
@@ -246,6 +250,7 @@ export async function dispatchOutreachForUser(params: {
   window: OutreachWindow;
   now?: Date;
   force?: boolean;
+  isWelcome?: boolean;
 }): Promise<{
   status: 'sent' | 'skipped' | 'auto_paused' | 'failed';
   reason?: string;
@@ -340,12 +345,23 @@ export async function dispatchOutreachForUser(params: {
   let cachedDiscordChannelId = outreach.discordChannelId;
 
   if ((outreach.channel === 'email' || outreach.channel === 'both') && outreach.email) {
-    const emailRes = await sendOutreachEmail({
-      to: outreach.email,
-      uid: params.uid,
-      cadence: effectiveCadence,
-      composed,
-    });
+    const emailRes = params.isWelcome
+      ? await sendOutreachWelcomeEmail({
+          to: outreach.email,
+          uid: params.uid,
+          cadence: effectiveCadence,
+          timezone: outreach.timezone || 'America/Los_Angeles',
+          morningHour: outreach.morningHour,
+          middayHour: outreach.middayHour,
+          nightHour: outreach.nightHour,
+          composed,
+        })
+      : await sendOutreachEmail({
+          to: outreach.email,
+          uid: params.uid,
+          cadence: effectiveCadence,
+          composed,
+        });
     if (emailRes.success) anySent = true;
     else if (emailRes.error) errors.push(`email:${emailRes.error}`);
   }
@@ -390,8 +406,9 @@ export async function dispatchOutreachForUser(params: {
     { merge: true },
   );
 
-  const windowTitle =
-    params.window === 'morning'
+  const windowTitle = params.isWelcome
+    ? 'Welcome Briefing'
+    : params.window === 'morning'
       ? 'Morning Briefing'
       : params.window === 'midday'
         ? 'Midday Check-In'
