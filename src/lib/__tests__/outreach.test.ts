@@ -16,7 +16,10 @@ import {
   renderOutreachWelcomeEmailHtml,
   resolveGmailOutreachConfig,
 } from '../outreach-email';
-import { extractPlainTextFromRawMime } from '../outreach-gmail-inbound';
+import {
+  extractEmailReplyPartsFromRawMime,
+  extractPlainTextFromRawMime,
+} from '../outreach-gmail-inbound';
 import {
   buildDiscordOutreachPayload,
   verifyDiscordSignature,
@@ -257,13 +260,28 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
 });
 
 describe('Email, Discord & Inbound Reply utilities', () => {
-  it('renders Email HTML with 1-Click Cancel and List-Unsubscribe URL', () => {
+  it('renders Email HTML with direct Last-On-Record prompt, photo reply support, and 1-Click Cancel', () => {
     const composed = composeOutreachDispatch({
-      window: 'morning',
+      window: 'midday',
       localDate: '2026-11-11',
-      hoursElapsed: 7.5,
+      hoursElapsed: 13.5,
       prefs: basePrefs,
+      todayFoods: [
+        makeFood({
+          id: 'meal_1',
+          name: 'Chicken & Rice Bowl',
+          calories: 650,
+          proteinG: 55,
+          carbsG: 70,
+          fatG: 14,
+          consumedAt: '12:00',
+        }),
+      ],
     });
+    expect(composed.lastFoodLine).toBe(
+      'Last on record: Chicken & Rice Bowl today at 12:00 PM (650 kcal, 55g protein).',
+    );
+
     const rendered = renderOutreachEmailHtml({
       uid: 'user_abc',
       cadence: '3x',
@@ -273,6 +291,10 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     expect(rendered.unsubscribeUrl).toContain('/api/outreach/action?token=');
     expect(rendered.html).toContain('1-Click Cancel');
     expect(rendered.html).toContain('Switch to Morning-Only');
+    expect(rendered.html).toContain('Chicken &amp; Rice Bowl today at 12:00 PM');
+    expect(rendered.html).toContain('What else did you have?');
+    expect(rendered.html).toContain('attach a meal or label photo');
+    expect(rendered.html).not.toContain('Fitbit');
 
     const welcome = renderOutreachWelcomeEmailHtml({
       uid: 'user_abc',
@@ -281,7 +303,10 @@ describe('Email, Discord & Inbound Reply utilities', () => {
       composed,
     });
     expect(welcome.subject).toContain('Welcome to the CFO Briefing');
-    expect(welcome.html).toContain('How to Use This in 5 Seconds');
+    expect(welcome.html).toContain('Last on record:');
+    expect(welcome.html).toContain('What else did you have?');
+    expect(welcome.html).toContain('attach a meal or nutrition-label photo');
+    expect(welcome.html).not.toContain('Fitbit');
     expect(welcome.html).toContain('/briefings');
   });
 
@@ -392,5 +417,39 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     );
 
     expect(extractPlainTextFromRawMime(mime)).toBe('40g whey shake and an apple');
+
+    const fakeJpegBase64 = Buffer.alloc(1500, 0xab).toString('base64');
+    const tinyPixelBase64 = Buffer.alloc(40, 0x01).toString('base64');
+    const mixedMime = Buffer.from(
+      [
+        'From: nicholas.switzer@gmail.com',
+        'To: nicholas.switzer+cfo@gmail.com',
+        'Content-Type: multipart/mixed; boundary="mix99"',
+        '',
+        '--mix99',
+        'Content-Type: text/plain; charset="UTF-8"',
+        '',
+        'Had half of this plate',
+        '--mix99',
+        'Content-Type: image/gif; name="pixel.gif"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        tinyPixelBase64,
+        '--mix99',
+        'Content-Type: image/jpeg; name="dinner.jpg"',
+        'Content-Disposition: attachment; filename="dinner.jpg"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        fakeJpegBase64,
+        '--mix99--',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    const parts = extractEmailReplyPartsFromRawMime(mixedMime);
+    expect(parts.text).toBe('Had half of this plate');
+    expect(parts.images).toHaveLength(1);
+    expect(parts.images[0].contentType).toBe('image/jpeg');
+    expect(parts.images[0].dataUri).toBe(`data:image/jpeg;base64,${fakeJpegBase64}`);
   });
 });

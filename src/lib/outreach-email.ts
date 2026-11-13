@@ -180,7 +180,7 @@ export function renderOutreachEmailHtml(params: {
 
       ${bannerHtml}
 
-      <div style="background:${palette.bg};border-left:4px solid ${palette.border};border-radius:10px;padding:16px;margin-bottom:16px;">
+      <div style="background:${palette.bg};border-left:4px solid ${palette.border};border-radius:10px;padding:16px;margin-bottom:14px;">
         <div style="font-size:19px;font-weight:800;line-height:1.3;color:#0f172a;margin-bottom:8px;">
           ${escapeHtml(composed.headline)}
         </div>
@@ -189,19 +189,24 @@ export function renderOutreachEmailHtml(params: {
         </div>
       </div>
 
-      <div style="font-size:12px;font-weight:600;color:#475569;background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:16px;">
+      <div style="font-size:13px;line-height:1.55;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+        <strong>${escapeHtml(composed.lastFoodLine)}</strong><br/>
+        <span style="color:#334155;"><strong>What else did you have?</strong> Just hit <strong>Reply</strong> in plain English — or <strong>attach a meal or label photo</strong> — and I&apos;ll put it on the books.</span>
+      </div>
+
+      <div style="font-size:12px;font-weight:600;color:#475569;margin-bottom:14px;">
         ${escapeHtml(composed.metricsLine)}
       </div>
 
-      <div style="margin-bottom:18px;">
+      <div style="margin-bottom:16px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;margin-bottom:6px;">
-          1-Tap Quick Update
+          Or 1-Tap Quick Update
         </div>
         ${actionButtonsHtml}
       </div>
 
-      <div style="font-size:12px;color:#64748b;line-height:1.5;border-top:1px solid #f1f5f9;padding-top:14px;">
-        <strong>Ate something else?</strong> Reply directly to this email in plain English (e.g. <em>"3 eggs and sourdough toast"</em>) or <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">open your full CFO ledger</a>.
+      <div style="font-size:12px;color:#64748b;line-height:1.5;border-top:1px solid #f1f5f9;padding-top:12px;">
+        Full ledger &amp; charts: <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a>
       </div>
 
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
@@ -221,6 +226,9 @@ export function renderOutreachEmailHtml(params: {
     '',
     composed.headline,
     composed.body,
+    '',
+    composed.lastFoodLine,
+    'What else did you have? Reply in plain English or attach a meal / nutrition-label photo.',
     '',
     composed.metricsLine,
     '',
@@ -258,8 +266,9 @@ export async function sendOutreachEmail(params: {
 }
 
 /**
- * Sends a transactional confirmation email (e.g. after an inbound reply meal log or stop command)
- * with macro breakdown, updated live Eat-By runway, and a 1-tap [Undo This Entry] button.
+ * Sends a direct, lightweight conversational agent reply email (threaded via In-Reply-To
+ * when replying to an inbound email) stating what was logged, the updated Eat-By call,
+ * the last food on record, and reminding the user they can reply with text or photos.
  */
 export async function sendOutreachReplyConfirmationEmail(params: {
   to: string;
@@ -267,6 +276,9 @@ export async function sendOutreachReplyConfirmationEmail(params: {
   subject: string;
   headline: string;
   detail: string;
+  agentReply?: string;
+  lastFoodLine?: string;
+  inReplyToMessageId?: string;
   loggedFoodId?: string;
   localDate?: string;
   loggedMacros?: {
@@ -297,94 +309,82 @@ export async function sendOutreachReplyConfirmationEmail(params: {
         })
       : null;
 
-  const toneColors = {
-    good: { bg: '#ecfdf5', border: '#10b981', pill: '#059669' },
-    soon: { bg: '#fffbeb', border: '#f59e0b', pill: '#d97706' },
-    urgent: { bg: '#fef2f2', border: '#ef4444', pill: '#dc2626' },
-  } as const;
-  const palette = toneColors[params.statusTone ?? 'good'];
+  const loggedLeadHtml = params.loggedMacros
+    ? `<p style="margin:0 0 12px 0;font-size:15px;line-height:1.55;color:#0f172a;">
+         <strong>${escapeHtml(params.headline)}</strong>
+         <span style="color:#059669;font-weight:700;"> (+${params.loggedMacros.calories} kcal &middot; ${params.loggedMacros.proteinG}g P &middot; ${params.loggedMacros.carbsG}g C &middot; ${params.loggedMacros.fatG}g F)</span>.${params.agentReply ? ` ${escapeHtml(params.agentReply)}` : ''}
+       </p>`
+    : `<p style="margin:0 0 12px 0;font-size:15px;line-height:1.55;color:#0f172a;">
+         ${escapeHtml(params.agentReply || params.detail)}
+       </p>`;
 
-  const macroStripHtml = params.loggedMacros
-    ? `<div style="font-size:13px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:9px 12px;margin-bottom:14px;">
-         +${params.loggedMacros.calories} kcal &nbsp;&middot;&nbsp; ${params.loggedMacros.proteinG}g protein &nbsp;&middot;&nbsp; ${params.loggedMacros.carbsG}g carbs &nbsp;&middot;&nbsp; ${params.loggedMacros.fatG}g fat
-       </div>`
-    : '';
-
-  const liveRunwayHtml =
+  const eatByParagraphHtml =
     params.updatedHeadline && params.updatedBody
-      ? `<div style="font-size:11px;font-weight:800;letter-spacing:0.1em;color:${palette.pill};text-transform:uppercase;margin-bottom:6px;">
-           Updated Live Status
-         </div>
-         <div style="background:${palette.bg};border-left:4px solid ${palette.border};border-radius:10px;padding:14px 16px;margin-bottom:12px;">
-           <div style="font-size:17px;font-weight:800;line-height:1.3;color:#0f172a;margin-bottom:5px;">
-             ${escapeHtml(params.updatedHeadline)}
-           </div>
-           <div style="font-size:14px;line-height:1.5;color:#334155;">
-             ${escapeHtml(params.updatedBody)}
-           </div>
-         </div>`
-      : `<div style="font-size:14px;color:#334155;line-height:1.5;margin-bottom:12px;">${escapeHtml(params.detail)}</div>`;
+      ? `<p style="margin:0 0 12px 0;font-size:14px;line-height:1.55;color:#1e293b;">
+           <strong>Next up: ${escapeHtml(params.updatedHeadline)}</strong> — ${escapeHtml(params.updatedBody)}${params.metricsLine ? `<br/><span style="font-size:12px;color:#64748b;">(${escapeHtml(params.metricsLine)})</span>` : ''}
+         </p>`
+      : '';
 
-  const metricsHtml = params.metricsLine
-    ? `<div style="font-size:12px;font-weight:600;color:#475569;background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:14px;">
-         ${escapeHtml(params.metricsLine)}
-       </div>`
-    : '';
-
-  const actionsRowHtml = undoUrl
-    ? `<div style="margin-bottom:16px;">
-         <a href="${undoUrl}" style="display:inline-block;margin:4px 8px 4px 0;padding:9px 14px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;background:#ffffff;color:#b91c1c;border:1px solid #fecaca;">Undo This Entry</a>
-         <a href="${SITE_URL}" style="display:inline-block;margin:4px 0;padding:9px 14px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;background:#0f172a;color:#ffffff;border:1px solid #0f172a;">Open CFO Ledger</a>
-       </div>`
+  const promptParagraphHtml = params.lastFoodLine
+    ? `<p style="margin:0 0 14px 0;font-size:14px;line-height:1.55;color:#0f172a;background:#f8fafc;border-left:3px solid #0f172a;padding:10px 12px;border-radius:6px;">
+         <strong>${escapeHtml(params.lastFoodLine)}</strong><br/>
+         What else did you have? Reply here in plain English — or attach a meal photo / nutrition label pic anytime.
+       </p>`
     : '';
 
   const html = `<!DOCTYPE html>
 <html>
-  <body style="margin:0;padding:16px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
-    <div style="max-width:540px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:22px;">
-      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;color:#059669;text-transform:uppercase;margin-bottom:6px;">
-        the CFO &middot; LEDGER UPDATED
-      </div>
-      <div style="font-size:19px;font-weight:800;line-height:1.3;color:#0f172a;margin-bottom:10px;">
-        ${escapeHtml(params.headline)}
-      </div>
-      ${macroStripHtml}
-      ${liveRunwayHtml}
-      ${metricsHtml}
-      ${actionsRowHtml}
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
-        Reply again anytime to log another item &middot; <a href="${pause7dUrl}" style="color:#64748b;text-decoration:underline;">Pause 7 Days</a> &middot; <a href="${unsubscribeUrl}" style="color:#dc2626;font-weight:700;text-decoration:underline;">1-Click Cancel</a>
-      </div>
+  <body style="margin:0;padding:14px;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <div style="max-width:540px;">
+      ${loggedLeadHtml}
+      ${eatByParagraphHtml}
+      ${promptParagraphHtml}
+      <p style="margin:14px 0 0 0;padding-top:10px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;">
+        ${undoUrl ? `<a href="${undoUrl}" style="color:#b91c1c;font-weight:700;text-decoration:underline;">Undo this entry</a> &middot; ` : ''}<a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">Open CFO Ledger</a> &middot; <a href="${pause7dUrl}" style="color:#64748b;text-decoration:underline;">Pause 7d</a> &middot; <a href="${unsubscribeUrl}" style="color:#dc2626;text-decoration:underline;">1-Click Cancel</a>
+      </p>
     </div>
   </body>
 </html>`;
 
   const textLines = [
-    `the CFO — ${params.headline}`,
-    ...(params.loggedMacros
+    params.loggedMacros
+      ? `${params.headline} (+${params.loggedMacros.calories} kcal · ${params.loggedMacros.proteinG}g P · ${params.loggedMacros.carbsG}g C · ${params.loggedMacros.fatG}g F).${params.agentReply ? ` ${params.agentReply}` : ''}`
+      : params.agentReply || params.detail,
+    ...(params.updatedHeadline && params.updatedBody
       ? [
-          `+${params.loggedMacros.calories} kcal · ${params.loggedMacros.proteinG}g protein · ${params.loggedMacros.carbsG}g carbs · ${params.loggedMacros.fatG}g fat`,
+          '',
+          `Next up: ${params.updatedHeadline} — ${params.updatedBody}`,
+          ...(params.metricsLine ? [`(${params.metricsLine})`] : []),
+        ]
+      : []),
+    ...(params.lastFoodLine
+      ? [
+          '',
+          params.lastFoodLine,
+          'What else did you have? Reply in plain English or attach a meal / nutrition-label photo anytime.',
         ]
       : []),
     '',
-    params.updatedHeadline && params.updatedBody
-      ? `${params.updatedHeadline}\n${params.updatedBody}`
-      : params.detail,
-    ...(params.metricsLine ? ['', params.metricsLine] : []),
-    ...(undoUrl ? ['', `Undo This Entry: ${undoUrl}`] : []),
+    ...(undoUrl ? [`Undo this entry: ${undoUrl}`] : []),
     `Open CFO Ledger: ${SITE_URL}`,
     `1-Click Cancel: ${unsubscribeUrl}`,
   ];
+
+  const headers: Record<string, string> = {
+    'List-Unsubscribe': `<${unsubscribeUrl}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  };
+  if (params.inReplyToMessageId) {
+    headers['In-Reply-To'] = params.inReplyToMessageId;
+    headers['References'] = params.inReplyToMessageId;
+  }
 
   const res = await deliverRawOutreachEmail({
     to: params.to,
     subject: params.subject,
     html,
     text: textLines.join('\n'),
-    headers: {
-      'List-Unsubscribe': `<${unsubscribeUrl}>`,
-      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-    },
+    headers,
   });
 
   return { success: res.success };
@@ -462,18 +462,7 @@ export function renderOutreachWelcomeEmailHtml(params: {
         Your automated &ldquo;Eat-By&rdquo; clock is live ($0).
       </div>
       <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:18px;">
-        Instead of obsessing over another food-tracking app, you&apos;ll get short briefings at <strong>${escapeHtml(scheduleSummary)}</strong> answering one question: <strong>when to eat next — or whether you&apos;re already good.</strong>
-      </div>
-
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
-        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:8px;">
-          How to Use This in 5 Seconds
-        </div>
-        <div style="font-size:13px;line-height:1.6;color:#1e293b;">
-          <strong>1. Tap a 1-click button below</strong> to log common protein pulses, same breakfast, or fasting status.<br/>
-          <strong>2. Or just hit Reply in plain English</strong> (e.g. <em>&ldquo;3 eggs and sourdough toast&rdquo;</em> or <em>&ldquo;45g grilled chicken salad&rdquo;</em>) and I&apos;ll update your clock automatically.<br/>
-          <strong>3. Optional visual dashboard &amp; wearables:</strong> Sign in anytime at <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a> with this email to sync Google Health, Fitbit, Oura, or Withings.
-        </div>
+        Briefings arrive at <strong>${escapeHtml(scheduleSummary)}</strong> answering one question: <strong>when to eat next — or whether you&apos;re already good.</strong>
       </div>
 
       <div style="font-size:11px;font-weight:800;letter-spacing:0.1em;color:${palette.pill};text-transform:uppercase;margin-bottom:6px;">
@@ -488,18 +477,27 @@ export function renderOutreachWelcomeEmailHtml(params: {
         </div>
       </div>
 
-      <div style="font-size:12px;font-weight:600;color:#475569;background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:16px;">
+      <div style="font-size:13px;line-height:1.55;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+        <strong>${escapeHtml(composed.lastFoodLine)}</strong><br/>
+        <span style="color:#334155;"><strong>What else did you have?</strong> Hit <strong>Reply</strong> in plain English (e.g. <em>&ldquo;3 eggs and sourdough toast&rdquo;</em>) — or <strong>attach a meal or nutrition-label photo</strong> — and I&apos;ll update your clock automatically.</span>
+      </div>
+
+      <div style="font-size:12px;font-weight:600;color:#475569;margin-bottom:14px;">
         ${escapeHtml(composed.metricsLine)}
       </div>
 
-      <div style="margin-bottom:18px;">
+      <div style="margin-bottom:16px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;margin-bottom:6px;">
-          1-Tap Quick Update
+          Or 1-Tap Quick Update
         </div>
         ${actionButtonsHtml}
       </div>
 
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
+      <div style="font-size:12px;color:#475569;line-height:1.55;border-top:1px solid #f1f5f9;padding-top:12px;">
+        Optional visual dashboard &amp; wearables: Sign in anytime at <a href="${SITE_URL}" style="color:#2563eb;text-decoration:underline;">cfofitness.app</a> with this email to sync Google Health, Oura, or Withings.
+      </div>
+
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.6;">
         Share with a friend: <a href="${SITE_URL}/briefings" style="color:#2563eb;text-decoration:underline;">cfofitness.app/briefings</a><br/>
         Always $0, zero guilt, easy to adjust or cancel:<br/>
         <a href="${toggleCadenceUrl}" style="color:#64748b;text-decoration:underline;">${escapeHtml(toggleCadenceLabel)}</a>
@@ -516,14 +514,13 @@ export function renderOutreachWelcomeEmailHtml(params: {
     'WELCOME TO THE CFO DAILY BRIEFING ($0)',
     `Schedule: ${scheduleSummary}`,
     '',
-    'How to use in 5 seconds:',
-    '1) Click any 1-tap preset link below, OR',
-    '2) Simply hit Reply in plain English (e.g. "3 eggs and sourdough toast"), OR',
-    `3) Open ${SITE_URL} with this email to connect Google Health, Fitbit, Oura, or Withings.`,
-    '',
     '--- RIGHT NOW: YOUR LIVE STATUS ---',
     composed.headline,
     composed.body,
+    '',
+    composed.lastFoodLine,
+    'What else did you have? Hit Reply in plain English — or attach a meal or nutrition-label photo — and I will update your clock automatically.',
+    '',
     composed.metricsLine,
     '',
     'Quick Actions:',
@@ -531,6 +528,7 @@ export function renderOutreachWelcomeEmailHtml(params: {
       (btn) => `- ${btn.label}: ${buildOutreachActionUrl({ uid, action: btn.action, date: composed.localDate, window: composed.window })}`,
     ),
     '',
+    `Optional dashboard & wearables (Google Health, Oura, Withings): ${SITE_URL}`,
     `Share with a friend: ${SITE_URL}/briefings`,
     `${toggleCadenceLabel}: ${toggleCadenceUrl}`,
     `Pause 7 Days: ${pause7dUrl}`,

@@ -11,10 +11,10 @@ export interface SlimUserContext {
   yesterday: string;
   preferences: any;
   health: any;
-  fitbitSync: any;
+  wearableSync: any;
   todaysFoodLog: any[];
   todaysExerciseLog: any[];
-  todaysFitbitActivities: any[];
+  todaysWearableActivities: any[];
   yesterdaysFoodLog: any[];
   yesterdaysFoodCount: number;
   yesterdaysProteinTotal: number;
@@ -46,23 +46,20 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
     healthService.queryLogRangeAll(firestore, userId, 'food_log', sixtyDaysAgo, today, 1000).catch(() => []),
   ]);
 
-  const fitbitStatus: {
+  const wearableStatus: {
     connected: boolean;
-    provider?: 'fitbit' | 'google';
+    provider?: 'google';
     lastSyncedAt?: number;
     lastSyncedAgo?: string;
     tokenExpired?: boolean;
   } = { connected: false };
-  if (fitbitCreds) {
-    const provider = fitbitCreds.provider || 'google';
-    fitbitStatus.connected = true;
-    fitbitStatus.provider = provider;
+  // Legacy Fitbit Web API ('fitbit') is retired/dead — only surface active Google Health ('google')
+  if (fitbitCreds && fitbitCreds.provider !== 'fitbit') {
+    wearableStatus.connected = true;
+    wearableStatus.provider = 'google';
 
     // Note: fitbitCreds.expiresAt is only the 1-hour OAuth2 access-token TTL,
     // NOT refresh-token expiration. Google Health auto-refreshes via refreshToken.
-    // If the access token is past its 1h TTL or telemetry hasn't synced in >30m,
-    // auto-refresh & sync right now so the AI coach has fresh data and never
-    // falsely claims the token expired.
     const staleMs = Date.now() - (fitbitCreds.lastSyncedAt ?? 0);
     const needsAutoSync = Boolean(fitbitCreds.refreshToken) && (Date.now() >= fitbitCreds.expiresAt || staleMs > 30 * 60 * 1000);
     let refreshFailed = !fitbitCreds.refreshToken;
@@ -85,11 +82,11 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
       }
     }
 
-    fitbitStatus.lastSyncedAt = fitbitCreds.lastSyncedAt;
-    fitbitStatus.tokenExpired = refreshFailed;
+    wearableStatus.lastSyncedAt = fitbitCreds.lastSyncedAt;
+    wearableStatus.tokenExpired = refreshFailed;
     if (fitbitCreds.lastSyncedAt) {
       const hoursAgo = Math.round((Date.now() - fitbitCreds.lastSyncedAt) / (1000 * 60 * 60));
-      fitbitStatus.lastSyncedAgo = hoursAgo <= 1 ? 'just now' : `${hoursAgo}h ago`;
+      wearableStatus.lastSyncedAgo = hoursAgo <= 1 ? 'just now' : `${hoursAgo}h ago`;
     }
   }
 
@@ -121,10 +118,10 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
       heightCm: health?.heightCm,
       bodyFatPct: health?.bodyFatPct,
     },
-    fitbitSync: fitbitStatus,
+    wearableSync: wearableStatus,
     todaysFoodLog: recentFood,
     todaysExerciseLog: recentExercise,
-    todaysFitbitActivities: health?.fitbitByDate?.[today]?.activities ?? [],
+    todaysWearableActivities: health?.fitbitByDate?.[today]?.activities ?? [],
     yesterdaysFoodLog: yesterdayFood,
     yesterdaysFoodCount: yesterdayFood.length,
     yesterdaysProteinTotal: yesterdayFood.reduce((s, e) => s + (e.proteinG || 0), 0),

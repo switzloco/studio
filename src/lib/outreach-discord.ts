@@ -99,6 +99,7 @@ export function buildDiscordOutreachPayload(params: {
   const descriptionParts = [
     composed.autoSunsetBanner ? `_${composed.autoSunsetBanner}_\n` : '',
     composed.body,
+    `\n**${composed.lastFoodLine}**\nWhat else did you have? Tap **Log Meal** below or tap a quick preset.`,
   ].filter(Boolean);
 
   return {

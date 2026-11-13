@@ -240,7 +240,7 @@ export function BriefingsEnrollView() {
                   Eat ~45g lean protein by 2:30 PM
                 </p>
                 <p className="text-xs text-slate-600">
-                  Tap <strong>[+45g Lean Lunch]</strong> or reply in plain English (<em>&ldquo;3 eggs and sourdough toast&rdquo;</em>).
+                  Last on record + direct check-in: reply in plain English (<em>&ldquo;3 eggs and sourdough toast&rdquo;</em>) or attach a meal / nutrition-label photo.
                 </p>
               </div>
 
@@ -515,7 +515,7 @@ export function BriefingsEnrollView() {
                       </span>
                       <span className="flex items-center gap-1">
                         <Zap className="w-3.5 h-3.5 text-primary" />
-                        Reply in Plain English to Log
+                        Reply with Text or Meal Photos
                       </span>
                     </div>
                   </form>

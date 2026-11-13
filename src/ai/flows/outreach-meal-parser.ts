@@ -1,33 +1,32 @@
 /**
- * @fileOverview Cost-optimized meal parser for Email & Discord outreach replies.
+ * @fileOverview Cost-optimized 1-pass meal & photo parser + direct reply note
+ * for Email & Discord outreach replies.
  *
- * Uses `CFO_LITE_MODEL` (~$0.00015 per call) + `nutritionLookupTool` (USDA) so
- * free outreach users can reply in plain English ("3 eggs and sourdough toast"
- * or "Chipotle double chicken bowl no rice") without triggering the full 13-tool
- * coaching prompt.
+ * Uses a single `CFO_LITE_MODEL` (`vertexai/gemini-3.1-flash-lite`) call (~$0.00010 text,
+ * ~$0.00018 with photo) with zero tool-loop round-trips so inbound replies stay ~100x
+ * cheaper than full multi-turn chat while accepting both plain English and attached photos.
  */
 
 import { ai, CFO_LITE_MODEL, CFO_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
-import { nutritionLookupTool } from '@/ai/tools/nutrition-lookup';
 import { trackAiUsage } from '@/lib/ai-usage';
 import { inferMealFromTime } from '@/lib/food-exercise-types';
 
 export const ParsedOutreachMealSchema = z.object({
   isFoodLog: z
     .boolean()
-    .describe('True if the text describes food, drink, alcohol, or supplements consumed; false if unrelated or empty.'),
+    .describe('True if the message or attached photo shows food, drink, alcohol, or supplements consumed; false if unrelated or a pure question.'),
   isStopCommand: z
     .boolean()
     .describe('True if the user is asking to stop, cancel, pause, or unsubscribe from messages.'),
   name: z
     .string()
-    .describe('Concise combined meal label, e.g. "3 Eggs + Sourdough Toast" or "Chipotle Double Chicken Bowl".'),
-  portionG: z.number().describe('Total estimated portion weight in grams.'),
-  calories: z.number().describe('Total calories (kcal).'),
-  proteinG: z.number().describe('Total protein in grams.'),
-  carbsG: z.number().describe('Total carbohydrates in grams.'),
-  fatG: z.number().describe('Total fat in grams.'),
+    .describe('Concise combined meal label, e.g. "3 Eggs + Sourdough Toast" or "1/4 Costco Hot Dog + 3 oz Pepperoni Pizza + Nurri Shake". Empty string if isFoodLog=false.'),
+  portionG: z.number().describe('Total estimated portion weight in grams (0 if isFoodLog=false).'),
+  calories: z.number().describe('Total calories in kcal (0 if isFoodLog=false).'),
+  proteinG: z.number().describe('Total protein in grams (0 if isFoodLog=false).'),
+  carbsG: z.number().describe('Total carbohydrates in grams (0 if isFoodLog=false).'),
+  fatG: z.number().describe('Total fat in grams (0 if isFoodLog=false).'),
   fiberG: z.number().optional().describe('Dietary fiber in grams.'),
   plantMassG: z.number().optional().describe('Raw fruit + vegetable grams (Starrett 800g protocol).'),
   alcoholDrinks: z.number().optional().describe('Standard alcoholic drinks included (0 if none).'),
@@ -38,6 +37,9 @@ export const ParsedOutreachMealSchema = z.object({
     .describe('24-hour HH:MM if the user stated when they ate (e.g. "at 1pm" -> "13:00"); omit otherwise.'),
   meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']).optional(),
   source: z.enum(['usda', 'user_estimate']),
+  agentReply: z
+    .string()
+    .describe('Direct, sharp 1-sentence CFO reply acknowledging what was logged (or briefly answering their question if isFoodLog=false). No markdown headers, no fluff.'),
 });
 
 export type ParsedOutreachMeal = z.infer<typeof ParsedOutreachMealSchema>;
@@ -80,21 +82,32 @@ export function isExplicitStopKeyword(cleanText: string): boolean {
   return /^(stop|unsubscribe|cancel|quit|end|off|pause)\b[.!]*$/i.test(lower);
 }
 
-const OUTREACH_MEAL_SYSTEM = `You are the CFO's Nutrition Intake Clerk. Convert a short meal reply from Email or Discord into a single summed macro entry.
+const OUTREACH_MEAL_SYSTEM = `You are "the CFO" — a direct, numbers-first Chief Fitness Officer replying to a client's quick email or Discord update.
+Convert their meal text and/or attached meal or nutrition-label photo(s) into ONE summed macro entry, plus a sharp 1-sentence agentReply.
 
 RULES:
-1. If the user asks to unsubscribe, stop, or cancel messages, set isStopCommand=true and isFoodLog=false.
-2. Respect exact fractions, weights, and restaurant/branded specs (e.g. "1/4 costco hot dog" = 0.25x a full 570 kcal / 24g P Costco beef hot dog & bun; "3 oz costco pepperoni pizza" = 85g portion ~220 kcal / 11.5g P, NOT a full 8.9 oz food-court slice; "1 nurri shake" = Nurri 11 fl oz ultra-filtered milk shake = 150 kcal, 30g P, 3g C, 2.5g F). Compute standard whole foods, major restaurant items, and known shakes directly without tool calls; only call nutrition_lookup when an item is genuinely unfamiliar.
-3. Sum all items mentioned in the message into ONE combined entry with a clear, concise name listing each item (e.g. "1/4 Costco Hot Dog + 3 oz Pepperoni Pizza + Nurri Shake").
-4. Keep portionG, calories, proteinG, carbsG, and fatG realistic and internally consistent (4*P + 4*C + 9*F + 7*alcohol_g ≈ calories).`;
+1. If the user asks to unsubscribe, stop, or cancel messages, set isStopCommand=true, isFoodLog=false, and agentReply="Done — your automated briefings are canceled."
+2. If photos are attached, read nutrition labels or estimate plate portions visually with high precision and sum everything shown + mentioned into ONE combined entry.
+3. Respect exact fractions, weights, and restaurant/branded specs (e.g. "1/4 costco hot dog" = 0.25x a full 570 kcal / 24g P Costco beef hot dog & bun; "3 oz costco pepperoni pizza" = 85g portion ~220 kcal / 11.5g P, NOT a full 8.9 oz slice; "1 nurri shake" = Nurri 11 fl oz ultra-filtered milk shake = 150 kcal, 30g P, 3g C, 2.5g F).
+4. Keep portionG, calories, proteinG, carbsG, and fatG realistic and internally consistent (4*P + 4*C + 9*F + 7*alcohol_g ≈ calories).
+5. If the user asks a quick question without logging food, set isFoodLog=false and answer directly in agentReply in 1–2 concise sentences.`;
+
+export interface OutreachImageAttachment {
+  dataUri: string;
+  contentType: string;
+}
 
 export async function parseOutreachMealText(params: {
   uid: string;
   rawText: string;
   localTime: string;
+  photoDataUris?: OutreachImageAttachment[];
 }): Promise<ParsedOutreachMeal> {
   const cleanText = extractCleanReplyText(params.rawText);
-  if (!cleanText) {
+  const photos = (params.photoDataUris ?? []).slice(0, 3);
+  const hasPhotos = photos.length > 0;
+
+  if (!cleanText && !hasPhotos) {
     return {
       isFoodLog: false,
       isStopCommand: false,
@@ -105,10 +118,11 @@ export async function parseOutreachMealText(params: {
       carbsG: 0,
       fatG: 0,
       source: 'user_estimate',
+      agentReply: 'Tell me what you had (or attach a quick pic of your meal or label) and I will put it on the books.',
     };
   }
 
-  if (isExplicitStopKeyword(cleanText)) {
+  if (!hasPhotos && isExplicitStopKeyword(cleanText)) {
     return {
       isFoodLog: false,
       isStopCommand: true,
@@ -119,14 +133,24 @@ export async function parseOutreachMealText(params: {
       carbsG: 0,
       fatG: 0,
       source: 'user_estimate',
+      agentReply: 'Done — your automated briefings are canceled.',
     };
   }
 
-  const prompt = `Local time: ${params.localTime}\nUser message: "${cleanText}"`;
+  const textPrompt = cleanText
+    ? `Local time: ${params.localTime}\nClient reply: "${cleanText}"`
+    : `Local time: ${params.localTime}\nClient attached ${photos.length} meal/nutrition-label photo(s) with no text — identify and log what is shown.`;
+
+  const promptParts = hasPhotos
+    ? [
+        ...photos.map((p) => ({ media: { url: p.dataUri, contentType: p.contentType } })),
+        { text: textPrompt },
+      ]
+    : textPrompt;
+
   const genOptions = {
     system: OUTREACH_MEAL_SYSTEM,
-    prompt,
-    tools: [nutritionLookupTool],
+    prompt: promptParts,
     output: { schema: ParsedOutreachMealSchema },
     config: { temperature: 0.1 },
   };

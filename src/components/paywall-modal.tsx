@@ -266,7 +266,7 @@ export function PaywallModal({
                   'Zero-AI 3-Day Nutritionist & Glycogen Tank',
                   '1-Tap Ticker Book & Manual Quick Log',
                   'Level Sprint Tracker (500–3,000 pt blocks)',
-                  'Fitbit, Google Health, Oura & Withings Sync',
+                  'Google Health, Oura & Withings Sync',
                   'Full CSV & JSON Ledger Export',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2">

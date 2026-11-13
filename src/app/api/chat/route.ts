@@ -107,9 +107,20 @@ export async function POST(req: Request) {
       ? { ...currentHealth, dailyProteinG: 0, dailyCaloriesIn: 0, dailyCarbsG: 0 }
       : currentHealth;
 
-    // Only resend the most recent slice of the conversation to the model.
+    // Only resend the most recent slice of the conversation to the model,
+    // stripping any legacy dead-Fitbit-API administrative notices from older turns.
     const trimmedHistory = Array.isArray(chatHistory)
-      ? chatHistory.slice(-MAX_SENT_HISTORY)
+      ? chatHistory.slice(-MAX_SENT_HISTORY).map((m: any) =>
+          m?.role === 'model' && typeof m?.content === 'string'
+            ? {
+                ...m,
+                content: m.content
+                  .replace(/---\s*\n*###?\s*\**Administrative Notice\**[\s\S]*?Fitbit data feed went dark[^\n]*\n*/gi, '')
+                  .replace(/[^\n]*Fitbit (?:data feed went dark|API token expired)[^\n]*\n?/gi, '')
+                  .trim(),
+              }
+            : m,
+        )
       : chatHistory;
 
     // Always preload slim user context so the LLM never wastes an 11,500-token

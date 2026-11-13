@@ -12,11 +12,15 @@ import { createHash } from 'crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { ImapFlow } from 'imapflow';
 import { getAdminFirestore } from '@/firebase/admin';
+import type { OutreachImageAttachment } from '@/ai/flows/outreach-meal-parser';
 import {
   resolveGmailOutreachConfig,
   sendOutreachReplyConfirmationEmail,
 } from './outreach-email';
 import { processOutreachFreeTextMeal } from './outreach-service';
+
+const MAX_INBOUND_MIME_BYTES = 10 * 1024 * 1024; // 10 MB for attached meal/label photos
+const MIN_PHOTO_BYTES = 1024; // Ignore tiny 1x1 tracking pixels
 
 function decodeQuotedPrintable(input: string): string {
   return input
@@ -38,72 +42,94 @@ function stripHtmlTags(html: string): string {
     .replace(/&quot;/gi, '"');
 }
 
+function walkMimeSection(
+  rawSection: string,
+  acc: { plainText: string; htmlFallback: string; images: OutreachImageAttachment[] },
+): void {
+  const splitMatch = rawSection.match(/\r?\n\r?\n/);
+  if (!splitMatch || splitMatch.index === undefined) return;
+
+  const headersPart = rawSection.slice(0, splitMatch.index);
+  // Unfold RFC 5322 multi-line headers (e.g. boundary wrapped onto next indented line)
+  const unfoldedHeaders = headersPart.replace(/\r?\n[ \t]+/g, ' ');
+  let bodyPart = rawSection.slice(splitMatch.index + splitMatch[0].length);
+  bodyPart = bodyPart.replace(/\r?\n--\s*$/, '');
+
+  const boundaryMatch = unfoldedHeaders.match(/boundary=(?:"([^"]+)"|([^;\s\r\n]+))/i);
+  if (boundaryMatch) {
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+    const parts = bodyPart.split(`--${boundary}`);
+    // Skip preamble (index 0) and closing "--" epilogue
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      if (part.startsWith('--')) break;
+      walkMimeSection(part.replace(/^\r?\n/, ''), acc);
+    }
+    return;
+  }
+
+  const ctMatch = unfoldedHeaders.match(/Content-Type:\s*([a-z0-9.+-]+\/[a-z0-9.+-]+)/i);
+  const contentType = (ctMatch?.[1] || 'text/plain').toLowerCase();
+  const isBase64 = /Content-Transfer-Encoding:\s*base64/i.test(unfoldedHeaders);
+  const isQP = /Content-Transfer-Encoding:\s*quoted-printable/i.test(unfoldedHeaders);
+
+  if (contentType.startsWith('image/') && isBase64 && acc.images.length < 3) {
+    const cleanB64 = bodyPart.replace(/\s+/g, '');
+    const approxBytes = Math.floor((cleanB64.length * 3) / 4);
+    if (approxBytes >= MIN_PHOTO_BYTES) {
+      acc.images.push({
+        contentType,
+        dataUri: `data:${contentType};base64,${cleanB64}`,
+      });
+    }
+    return;
+  }
+
+  if (contentType === 'text/plain' || contentType === 'text/html') {
+    let decoded = bodyPart;
+    if (isBase64) {
+      try {
+        decoded = Buffer.from(bodyPart.replace(/\s+/g, ''), 'base64').toString('utf8');
+      } catch {
+        // Keep raw fallback
+      }
+    } else if (isQP) {
+      decoded = decodeQuotedPrintable(bodyPart);
+    }
+
+    if (contentType === 'text/plain' && !acc.plainText) {
+      acc.plainText = decoded.trim();
+    } else if (contentType === 'text/html' && !acc.htmlFallback) {
+      acc.htmlFallback = stripHtmlTags(decoded).trim();
+    }
+  }
+}
+
 /**
- * Lightweight MIME plain-text extractor for short email replies.
+ * Extracts plain-text reply AND up to 3 attached/inline meal or nutrition-label photos
+ * from a raw RFC 5322 / MIME email buffer.
+ */
+export function extractEmailReplyPartsFromRawMime(rawBuffer: Buffer): {
+  text: string;
+  images: OutreachImageAttachment[];
+} {
+  const raw = rawBuffer.toString('utf8');
+  if (!/\r?\n\r?\n/.test(raw)) {
+    return { text: raw.trim(), images: [] };
+  }
+  const acc = { plainText: '', htmlFallback: '', images: [] as OutreachImageAttachment[] };
+  walkMimeSection(raw, acc);
+  return {
+    text: acc.plainText || acc.htmlFallback,
+    images: acc.images,
+  };
+}
+
+/**
+ * Lightweight MIME plain-text extractor preserved for callers & tests needing text only.
  */
 export function extractPlainTextFromRawMime(rawBuffer: Buffer): string {
-  const raw = rawBuffer.toString('utf8');
-  const headerSplitIdx = raw.search(/\r?\n\r?\n/);
-  if (headerSplitIdx === -1) return raw.trim();
-
-  const headersPart = raw.slice(0, headerSplitIdx);
-  const bodyPart = raw.slice(headerSplitIdx).replace(/^\r?\n\r?\n/, '');
-
-  const boundaryMatch = headersPart.match(/boundary="?([^"\r\n;]+)"?/i);
-  if (boundaryMatch) {
-    const boundary = boundaryMatch[1];
-    const parts = bodyPart.split(`--${boundary}`);
-    let htmlFallback = '';
-
-    for (const part of parts) {
-      const subIdx = part.search(/\r?\n\r?\n/);
-      if (subIdx === -1) continue;
-      const partHeaders = part.slice(0, subIdx);
-      let content = part.slice(subIdx).replace(/^\r?\n\r?\n/, '');
-      // Remove trailing closing "--" marker if present
-      content = content.replace(/\r?\n--\s*$/, '').trim();
-
-      const isBase64 = /Content-Transfer-Encoding:\s*base64/i.test(partHeaders);
-      const isQP = /Content-Transfer-Encoding:\s*quoted-printable/i.test(partHeaders);
-
-      if (isBase64) {
-        try {
-          content = Buffer.from(content.replace(/\s+/g, ''), 'base64').toString('utf8');
-        } catch {
-          // Keep raw fallback
-        }
-      } else if (isQP) {
-        content = decodeQuotedPrintable(content);
-      }
-
-      if (/Content-Type:\s*text\/plain/i.test(partHeaders)) {
-        return content.trim();
-      }
-      if (/Content-Type:\s*text\/html/i.test(partHeaders) && !htmlFallback) {
-        htmlFallback = stripHtmlTags(content).trim();
-      }
-    }
-
-    if (htmlFallback) return htmlFallback;
-  }
-
-  // Single-part message
-  const isBase64 = /Content-Transfer-Encoding:\s*base64/i.test(headersPart);
-  const isQP = /Content-Transfer-Encoding:\s*quoted-printable/i.test(headersPart);
-  let decoded = bodyPart;
-  if (isBase64) {
-    try {
-      decoded = Buffer.from(bodyPart.replace(/\s+/g, ''), 'base64').toString('utf8');
-    } catch {
-      // Ignore
-    }
-  } else if (isQP) {
-    decoded = decodeQuotedPrintable(bodyPart);
-  }
-  if (/Content-Type:\s*text\/html/i.test(headersPart)) {
-    return stripHtmlTags(decoded).trim();
-  }
-  return decoded.trim();
+  return extractEmailReplyPartsFromRawMime(rawBuffer).text;
 }
 
 function buildGmailReceiptId(messageIdHeader: string | undefined, msgUid: number): string {
@@ -183,7 +209,8 @@ export async function pollGmailOutreachReplies(): Promise<{
 
       for (const msgUid of targetUids) {
         try {
-          const msg = await client.fetchOne(
+          // Phase 1: lightweight header-only check (~500 bytes) before downloading photo bodies
+          const meta = await client.fetchOne(
             String(msgUid),
             {
               uid: true,
@@ -197,18 +224,17 @@ export async function pollGmailOutreachReplies(): Promise<{
                 'auto-submitted',
                 'x-autoreply',
               ],
-              source: { maxLength: 65536 },
             },
             { uid: true },
           );
 
-          if (!msg || !msg.source) continue;
+          if (!meta) continue;
 
-          const headerText = msg.headers ? msg.headers.toString('utf8') : '';
+          const headerText = meta.headers ? meta.headers.toString('utf8') : '';
           const headerLower = headerText.toLowerCase();
 
           // Safety guard 1: strictly require "+cfo@" in To / Delivered-To or envelope.to
-          const envToMatch = (msg.envelope?.to ?? []).some((addr) =>
+          const envToMatch = (meta.envelope?.to ?? []).some((addr) =>
             (addr.address || '').toLowerCase().includes('+cfo@'),
           );
           if (!envToMatch && !headerLower.includes('+cfo@')) {
@@ -216,7 +242,7 @@ export async function pollGmailOutreachReplies(): Promise<{
           }
 
           // Safety guard 2: never re-ingest our own outbound briefings ("From: the CFO <...>")
-          const fromEntry = msg.envelope?.from?.[0];
+          const fromEntry = meta.envelope?.from?.[0];
           const fromName = (fromEntry?.name || '').trim().toLowerCase();
           if (fromName === 'the cfo' || /^from:\s*"?the cfo"?\s*</im.test(headerText)) {
             continue;
@@ -245,7 +271,7 @@ export async function pollGmailOutreachReplies(): Promise<{
 
           const userId = userSnap.docs[0].id;
           const messageIdMatch = headerText.match(/^message-id:\s*(.+)$/im);
-          const messageId = messageIdMatch?.[1]?.trim() || msg.envelope?.messageId;
+          const messageId = messageIdMatch?.[1]?.trim() || meta.envelope?.messageId;
           const receiptId = buildGmailReceiptId(messageId, msgUid);
           const receiptRef = db.doc(`users/${userId}/outreach_actions/${receiptId}`);
 
@@ -255,14 +281,26 @@ export async function pollGmailOutreachReplies(): Promise<{
             continue;
           }
 
-          const plainText = extractPlainTextFromRawMime(msg.source);
-          if (!plainText) continue;
+          // Phase 2: fetch full MIME source (up to 10 MB for attached meal/label photos)
+          const fullMsg = await client.fetchOne(
+            String(msgUid),
+            {
+              uid: true,
+              source: { maxLength: MAX_INBOUND_MIME_BYTES },
+            },
+            { uid: true },
+          );
+          if (!fullMsg || !fullMsg.source) continue;
+
+          const { text: plainText, images } = extractEmailReplyPartsFromRawMime(fullMsg.source);
+          if (!plainText && images.length === 0) continue;
 
           // Claim receipt + mark \Seen before LLM/email execution so retries never double-log
           await receiptRef.set({
             source: 'gmail_imap',
             msgUid,
             messageId: messageId ?? null,
+            imageCount: images.length,
             createdAt: FieldValue.serverTimestamp(),
           });
           await client.messageFlagsAdd(String(msgUid), ['\\Seen'], { uid: true }).catch(() => {});
@@ -270,7 +308,8 @@ export async function pollGmailOutreachReplies(): Promise<{
           const result = await processOutreachFreeTextMeal({
             uid: userId,
             rawText: plainText,
-            now: msg.envelope?.date instanceof Date ? msg.envelope.date : undefined,
+            photoDataUris: images,
+            now: meta.envelope?.date instanceof Date ? meta.envelope.date : undefined,
           });
 
           await receiptRef.set(
@@ -282,12 +321,22 @@ export async function pollGmailOutreachReplies(): Promise<{
             { merge: true },
           );
 
+          const origSubject = (meta.envelope?.subject || '').trim();
+          const replySubject = origSubject
+            ? /^re:/i.test(origSubject)
+              ? origSubject
+              : `Re: ${origSubject}`
+            : `the CFO: ${result.headline}`;
+
           await sendOutreachReplyConfirmationEmail({
             to: fromAddr,
             uid: userId,
-            subject: `the CFO: ${result.headline}`,
+            subject: replySubject,
+            inReplyToMessageId: messageId,
             headline: result.headline,
             detail: result.detail,
+            agentReply: result.agentReply,
+            lastFoodLine: result.lastFoodLine,
             loggedFoodId: result.loggedFoodId,
             localDate: result.localDate,
             loggedMacros: result.loggedMacros,

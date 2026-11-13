@@ -58,7 +58,18 @@ export async function POST(req: Request) {
       localDate: resolvedDate,
       localTime: new Date().toLocaleTimeString('en-US'),
       preloadedContext,
-      chatHistory: Array.isArray(chatHistory) ? chatHistory.slice(-10) : chatHistory,
+      chatHistory: Array.isArray(chatHistory)
+        ? chatHistory.slice(-10).map((m: any) =>
+            m?.role === 'model' && typeof m?.content === 'string'
+              ? {
+                  ...m,
+                  content: m.content
+                    .replace(/[^\n]*Fitbit (?:data feed went dark|API token expired)[^\n]*\n?/gi, '')
+                    .trim(),
+                }
+              : m,
+          )
+        : chatHistory,
     };
 
     const selectedModel =

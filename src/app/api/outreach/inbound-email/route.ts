@@ -48,9 +48,14 @@ export async function POST(request: NextRequest) {
     Array.isArray(payload?.from) ? payload.from[0] : payload?.from,
   );
   const rawText = String(payload?.text || payload?.plainText || payload?.subject || '').trim();
+  const rawImages = Array.isArray(payload?.images)
+    ? payload.images
+        .filter((img: any) => typeof img?.dataUri === 'string' && typeof img?.contentType === 'string')
+        .slice(0, 3)
+    : undefined;
 
-  if (!senderEmail || !rawText) {
-    return NextResponse.json({ ok: false, reason: 'missing_sender_or_text' });
+  if (!senderEmail || (!rawText && (!rawImages || rawImages.length === 0))) {
+    return NextResponse.json({ ok: false, reason: 'missing_sender_or_content' });
   }
 
   const db = getAdminFirestore();
@@ -65,14 +70,27 @@ export async function POST(request: NextRequest) {
   }
 
   const uid = userSnap.docs[0].id;
-  const result = await processOutreachFreeTextMeal({ uid, rawText });
+  const result = await processOutreachFreeTextMeal({
+    uid,
+    rawText,
+    photoDataUris: rawImages,
+  });
+
+  const inboundSubject = String(payload?.subject || '').trim();
+  const replySubject = inboundSubject
+    ? /^re:/i.test(inboundSubject)
+      ? inboundSubject
+      : `Re: ${inboundSubject}`
+    : `the CFO: ${result.headline}`;
 
   await sendOutreachReplyConfirmationEmail({
     to: senderEmail,
     uid,
-    subject: `the CFO: ${result.headline}`,
+    subject: replySubject,
     headline: result.headline,
     detail: result.detail,
+    agentReply: result.agentReply,
+    lastFoodLine: result.lastFoodLine,
     loggedFoodId: result.loggedFoodId,
     localDate: result.localDate,
     loggedMacros: result.loggedMacros,

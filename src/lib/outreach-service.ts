@@ -29,7 +29,11 @@ import {
   sendOutreachWelcomeEmail,
 } from './outreach-email';
 import { sendOutreachDiscordDM } from './outreach-discord';
-import { extractCleanReplyText, parseOutreachMealText } from '@/ai/flows/outreach-meal-parser';
+import {
+  extractCleanReplyText,
+  parseOutreachMealText,
+  type OutreachImageAttachment,
+} from '@/ai/flows/outreach-meal-parser';
 import { backfillScoreHistory } from './score-history-sync';
 import { FOUNDER_EMAILS } from './entitlements';
 
@@ -701,11 +705,14 @@ export async function executeOutreachQuickAction(params: {
 export async function processOutreachFreeTextMeal(params: {
   uid: string;
   rawText: string;
+  photoDataUris?: OutreachImageAttachment[];
   now?: Date;
 }): Promise<{
-  status: 'logged' | 'stopped' | 'cap_reached' | 'unrecognized';
+  status: 'logged' | 'replied' | 'stopped' | 'cap_reached' | 'unrecognized';
   headline: string;
   detail: string;
+  agentReply?: string;
+  lastFoodLine?: string;
   loggedFoodId?: string;
   loggedMealName?: string;
   loggedMacros?: {
@@ -752,6 +759,7 @@ export async function processOutreachFreeTextMeal(params: {
     uid: params.uid,
     rawText: params.rawText,
     localTime: clock.localTime,
+    photoDataUris: params.photoDataUris,
   });
 
   if (parsed.isStopCommand) {
@@ -760,14 +768,26 @@ export async function processOutreachFreeTextMeal(params: {
       status: 'stopped',
       headline: 'Briefings Canceled',
       detail: 'You are unsubscribed and will receive no further automated briefings.',
+      agentReply: parsed.agentReply,
     };
   }
 
   if (!parsed.isFoodLog || !parsed.name) {
+    const { composed } = await buildLiveUserOutreach({ uid: params.uid });
+    const replyLine =
+      parsed.agentReply ||
+      'Tell me what you had in plain English — or attach a meal or label photo — and I will log it.';
     return {
-      status: 'unrecognized',
-      headline: 'No Meal Detected',
-      detail: 'Reply with what you ate (e.g. "3 eggs and sourdough toast" or "40g whey shake"), or reply STOP to cancel briefings.',
+      status: parsed.agentReply ? 'replied' : 'unrecognized',
+      headline: composed.headline,
+      detail: replyLine,
+      agentReply: replyLine,
+      lastFoodLine: composed.lastFoodLine,
+      updatedHeadline: composed.headline,
+      updatedBody: composed.body,
+      metricsLine: composed.metricsLine,
+      statusTone: composed.statusTone,
+      localDate: clock.localDate,
     };
   }
 
@@ -811,25 +831,31 @@ export async function processOutreachFreeTextMeal(params: {
     fatG: Math.max(0, Math.round(parsed.fatG || 0)),
   };
 
-  const cleanUserMessage = extractCleanReplyText(params.rawText) || params.rawText.trim();
+  const hasAttachedPhotos = (params.photoDataUris?.length ?? 0) > 0;
+  const cleanUserMessage =
+    extractCleanReplyText(params.rawText) ||
+    (hasAttachedPhotos ? `[Attached meal photo: ${parsed.name}]` : params.rawText.trim());
   const nowTs = Date.now();
   await appendOutreachTranscript(params.uid, clock.localDate, [
     {
       role: 'user',
       content: cleanUserMessage,
+      ...(hasAttachedPhotos ? { hasImages: true } : {}),
       ts: nowTs,
     },
     {
       role: 'model',
-      content: `**Logged ${parsed.name}** (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g protein · ${roundedMacros.carbsG}g carbs · ${roundedMacros.fatG}g fat).\n\n**${composed.headline}** — ${composed.body}`,
+      content: `**Logged ${parsed.name}** (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g protein · ${roundedMacros.carbsG}g carbs · ${roundedMacros.fatG}g fat).${parsed.agentReply ? ` ${parsed.agentReply}` : ''}\n\n**${composed.headline}** — ${composed.body}`,
       ts: nowTs + 1,
     },
   ]);
 
   return {
     status: 'logged',
-    headline: `Logged ${parsed.name} (${roundedMacros.calories} kcal · ${roundedMacros.proteinG}g P)`,
+    headline: `Logged: ${parsed.name}`,
     detail: `${composed.headline} — ${composed.body}`,
+    agentReply: parsed.agentReply,
+    lastFoodLine: composed.lastFoodLine,
     loggedFoodId: foodId,
     loggedMealName: parsed.name,
     loggedMacros: roundedMacros,

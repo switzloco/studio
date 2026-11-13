@@ -44,6 +44,7 @@ export interface ComposedOutreachMessage {
   subject: string;
   headline: string;
   body: string;
+  lastFoodLine: string;
   metricsLine: string;
   eatByLabel: string;
   goodFromYesterday: boolean;
@@ -68,6 +69,46 @@ export interface ComposeOutreachInput {
 
 function cleanClockLabel(label: string): string {
   return label.replace(/^Today\s+/i, '').trim();
+}
+
+function format12hClock(hhmm?: string): string | null {
+  if (!hhmm || !/^\d{1,2}:\d{2}/.test(hhmm)) return null;
+  const [hRaw, mRaw] = hhmm.split(':');
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${suffix}`;
+}
+
+export function buildLastFoodOnRecordLine(
+  todayFoods: FoodLogEntry[] = [],
+  yesterdayFoods: FoodLogEntry[] = [],
+): string {
+  const activeToday = todayFoods
+    .filter((f) => !f.ignored && f.name)
+    .sort((a, b) => (b.consumedAt || '').localeCompare(a.consumedAt || ''));
+
+  if (activeToday.length > 0) {
+    const latest = activeToday[0];
+    const atLabel = format12hClock(latest.consumedAt);
+    const timePart = atLabel ? ` today at ${atLabel}` : ' today';
+    return `Last on record: ${latest.name}${timePart} (${Math.round(latest.calories || 0)} kcal, ${Math.round(latest.proteinG || 0)}g protein).`;
+  }
+
+  const activeYesterday = yesterdayFoods
+    .filter((f) => !f.ignored && f.name)
+    .sort((a, b) => (b.consumedAt || '').localeCompare(a.consumedAt || ''));
+
+  if (activeYesterday.length > 0) {
+    const latest = activeYesterday[0];
+    const atLabel = format12hClock(latest.consumedAt);
+    const timePart = atLabel ? ` yesterday at ${atLabel}` : ' yesterday';
+    return `Last on record: ${latest.name}${timePart} (${Math.round(latest.calories || 0)} kcal, ${Math.round(latest.proteinG || 0)}g protein) — nothing logged yet today.`;
+  }
+
+  return 'Last on record: Nothing logged yet today.';
 }
 
 /**
@@ -405,6 +446,7 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     ];
   }
 
+  const lastFoodLine = buildLastFoodOnRecordLine(input.todayFoods, input.yesterdayFoods);
   const scoreBadge = `VF ${vfPreview.score >= 0 ? '+' : ''}${vfPreview.score}`;
   const metricsLine = `${todayCaloriesIn.toLocaleString()} kcal in · ${todayProteinG}/${proteinGoal}g protein · Fat faucet ${runway.fatFaucetHourlyKcal} kcal/hr · ${scoreBadge}`;
 
@@ -415,6 +457,7 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     subject,
     headline,
     body,
+    lastFoodLine,
     metricsLine,
     eatByLabel: eatByClean,
     goodFromYesterday,
