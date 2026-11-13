@@ -34,12 +34,6 @@ const COMMANDS = [
         required: false,
       },
       {
-        name: 'weight_lbs',
-        description: 'Current body weight in lbs (optional, e.g. 185)',
-        type: 10, // NUMBER
-        required: false,
-      },
-      {
         name: 'timezone',
         description: 'IANA timezone (default: America/Los_Angeles)',
         type: 3, // STRING

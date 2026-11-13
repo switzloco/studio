@@ -117,8 +117,6 @@ export async function POST(request: NextRequest) {
     if (cmdName === 'start') {
       const tz = String(getOpt('timezone') || 'America/Los_Angeles');
       const emailOpt = String(getOpt('email') || '').trim().toLowerCase();
-      const weightLbs = Number(getOpt('weight_lbs') || 0);
-      const weightKg = weightLbs > 60 ? weightLbs / 2.20462 : undefined;
 
       let matchedUid: string | null = null;
       let existingChannel: 'email' | 'discord' | 'both' = 'discord';
@@ -159,7 +157,6 @@ export async function POST(request: NextRequest) {
           discordChannelId: dmChannelId,
           timezone: tz,
         },
-        weightKg,
       });
 
       const { composed } = await buildLiveUserOutreach({ uid });

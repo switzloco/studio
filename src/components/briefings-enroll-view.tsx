@@ -33,7 +33,6 @@ export function BriefingsEnrollView() {
   const [channel, setChannel] = useState<OutreachChannel>('email');
   const [email, setEmail] = useState('');
   const [discordUserId, setDiscordUserId] = useState('');
-  const [weightLbs, setWeightLbs] = useState('');
   const [cadence, setCadence] = useState<OutreachCadence>('3x');
   const [morningHour, setMorningHour] = useState(7);
   const [middayHour, setMiddayHour] = useState(12);
@@ -83,14 +82,12 @@ export function BriefingsEnrollView() {
     setIsSubmitting(true);
 
     try {
-      const parsedWeight = weightLbs.trim() ? Number(weightLbs.trim()) : undefined;
       const cleanEmail = email.trim().toLowerCase();
 
       // Use authenticated UID only when not an anonymous guest OR when enrolling the exact signed-in email
       const useCurrentUserUid =
         Boolean(user) &&
-        (!user?.email || cleanEmail === user.email.toLowerCase() || channel === 'discord') &&
-        !parsedWeight;
+        (!user?.email || cleanEmail === user.email.toLowerCase() || channel === 'discord');
 
       let res: {
         success: boolean;
@@ -119,7 +116,6 @@ export function BriefingsEnrollView() {
           channel,
           email: channel === 'email' ? cleanEmail : undefined,
           discordUserId: channel === 'discord' ? discordUserId.trim() : undefined,
-          weightLbs: parsedWeight,
           cadence,
           timezone,
           morningHour,
@@ -428,37 +424,19 @@ export function BriefingsEnrollView() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="briefings-weight" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-                          Body Weight (lbs, optional)
-                        </Label>
-                        <Input
-                          id="briefings-weight"
-                          type="number"
-                          min={80}
-                          max={500}
-                          placeholder="180"
-                          value={weightLbs}
-                          onChange={(e) => setWeightLbs(e.target.value)}
-                          className="h-11 rounded-xl text-sm"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label htmlFor="briefings-cadence" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-                          Frequency
-                        </Label>
-                        <select
-                          id="briefings-cadence"
-                          value={cadence}
-                          onChange={(e) => setCadence(e.target.value as OutreachCadence)}
-                          className="w-full h-11 rounded-xl border border-input bg-background px-3 text-xs font-bold"
-                        >
-                          <option value="3x">3x/Day (Morning, Midday &amp; Night)</option>
-                          <option value="morning_only">Morning Briefing Only (1x/Day)</option>
-                        </select>
-                      </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="briefings-cadence" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+                        Frequency
+                      </Label>
+                      <select
+                        id="briefings-cadence"
+                        value={cadence}
+                        onChange={(e) => setCadence(e.target.value as OutreachCadence)}
+                        className="w-full h-11 rounded-xl border border-input bg-background px-3 text-xs font-bold"
+                      >
+                        <option value="3x">3x/Day (Morning, Midday &amp; Night)</option>
+                        <option value="morning_only">Morning Briefing Only (1x/Day)</option>
+                      </select>
                     </div>
 
                     {/* Delivery Hours */}
