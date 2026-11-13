@@ -9,6 +9,70 @@ import type { FoodLogEntry, ExerciseLogEntry, FastLogEntry, ChatMessage, ChatSes
  * security rules via ADC (Application Default Credentials).
  */
 
+const FOOD_STOP_WORDS = new Set([
+  'with', 'and', 'the', 'for', 'from', 'cup', 'cups', 'oz', 'ounce', 'ounces',
+  'gram', 'grams', 'lb', 'lbs', 'tbsp', 'tsp', 'slice', 'slices', 'piece', 'pieces',
+  'partial', 'breading', 'half', 'quarter', 'full', 'serving', 'servings', 'bowl',
+  'plate', 'meal', 'breakfast', 'lunch', 'dinner', 'snack', 'some', 'about', 'approx',
+]);
+
+export function extractFoodTokens(name: string): string[] {
+  const rawWords = (name || '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !FOOD_STOP_WORDS.has(w))
+    .map((w) => (w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+  return Array.from(new Set(rawWords));
+}
+
+function parseHhMmToMinutes(hhmm?: string): number | null {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm.trim())) return null;
+  const [h, m] = hhmm.trim().split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+export function isLikelyDuplicateOrRevisionMeal(
+  existing: FoodLogEntry,
+  incoming: Omit<FoodLogEntry, 'timestamp'>,
+): boolean {
+  if (existing.ignored || existing.date !== incoming.date) return false;
+
+  const existingMins = parseHhMmToMinutes(existing.consumedAt);
+  const incomingMins = parseHhMmToMinutes(incoming.consumedAt);
+  const minsDiff =
+    existingMins !== null && incomingMins !== null
+      ? Math.abs(existingMins - incomingMins)
+      : 0;
+
+  const existingTokens = extractFoodTokens(existing.name);
+  const incomingTokens = extractFoodTokens(incoming.name);
+  if (existingTokens.length === 0 || incomingTokens.length === 0) return false;
+
+  const existingSet = new Set(existingTokens);
+  const intersectionCount = incomingTokens.filter((t) => existingSet.has(t)).length;
+  const minLen = Math.min(existingTokens.length, incomingTokens.length);
+  const maxLen = Math.max(existingTokens.length, incomingTokens.length);
+  const overlapRatio = intersectionCount / minLen;
+
+  // 1. Exact same food tokens within 90 minutes
+  if (
+    existingTokens.length === incomingTokens.length &&
+    intersectionCount === existingTokens.length &&
+    minsDiff <= 90
+  ) {
+    return true;
+  }
+
+  // 2. Complex meal (>= 3 food tokens) where >= 75% of the shorter entry's tokens match within 120 minutes
+  if (maxLen >= 3 && minLen >= 2 && overlapRatio >= 0.75 && minsDiff <= 120) {
+    return true;
+  }
+
+  return false;
+}
+
 export const adminHealthService = {
   async getHealthSummary(db: Firestore, userId: string): Promise<HealthData | null> {
     const docRef = db.doc(`users/${userId}`);
@@ -196,6 +260,30 @@ export const adminHealthService = {
     const clean = Object.fromEntries(
       Object.entries({ ...entry, timestamp: FieldValue.serverTimestamp() }).filter(([, v]) => v !== undefined)
     );
+
+    if (entry.date) {
+      try {
+        const sameDaySnap = await ref.where('date', '==', entry.date).limit(30).get();
+        const activeExisting = sameDaySnap.docs
+          .map((d) => ({ ...d.data(), id: d.id }) as FoodLogEntry)
+          .filter((e) => !e.ignored);
+
+        const match = activeExisting.find((e) => isLikelyDuplicateOrRevisionMeal(e, entry));
+        if (match?.id) {
+          const existingTokens = extractFoodTokens(match.name);
+          const incomingTokens = extractFoodTokens(entry.name);
+          // If the existing entry already has strictly more items (e.g. a later subset retry arrived out of order), keep the superset
+          if (existingTokens.length > incomingTokens.length && (match.calories ?? 0) >= (entry.calories ?? 0)) {
+            return match.id;
+          }
+          await ref.doc(match.id).set(clean, { merge: true });
+          return match.id;
+        }
+      } catch (err) {
+        console.warn('[logFood] Deduplication check non-fatal warning:', err);
+      }
+    }
+
     const docRef = await ref.add(clean);
     return docRef.id;
   },

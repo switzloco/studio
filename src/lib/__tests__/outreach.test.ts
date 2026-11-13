@@ -28,6 +28,7 @@ import {
   extractCleanReplyText,
   isExplicitStopKeyword,
 } from '@/ai/flows/outreach-meal-parser';
+import { isLikelyDuplicateOrRevisionMeal } from '../health-service-admin';
 import type { HealthData, UserPreferences } from '../health-service';
 import type { FoodLogEntry } from '../food-exercise-types';
 
@@ -453,5 +454,44 @@ describe('Email, Discord & Inbound Reply utilities', () => {
     expect(parts.images).toHaveLength(1);
     expect(parts.images[0].contentType).toBe('image/jpeg');
     expect(parts.images[0].dataUri).toBe(`data:image/jpeg;base64,${fakeJpegBase64}`);
+  });
+
+  it('deduplicates complex meal retries and revisions while preserving distinct later meals', () => {
+    const firstAttempt = makeFood({
+      id: 'entry_1',
+      name: '1.5 Cheese Quesadillas + 2 Breaded Chicken Breasts (Partial Breading) + 2 Cups Black Grapes',
+      calories: 840,
+      proteinG: 52,
+      consumedAt: '11:18',
+      date: '2026-11-13',
+    });
+
+    const revisedAttemptWithCrackers = makeFood({
+      name: '1.5 Cheese Quesadillas, 2 Breaded Chicken Breasts (partial breading), 2 Cups Grapes, 6 PB Crackers',
+      calories: 1180,
+      proteinG: 58,
+      consumedAt: '11:20',
+      date: '2026-11-13',
+    });
+
+    expect(isLikelyDuplicateOrRevisionMeal(firstAttempt, revisedAttemptWithCrackers)).toBe(true);
+
+    const morningShake = makeFood({
+      id: 'shake_am',
+      name: '40g Whey Protein Shake',
+      calories: 210,
+      proteinG: 40,
+      consumedAt: '08:30',
+      date: '2026-11-13',
+    });
+    const afternoonShake = makeFood({
+      name: '40g Whey Protein Shake',
+      calories: 210,
+      proteinG: 40,
+      consumedAt: '15:30',
+      date: '2026-11-13',
+    });
+    expect(isLikelyDuplicateOrRevisionMeal(morningShake, afternoonShake)).toBe(false);
+    expect(isExplicitStopKeyword("please don't message me anymore")).toBe(true);
   });
 });
