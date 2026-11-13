@@ -1,48 +1,163 @@
-import { ai } from '@/ai/genkit';
+import { FieldValue } from 'firebase-admin/firestore';
+import { ai, CFO_LITE_MODEL, CFO_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
-import { getWeeklyMetrics } from '@/lib/admin-metrics';
+import { getAdminFirestore } from '@/firebase/admin';
+import {
+  getUserSummaryMetrics,
+  renderUserSummaryEmailHtml,
+  type UserSummaryMetrics,
+} from '@/lib/admin-metrics';
+import { sendAdminReportEmail } from '@/lib/admin-email';
 import { trackAiUsage } from '@/lib/ai-usage';
 
 /**
- * @fileOverview Genkit flow to generate a weekly executive summary of app usage.
+ * @fileOverview Cost-optimized 1-pass executive user summary flow for founder reports.
  */
+
+export async function generateFounderUserSummary(periodDays = 3): Promise<{
+  summary: string;
+  metrics: UserSummaryMetrics;
+}> {
+  const metrics = await getUserSummaryMetrics(periodDays);
+
+  const topActiveLines = metrics.roster
+    .slice(0, 12)
+    .map(
+      (u) =>
+        `- ${u.name} (${u.email}): Briefings=${u.outreachStatus}, ${metrics.periodDays}d=${u.foodLogsPeriod} meals/${u.exerciseLogsPeriod} ex, last=${u.lastActiveDate || 'none'}, AI=$${u.aiCostUsdPeriod.toFixed(4)}`,
+    )
+    .join('\n');
+
+  const promptText = `You are the Chief Operating Analyst for "the CFO" fitness app reporting directly to founder Nick Switzer.
+Write a crisp, direct 2–3 sentence executive pulse covering the last ${metrics.periodDays} days (${metrics.dateRange.start} to ${metrics.dateRange.end}):
+- Registered users: ${metrics.registeredUsers} (+${metrics.newUsersPeriod} new; ${metrics.anonymousUsers} anon sessions)
+- Active (${metrics.periodDays}d / 24h): ${metrics.activeUsersPeriod} / ${metrics.dau}
+- Daily Briefings active: ${metrics.outreachActiveUsers} (${metrics.outreach3xUsers} on 3x/day, ${metrics.outreachMorningOnlyUsers} on 1x AM)
+- Volume: ${metrics.totalFoodLogsPeriod} meals, ${metrics.totalExerciseLogsPeriod} workouts
+- Total AI spend: ${metrics.totalLLMCallsPeriod} calls ($${metrics.totalAiCostUsdPeriod.toFixed(4)})
+Top roster snapshot:
+${topActiveLines || '(none)'}
+
+Plain text only (no markdown headers or bullets). Mention specific active/enrolled users by first name or email handle where notable, call out anyone enrolled on briefings with 0 meals logged if applicable, and note unit cost health.`;
+
+  try {
+    let res;
+    try {
+      res = await ai.generate({
+        model: CFO_LITE_MODEL,
+        use: [
+          trackAiUsage({
+            uid: 'system:admin_report',
+            feature: 'admin_report',
+            model: CFO_LITE_MODEL,
+          }),
+        ],
+        prompt: promptText,
+      });
+    } catch {
+      res = await ai.generate({
+        model: CFO_MODEL,
+        use: [
+          trackAiUsage({
+            uid: 'system:admin_report',
+            feature: 'admin_report',
+            model: CFO_MODEL,
+          }),
+        ],
+        prompt: promptText,
+      });
+    }
+
+    const clean = (res.text || '').trim();
+    if (clean) {
+      return { summary: clean, metrics };
+    }
+  } catch (err) {
+    console.warn('[AdminReport] Falling back to deterministic summary:', err);
+  }
+
+  const fallback = `${metrics.activeUsersPeriod} of ${metrics.registeredUsers} registered users were active over the last ${metrics.periodDays} days (${metrics.dau} in the last 24h), logging ${metrics.totalFoodLogsPeriod} meals and ${metrics.totalExerciseLogsPeriod} workouts. ${metrics.outreachActiveUsers} users are active on Daily Briefings, and total Vertex AI spend across ${metrics.totalLLMCallsPeriod} calls was $${metrics.totalAiCostUsdPeriod.toFixed(4)}.`;
+  return { summary: fallback, metrics };
+}
 
 export const adminReportFlow = ai.defineFlow(
   {
     name: 'admin_report_flow',
-    inputSchema: z.void(),
+    inputSchema: z.object({ periodDays: z.number().optional() }).optional(),
     outputSchema: z.object({
       summary: z.string(),
       metrics: z.any(),
     }),
   },
-  async () => {
-    const metrics = await getWeeklyMetrics();
-
-    const response = await ai.generate({
-      use: [trackAiUsage({ uid: 'system:admin_report', feature: 'admin_report' })],
-      prompt: `
-        You are the Executive Reporting Assistant for the "the CFO" (Chief Fitness Officer) app.
-        Generate a professional, concise weekly summary for the founder (Nicholas Switzer).
-        
-        Metrics for the period ${metrics.dateRange.start} to ${metrics.dateRange.end}:
-        - Total Users: ${metrics.totalUsers}
-        - Daily Active Users (DAU): ${metrics.dau}
-        - Weekly Active Users (WAU): ${metrics.wau}
-        - New Users This Week: ${metrics.newUsersWeek}
-        - Total Food Logs: ${metrics.totalFoodLogsWeek}
-        - Total Exercise Logs: ${metrics.totalExerciseLogsWeek}
-        - Estimated AI Interactions (LLM Calls): ${metrics.totalLLMCallsWeek}
-        
-        The tone should be "Financial Executive" — data-driven, slightly bullish but realistic, using metaphors from the finance world (e.g., "Active liquidity", "Asset engagement", "Operational overhead").
-        
-        Keep it to 3 short paragraphs. Include a "Key Takeaway" bullet point at the end.
-      `,
-    });
-
-    return {
-      summary: response.text,
-      metrics,
-    };
-  }
+  async (input) => {
+    return generateFounderUserSummary(input?.periodDays ?? 7);
+  },
 );
+
+const FOUNDER_EMAIL = 'nicholas.switzer@gmail.com';
+const MIN_HOURS_BETWEEN_SENDS = 68; // ~3 days (72h) minus 4h morning schedule buffer
+
+export async function sendFounderUserSummaryNow(params?: {
+  periodDays?: number;
+  force?: boolean;
+}) {
+  const periodDays = Math.max(1, Math.min(30, Math.round(params?.periodDays ?? 3)));
+  const force = Boolean(params?.force);
+  const db = getAdminFirestore();
+  const stateRef = db.doc('admin_state/user_summary_3d');
+  const nowMs = Date.now();
+
+  if (!force) {
+    const snap = await stateRef.get();
+    const lastSentAtMs = Number(snap.data()?.lastSentAtMs || 0);
+    if (lastSentAtMs > 0) {
+      const hoursElapsed = (nowMs - lastSentAtMs) / (3600 * 1000);
+      if (hoursElapsed < MIN_HOURS_BETWEEN_SENDS) {
+        return {
+          ok: true,
+          skipped: true,
+          hoursSinceLast: Number(hoursElapsed.toFixed(1)),
+          nextDueInHours: Number((72 - hoursElapsed).toFixed(1)),
+        };
+      }
+    }
+  }
+
+  const { summary, metrics } = await generateFounderUserSummary(periodDays);
+  const html = renderUserSummaryEmailHtml({ metrics, summary });
+  const subject = `[the CFO] ${metrics.periodDays}d User Summary · ${metrics.activeUsersPeriod} Active · ${metrics.outreachActiveUsers} on Briefings`;
+
+  const emailRes = await sendAdminReportEmail(FOUNDER_EMAIL, subject, html);
+
+  if (emailRes.success) {
+    await stateRef.set(
+      {
+        lastSentAtMs: nowMs,
+        lastSentIso: new Date(nowMs).toISOString(),
+        periodDays: metrics.periodDays,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
+  return {
+    ok: emailRes.success,
+    skipped: false,
+    emailSent: emailRes.success,
+    error: emailRes.error,
+    subject,
+    summary,
+    counts: {
+      registeredUsers: metrics.registeredUsers,
+      anonymousUsers: metrics.anonymousUsers,
+      activeUsersPeriod: metrics.activeUsersPeriod,
+      dau: metrics.dau,
+      outreachActiveUsers: metrics.outreachActiveUsers,
+      totalFoodLogsPeriod: metrics.totalFoodLogsPeriod,
+      totalLLMCallsPeriod: metrics.totalLLMCallsPeriod,
+      totalAiCostUsdPeriod: Number(metrics.totalAiCostUsdPeriod.toFixed(4)),
+      rosterSize: metrics.roster.length,
+    },
+  };
+}
