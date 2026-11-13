@@ -5,6 +5,7 @@ import type { OutreachWindow } from '@/lib/health-service';
 import { resolveLocalClock } from '@/lib/outreach-auth';
 import { dispatchOutreachForUser } from '@/lib/outreach-service';
 import { pollGmailOutreachReplies } from '@/lib/outreach-gmail-inbound';
+import { pollDiscordOutreachReplies } from '@/lib/outreach-discord-inbound';
 
 /**
  * @fileOverview 5-minute cron endpoint for inbound Gmail reply polling + 3x/day outreach.
@@ -70,7 +71,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, mode: 'single', uid: forceUid, ...single });
   }
 
-  const inboundReplies = await pollGmailOutreachReplies();
+  const [inboundReplies, discordInbound] = await Promise.all([
+    pollGmailOutreachReplies(),
+    pollDiscordOutreachReplies(),
+  ]);
 
   const db = getAdminFirestore();
   const snapshot = await db
@@ -135,6 +139,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     inboundReplies,
+    discordInbound,
     enrolledChecked: checked,
     dueNow: dueQueue.length,
     sent,

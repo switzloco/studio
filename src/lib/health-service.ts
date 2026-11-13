@@ -272,6 +272,8 @@ export interface OutreachPreferences {
   discordUserId?: string;
   /** Cached Discord DM channel ID or private thread ID for stateless REST sends. */
   discordChannelId?: string;
+  /** Last processed Discord DM message snowflake ID for stateless 5-min REST polling. */
+  lastDiscordMessageId?: string;
   /** IANA timezone string, e.g. "America/Los_Angeles". */
   timezone: string;
   /** Local hour (0-23) for morning dispatch. Default 7. */

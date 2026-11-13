@@ -99,7 +99,7 @@ export function buildDiscordOutreachPayload(params: {
   const descriptionParts = [
     composed.autoSunsetBanner ? `_${composed.autoSunsetBanner}_\n` : '',
     composed.body,
-    `\n**${composed.lastFoodLine}**\nWhat else did you have? Tap **Log Meal** below or tap a quick preset.`,
+    `\n**${composed.lastFoodLine}**\n**What else did you have?** Reply right here in plain English, drop a meal/label photo, or tap **Log Meal** below.`,
   ].filter(Boolean);
 
   return {
@@ -207,5 +207,74 @@ export async function sendOutreachDiscordDM(params: {
     return { success: true, resolvedChannelId: channelId };
   } catch (err: any) {
     return { success: false, error: err?.message ?? String(err) };
+  }
+}
+
+/**
+ * Sends a lightweight conversational agent reply directly in a Discord DM thread,
+ * including a 1-tap [Undo Entry] button whenever a meal was logged.
+ */
+export async function sendDiscordDmReply(params: {
+  channelId: string;
+  replyToMessageId?: string;
+  headline: string;
+  agentReply: string;
+  updatedHeadline?: string;
+  lastFoodLine?: string;
+  loggedFoodId?: string;
+  localDate?: string;
+}): Promise<{ success: boolean }> {
+  const botToken = process.env.DISCORD_BOT_TOKEN;
+  if (!botToken || !params.channelId) return { success: false };
+
+  const lines = [
+    `**${params.headline}**`,
+    params.agentReply,
+    params.updatedHeadline && params.updatedHeadline !== params.headline
+      ? `**Next up:** ${params.updatedHeadline}`
+      : '',
+    params.lastFoodLine ? `_${params.lastFoodLine}_` : '',
+  ].filter(Boolean);
+
+  const components =
+    params.loggedFoodId && params.localDate
+      ? [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 2,
+                label: 'Undo Entry',
+                custom_id: `outreach:undo:${params.loggedFoodId}:${params.localDate}`,
+              },
+            ],
+          },
+        ]
+      : undefined;
+
+  try {
+    const res = await fetch(`${DISCORD_API_BASE}/channels/${params.channelId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: lines.join('\n'),
+        ...(params.replyToMessageId
+          ? {
+              message_reference: {
+                message_id: params.replyToMessageId,
+                fail_if_not_exists: false,
+              },
+            }
+          : {}),
+        ...(components ? { components } : {}),
+      }),
+    });
+    return { success: res.ok };
+  } catch {
+    return { success: false };
   }
 }

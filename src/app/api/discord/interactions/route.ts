@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminFirestore } from '@/firebase/admin';
+import { getAdminAuth, getAdminFirestore } from '@/firebase/admin';
+import { adminHealthService } from '@/lib/health-service-admin';
 import { verifyDiscordSignature } from '@/lib/outreach-discord';
+import { fetchDiscordImageAttachments } from '@/lib/outreach-discord-inbound';
 import type { OutreachActionType } from '@/lib/outreach-auth';
 import type { OutreachWindow } from '@/lib/health-service';
 import {
@@ -110,17 +112,42 @@ export async function POST(request: NextRequest) {
 
     if (cmdName === 'start') {
       const tz = String(getOpt('timezone') || 'America/Los_Angeles');
+      const emailOpt = String(getOpt('email') || '').trim().toLowerCase();
       const weightLbs = Number(getOpt('weight_lbs') || 0);
       const weightKg = weightLbs > 60 ? weightLbs / 2.20462 : undefined;
 
-      const existingUid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true);
-      const uid = existingUid!;
+      let matchedUid: string | null = null;
+      let existingChannel: 'email' | 'discord' | 'both' = 'discord';
+      if (emailOpt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailOpt)) {
+        const db = getAdminFirestore();
+        const byOutreachEmail = await db
+          .collection('users')
+          .where('outreachEmail', '==', emailOpt)
+          .limit(1)
+          .get();
+        if (!byOutreachEmail.empty) {
+          matchedUid = byOutreachEmail.docs[0].id;
+        } else {
+          const authUser = await getAdminAuth().getUserByEmail(emailOpt).catch(() => null);
+          if (authUser?.uid) matchedUid = authUser.uid;
+        }
+        if (matchedUid) {
+          const prefs = await adminHealthService.getUserPreferences(db, matchedUid);
+          if (prefs?.outreach?.enabled && prefs.outreach.email) {
+            existingChannel = 'both';
+          }
+        }
+      }
+
+      const uid =
+        matchedUid || (await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true))!;
       await saveUserOutreachSettings({
         uid,
         outreach: {
           enabled: true,
-          channel: 'discord',
+          channel: existingChannel,
           cadence: '3x',
+          ...(emailOpt ? { email: emailOpt } : {}),
           discordUserId,
           discordChannelId: channelId,
           timezone: tz,
@@ -129,10 +156,11 @@ export async function POST(request: NextRequest) {
       });
 
       const { composed } = await buildLiveUserOutreach({ uid });
+      const linkedNote = matchedUid ? ` · Linked to \`${emailOpt}\`` : '';
       return NextResponse.json({
         type: 4,
         data: {
-          content: `**3x/Day Free CFO Briefings Enabled** (${tz})\n**${composed.headline}**\n${composed.body}\n\n_Free forever ($0). Run \`/stop\` or tap Cancel Pings any time._`,
+          content: `**3x/Day Free CFO Briefings Enabled** (${tz}${linkedNote})\n**${composed.headline}**\n${composed.body}\n\n**${composed.lastFoodLine}**\nReply right in DM with plain English or a meal/label photo, or use \`/eat\`.\n_Free forever ($0). Run \`/stop\` or tap Cancel Pings any time._`,
           flags: EPHEMERAL_FLAG,
         },
       });
@@ -170,11 +198,32 @@ export async function POST(request: NextRequest) {
 
     if (cmdName === 'eat') {
       const mealText = String(getOpt('meal') || '').trim();
-      const parsedRes = await processOutreachFreeTextMeal({ uid, rawText: mealText });
+      const photoAttachmentId = getOpt('photo') ? String(getOpt('photo')) : null;
+      const resolvedAttachments = interaction.data?.resolved?.attachments ?? {};
+      const rawAtt = photoAttachmentId ? resolvedAttachments[photoAttachmentId] : null;
+      const photoDataUris = rawAtt
+        ? await fetchDiscordImageAttachments([rawAtt])
+        : undefined;
+
+      if (!mealText && (!photoDataUris || photoDataUris.length === 0)) {
+        return NextResponse.json({
+          type: 4,
+          data: {
+            content: 'Include `meal:` text or attach a `photo:` so I can put it on your ledger.',
+            flags: EPHEMERAL_FLAG,
+          },
+        });
+      }
+
+      const parsedRes = await processOutreachFreeTextMeal({
+        uid,
+        rawText: mealText,
+        photoDataUris,
+      });
       return NextResponse.json({
         type: 4,
         data: {
-          content: `**${parsedRes.headline}**\n${parsedRes.detail}`,
+          content: `**${parsedRes.headline}**\n${parsedRes.agentReply || parsedRes.detail}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
           flags: EPHEMERAL_FLAG,
         },
       });
@@ -218,6 +267,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         type: 4,
         data: { content: 'Account not found.', flags: EPHEMERAL_FLAG },
+      });
+    }
+
+    if (parts[0] === 'outreach' && parts[1] === 'undo') {
+      const foodId = parts[2] || undefined;
+      const date = parts[3] || undefined;
+      const res = await executeOutreachQuickAction({
+        uid,
+        action: 'undo_food',
+        foodId,
+        date,
+      });
+      const clockNote = res.updatedHeadline ? `\n\n**${res.updatedHeadline}**\n${res.updatedBody ?? ''}` : '';
+      return NextResponse.json({
+        type: 4,
+        data: {
+          content: `**${res.title}** — ${res.detail}${clockNote}`,
+          flags: EPHEMERAL_FLAG,
+        },
       });
     }
 
