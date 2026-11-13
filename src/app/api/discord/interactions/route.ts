@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
-import { verifyDiscordSignature } from '@/lib/outreach-discord';
+import {
+  openDiscordDmChannel,
+  sendOutreachDiscordDM,
+  verifyDiscordSignature,
+} from '@/lib/outreach-discord';
 import { fetchDiscordImageAttachments } from '@/lib/outreach-discord-inbound';
 import type { OutreachActionType } from '@/lib/outreach-auth';
 import type { OutreachWindow } from '@/lib/health-service';
@@ -139,8 +143,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const dmOpened = await openDiscordDmChannel(discordUserId);
+      const dmChannelId = dmOpened.channelId || channelId;
+
       const uid =
-        matchedUid || (await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true))!;
+        matchedUid || (await resolveOrCreateUidForDiscordUser(discordUserId, dmChannelId, true))!;
       await saveUserOutreachSettings({
         uid,
         outreach: {
@@ -149,18 +156,25 @@ export async function POST(request: NextRequest) {
           cadence: '3x',
           ...(emailOpt ? { email: emailOpt } : {}),
           discordUserId,
-          discordChannelId: channelId,
+          discordChannelId: dmChannelId,
           timezone: tz,
         },
         weightKg,
       });
 
       const { composed } = await buildLiveUserOutreach({ uid });
+      await sendOutreachDiscordDM({
+        discordUserId,
+        discordChannelId: dmChannelId,
+        cadence: '3x',
+        composed,
+      }).catch(() => null);
+
       const linkedNote = matchedUid ? ` · Linked to \`${emailOpt}\`` : '';
       return NextResponse.json({
         type: 4,
         data: {
-          content: `**3x/Day Free CFO Briefings Enabled** (${tz}${linkedNote})\n**${composed.headline}**\n${composed.body}\n\n**${composed.lastFoodLine}**\nReply right in DM with plain English or a meal/label photo, or use \`/eat\`.\n_Free forever ($0). Run \`/stop\` or tap Cancel Pings any time._`,
+          content: `**3x/Day Free CFO Briefings Enabled** (${tz}${linkedNote})\n**${composed.headline}**\n${composed.body}\n\n**${composed.lastFoodLine}**\nSent your interactive Eat-By Briefing card to your DMs — reply right in DM with plain English or a meal/label photo, or use \`/eat\`.\n_Free forever ($0). Run \`/stop\` or tap Cancel Pings any time._`,
           flags: EPHEMERAL_FLAG,
         },
       });

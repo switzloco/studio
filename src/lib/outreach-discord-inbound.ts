@@ -8,8 +8,16 @@
 
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from './health-service-admin';
-import { openDiscordDmChannel, sendDiscordDmReply } from './outreach-discord';
-import { processOutreachFreeTextMeal } from './outreach-service';
+import {
+  openDiscordDmChannel,
+  sendDiscordDmReply,
+  sendOutreachDiscordDM,
+} from './outreach-discord';
+import {
+  buildLiveUserOutreach,
+  executeOutreachQuickAction,
+  processOutreachFreeTextMeal,
+} from './outreach-service';
 import type { OutreachImageAttachment } from '@/ai/flows/outreach-meal-parser';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
@@ -170,13 +178,38 @@ export async function pollDiscordOutreachReplies(): Promise<{
         if (!claimed) continue;
 
         processed++;
+
+        const lowerText = text.toLowerCase();
+        if (!hasImageAttachments && (lowerText.startsWith('/start') || lowerText === '/status')) {
+          const { composed } = await buildLiveUserOutreach({ uid });
+          await sendOutreachDiscordDM({
+            discordUserId: outreach.discordUserId || '',
+            discordChannelId: channelId,
+            cadence: outreach.cadence ?? '3x',
+            composed,
+          });
+          continue;
+        }
+
+        if (!hasImageAttachments && lowerText === '/stop') {
+          const stopRes = await executeOutreachQuickAction({ uid, action: 'unsubscribe' });
+          await sendDiscordDmReply({
+            channelId,
+            replyToMessageId: msg.id,
+            headline: stopRes.title,
+            agentReply: stopRes.detail,
+          });
+          continue;
+        }
+
+        const cleanedMealText = text.replace(/^\/eat(?:\s+meal:|\s+)/i, '').trim();
         const photoDataUris = hasImageAttachments
           ? await fetchDiscordImageAttachments(msg.attachments)
           : undefined;
 
         const parseRes = await processOutreachFreeTextMeal({
           uid,
-          rawText: text,
+          rawText: cleanedMealText || text,
           photoDataUris,
         });
 
