@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService } from '@/lib/health-service-admin';
 import {
@@ -183,7 +183,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, false);
+    const uid = await resolveOrCreateUidForDiscordUser(
+      discordUserId,
+      channelId,
+      cmdName === 'eat' || cmdName === 'status',
+    );
     if (!uid) {
       return NextResponse.json({
         type: 4,
@@ -218,11 +222,8 @@ export async function POST(request: NextRequest) {
       const photoAttachmentId = getOpt('photo') ? String(getOpt('photo')) : null;
       const resolvedAttachments = interaction.data?.resolved?.attachments ?? {};
       const rawAtt = photoAttachmentId ? resolvedAttachments[photoAttachmentId] : null;
-      const photoDataUris = rawAtt
-        ? await fetchDiscordImageAttachments([rawAtt])
-        : undefined;
 
-      if (!mealText && (!photoDataUris || photoDataUris.length === 0)) {
+      if (!mealText && !rawAtt) {
         return NextResponse.json({
           type: 4,
           data: {
@@ -232,17 +233,54 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const parsedRes = await processOutreachFreeTextMeal({
-        uid,
-        rawText: mealText,
-        photoDataUris,
+      const appId = String(interaction.application_id || process.env.NEXT_PUBLIC_DISCORD_APP_ID || '1570868560065077420');
+      const interactionToken = String(interaction.token || '');
+
+      after(async () => {
+        try {
+          const photoDataUris = rawAtt
+            ? await fetchDiscordImageAttachments([rawAtt])
+            : undefined;
+          const parsedRes = await processOutreachFreeTextMeal({
+            uid,
+            rawText: mealText,
+            photoDataUris,
+          });
+          const components =
+            parsedRes.loggedFoodId && parsedRes.localDate
+              ? [
+                  {
+                    type: 1,
+                    components: [
+                      {
+                        type: 2,
+                        style: 2,
+                        label: 'Undo Entry',
+                        custom_id: `outreach:undo:${parsedRes.loggedFoodId}:${parsedRes.localDate}`,
+                      },
+                    ],
+                  },
+                ]
+              : undefined;
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: `**${parsedRes.headline}**\n${parsedRes.agentReply || parsedRes.detail}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
+                ...(components ? { components } : {}),
+              }),
+            },
+          );
+        } catch (err) {
+          console.error('[DiscordInteractions] /eat deferred error:', err);
+        }
       });
+
       return NextResponse.json({
-        type: 4,
-        data: {
-          content: `**${parsedRes.headline}**\n${parsedRes.agentReply || parsedRes.detail}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
-          flags: EPHEMERAL_FLAG,
-        },
+        type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (prevents Discord 3.0s timeout on LLM parse)
+        data: { flags: EPHEMERAL_FLAG },
       });
     }
   }
@@ -336,13 +374,47 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const res = await processOutreachFreeTextMeal({ uid, rawText: rawMeal });
+    const appId = String(interaction.application_id || process.env.NEXT_PUBLIC_DISCORD_APP_ID || '1570868560065077420');
+    const interactionToken = String(interaction.token || '');
+
+    after(async () => {
+      try {
+        const res = await processOutreachFreeTextMeal({ uid, rawText: rawMeal });
+        const components =
+          res.loggedFoodId && res.localDate
+            ? [
+                {
+                  type: 1,
+                  components: [
+                    {
+                      type: 2,
+                      style: 2,
+                      label: 'Undo Entry',
+                      custom_id: `outreach:undo:${res.loggedFoodId}:${res.localDate}`,
+                    },
+                  ],
+                },
+              ]
+            : undefined;
+        await fetch(
+          `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              content: `**${res.headline}**\n${res.agentReply || res.detail}${res.lastFoodLine ? `\n_${res.lastFoodLine}_` : ''}`,
+              ...(components ? { components } : {}),
+            }),
+          },
+        );
+      } catch (err) {
+        console.error('[DiscordInteractions] Modal submit deferred error:', err);
+      }
+    });
+
     return NextResponse.json({
-      type: 4,
-      data: {
-        content: `**${res.headline}**\n${res.detail}`,
-        flags: EPHEMERAL_FLAG,
-      },
+      type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+      data: { flags: EPHEMERAL_FLAG },
     });
   }
 
