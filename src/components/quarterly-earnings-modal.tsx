@@ -135,24 +135,24 @@ export function QuarterlyEarningsModal() {
 
   return (
     <Dialog open={earningsModalOpen} onOpenChange={setEarningsModalOpen}>
-      <DialogContent className="max-w-2xl bg-slate-950 border-emerald-500/40 text-emerald-200 font-mono p-0 overflow-hidden max-h-[90vh] flex flex-col">
-        <DialogHeader className="border-b border-emerald-500/25 bg-slate-900 px-5 py-4 space-y-1 shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
-            <DialogTitle className="text-sm font-black uppercase tracking-widest text-emerald-300 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-amber-400" />
-              30-DAY METABOLIC EARNINGS CALL // PORTFOLIO FORECAST
+      <DialogContent className="w-[calc(100vw-1.25rem)] sm:w-full max-w-2xl rounded-2xl bg-slate-950 border-emerald-500/40 text-emerald-200 font-mono p-0 overflow-hidden max-h-[88dvh] flex flex-col">
+        <DialogHeader className="border-b border-emerald-500/25 bg-slate-900 px-3.5 sm:px-5 py-3 sm:py-4 space-y-1 shrink-0 text-left">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 pr-6">
+            <DialogTitle className="text-xs sm:text-sm font-black uppercase tracking-wider sm:tracking-widest text-emerald-300 flex items-center gap-1.5">
+              <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>30-DAY METABOLIC EARNINGS CALL</span>
             </DialogTitle>
-            <span className="rounded border border-amber-500/40 bg-amber-950/40 px-2 py-0.5 text-[9px] font-bold uppercase text-amber-300">
-              ROUTE: {secPrivacyLock ? 'ONLY_ON_DEVICE' : `PREFER_IN_CLOUD (${remoteConfig.cfoCloudModel})`}
+            <span className="rounded border border-amber-500/40 bg-amber-950/40 px-1.5 py-0.5 text-[8.5px] sm:text-[9px] font-bold uppercase text-amber-300">
+              {secPrivacyLock ? 'ONLY_ON_DEVICE' : `CLOUD · ${remoteConfig.cfoCloudModel}`}
             </span>
           </div>
-          <DialogDescription className="text-[11px] text-emerald-400/80 font-mono">
-            Synthesizes your multi-week Audit Ledger, Equity Score trajectory, Alpert fat-oxidation ceiling, and metabolic break-even run-rate.
-            {!isOnline && ' (Browser Offline: automatic on-device Gemini Nano fallback armed.)'}
+          <DialogDescription className="text-[10.5px] sm:text-[11px] text-emerald-400/80 font-mono">
+            Synthesizes your multi-week Audit Ledger, Equity trajectory, Alpert ceiling, and metabolic break-even run-rate.
+            {!isOnline && ' (Offline: automatic on-device Gemini Nano fallback armed.)'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="p-5 overflow-y-auto space-y-4">
+        <div className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 sm:space-y-4">
           {!report && !isRunning && !complianceAlert && (
             <div className="rounded-xl border border-emerald-500/30 bg-slate-900/70 p-5 text-center space-y-3">
               <TrendingUp className="w-8 h-8 text-amber-400 mx-auto" />

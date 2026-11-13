@@ -612,7 +612,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
   const EntitlementBanner = (() => {
     if (entitlement.tier === 'founder') {
       return (
-        <div className="mb-2 flex items-center justify-between px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-700">
+        <div className="hidden sm:flex mb-2 items-center justify-between px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-700">
           <span className="flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
             Founder Immunity · Unlimited AI CFO
@@ -623,7 +623,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
     if (entitlement.tier === 'vip' || entitlement.tier === 'pro') {
       return (
-        <div className="mb-2 flex items-center justify-between px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary">
+        <div className="hidden sm:flex mb-2 items-center justify-between px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary">
           <span className="flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" />
             {entitlement.badgeLabel} · Unlimited AI Audits
@@ -635,7 +635,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     const isLow = remaining <= 5;
     return (
       <div
-        className={`mb-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border text-[10px] font-bold ${
+        className={`mb-1.5 sm:mb-2 flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-[10px] font-bold ${
           isLow
             ? 'bg-amber-500/10 border-amber-500/30 text-amber-900'
             : 'bg-muted/40 border-border/50 text-muted-foreground'
@@ -643,16 +643,17 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
       >
         <span className="truncate">
           <strong className="font-black uppercase tracking-wider">
-            {remaining} of {entitlement.freeLimit}
+            {remaining}/{entitlement.freeLimit}
           </strong>{' '}
-          free AI audits left · Zero-AI Cockpit is free forever
+          <span className="sm:hidden">free AI audits left</span>
+          <span className="hidden sm:inline">free AI audits left · Zero-AI Cockpit is free forever</span>
         </span>
         <button
           type="button"
           onClick={() => setPaywallOpen(true)}
           className="shrink-0 font-black uppercase tracking-wider text-primary hover:underline"
         >
-          Retain CFO / Code
+          Retain CFO
         </button>
       </div>
     );
@@ -701,7 +702,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
 
   /** Shared input bar used in both the idle screen and main chat view. */
   const InputBar = (
-    <div className="p-3 glass-morphism border-t shadow-2xl safe-area-bottom">
+    <div className="p-2 sm:p-3 glass-morphism border-t shadow-2xl safe-area-bottom shrink-0">
       {EntitlementBanner}
       {PhotoStrip}
 
@@ -717,54 +718,72 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         onChange={handleFileChange}
       />
 
-      {/* Row 1 — input options. Attachment cluster on the left, voice + send on the right. */}
-      <div className="flex items-center gap-1.5 mb-2">
+      {/* Row 1 — input options. Attachment + Ticker pill on the left, voice + send on the right. */}
+      <div className="flex items-center gap-1.5 mb-1.5 sm:mb-2">
         <Button
           variant="secondary" size="icon"
-          className="rounded-full shrink-0 w-10 h-10"
+          className="rounded-full shrink-0 w-9 h-9 sm:w-10 sm:h-10"
           onClick={() => cameraInputRef.current?.click()}
           disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Take photo"
         >
-          <Camera className="w-5 h-5 text-muted-foreground" />
+          <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
         </Button>
         <Button
           variant="secondary" size="icon"
-          className="rounded-full shrink-0 w-10 h-10"
+          className="rounded-full shrink-0 w-9 h-9 sm:w-10 sm:h-10"
           onClick={() => galleryInputRef.current?.click()}
           disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
           title="Choose from library"
         >
-          <Images className="w-5 h-5 text-muted-foreground" />
+          <Images className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
         </Button>
         {GOOGLE_CLIENT_ID && (
           <Button
             variant="secondary" size="icon"
-            className="rounded-full shrink-0 w-10 h-10"
+            className="rounded-full shrink-0 w-9 h-9 sm:w-10 sm:h-10"
             onClick={handleGooglePhotos}
             disabled={isLoading || isPickerOpen || selectedPhotos.length >= MAX_PHOTOS}
             title="Pick from Google Photos"
           >
-            <GooglePhotosIcon className="w-5 h-5" />
+            <GooglePhotosIcon className="w-4 h-4 sm:w-5 sm:h-5" />
           </Button>
         )}
+
+        <button
+          type="button"
+          onClick={() => setShowTickerDrawer((prev) => !prev)}
+          data-testid="coach-ticker-drawer-btn"
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 h-8 sm:h-9 font-mono text-[10px] font-bold uppercase tracking-wider transition-all shrink-0 ${
+            showTickerDrawer
+              ? 'border-emerald-400 bg-slate-950 text-emerald-300 shadow-sm'
+              : 'border-slate-300 bg-slate-950 text-emerald-300 hover:bg-slate-900'
+          }`}
+          title="Toggle instant natural-language Ticker Tape & Receipt Auditor"
+        >
+          <Terminal className="w-3 h-3 text-emerald-400 shrink-0" />
+          <span className="sm:hidden">{showTickerDrawer ? 'Hide Ticker' : 'Ticker'}</span>
+          <span className="hidden sm:inline">
+            {showTickerDrawer ? 'Hide Ticker & Receipt Bar' : 'Ticker Tape & Receipt Auditor'}
+          </span>
+        </button>
 
         <div className="flex-1" />
 
         <Button
           variant={micStatus === 'recording' ? 'destructive' : 'secondary'}
           size="icon"
-          className={`rounded-full shrink-0 w-10 h-10 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
+          className={`rounded-full shrink-0 w-9 h-9 sm:w-10 sm:h-10 ${micStatus === 'recording' ? 'animate-pulse' : ''}`}
           onClick={toggleMic}
           disabled={isLoading || micStatus === 'transcribing'}
           title={micStatus === 'recording' ? 'Stop recording' : micStatus === 'transcribing' ? 'Transcribing...' : 'Voice input'}
         >
           {micStatus === 'recording' ? <Square className="w-4 h-4" /> :
            micStatus === 'transcribing' ? <Loader2 className="w-4 h-4 animate-spin" /> :
-           <Mic className="w-5 h-5 text-muted-foreground" />}
+           <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />}
         </Button>
         <Button
-          size="icon" className="rounded-full shrink-0 w-10 h-10"
+          size="icon" className="rounded-full shrink-0 w-9 h-9 sm:w-10 sm:h-10"
           onClick={() => handleSend()}
           disabled={isLoading || isPickerOpen || (!input.trim() && selectedPhotos.length === 0)}
           title="Send"
@@ -773,7 +792,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         </Button>
       </div>
 
-      {/* Row 2 — multi-line textarea. Auto-grows 2 → ~5 lines. Enter sends; Shift+Enter newlines. */}
+      {/* Row 2 — auto-growing textarea (16px text-base prevents mobile browser zoom on focus). */}
       <Textarea
         placeholder={placeholder}
         value={input}
@@ -785,66 +804,21 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
           }
         }}
         onPaste={handlePaste}
-        rows={2}
-        className="w-full rounded-2xl border-muted bg-white/60 min-h-[60px] max-h-[140px] resize-none px-4 py-2.5 text-base leading-snug"
+        rows={1}
+        className="w-full rounded-2xl border-muted bg-white/60 min-h-[42px] sm:min-h-[56px] max-h-[130px] resize-none px-3.5 py-2 text-base leading-snug"
       />
     </div>
   );
 
-  const HybridCoachToolbar = (
-    <div className="border-b border-emerald-500/30 bg-slate-950 px-3 py-2 font-mono shrink-0 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowTickerDrawer((prev) => !prev)}
-            data-testid="coach-ticker-drawer-btn"
-            className="inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-950/50 hover:bg-emerald-900/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300 transition-colors"
-          >
-            <Terminal className="w-3 h-3 text-emerald-400" />
-            <span>{showTickerDrawer ? 'HIDE TICKER & RECEIPT BAR' : 'TICKER TAPE & RECEIPT AUDITOR'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSecPrivacyLock(!secPrivacyLock)}
-            data-testid="coach-sec-lock-btn"
-            className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              secPrivacyLock
-                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-500/50'
-            }`}
-          >
-            {secPrivacyLock ? (
-              <>
-                <Lock className="w-3 h-3 text-emerald-300" />
-                <span>SEC PRIVACY LOCK (STRICT ON-DEVICE)</span>
-              </>
-            ) : (
-              <>
-                <Unlock className="w-3 h-3 text-amber-400" />
-                <span>SEC PRIVACY LOCK: OFF</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setEarningsModalOpen(true)}
-          data-testid="coach-earnings-call-btn"
-          className="inline-flex items-center gap-1.5 rounded border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300 transition-colors"
-        >
-          <TrendingUp className="w-3 h-3 text-amber-400" />
-          <span>RUN 30-DAY EARNINGS CALL</span>
-        </button>
-      </div>
-
-      {showTickerDrawer && (
-        <HybridTickerTerminal compact healthData={healthData} />
-      )}
+  const HybridCoachToolbar = showTickerDrawer ? (
+    <div className="border-b border-emerald-500/30 bg-slate-950 p-2 sm:p-3 font-mono shrink-0 max-h-[56vh] overflow-y-auto">
+      <HybridTickerTerminal
+        compact
+        healthData={healthData}
+        onCommitted={() => setShowTickerDrawer(false)}
+      />
     </div>
-  );
+  ) : null;
 
   // Idle screen when auto-chat is disabled and no messages yet
   if (!autoChatEnabled && messages.length === 0 && !isLoading) {

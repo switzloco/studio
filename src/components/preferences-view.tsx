@@ -365,7 +365,7 @@ export function PreferencesView() {
       {/* Bloomberg / CRT Hybrid AI Engine, SEC Insider Privacy Lock & Remote Config Telemetry */}
       <section
         data-testid="settings-hybrid-ai-card"
-        className="rounded-2xl border border-emerald-500/40 bg-slate-950 p-6 font-mono text-emerald-300 shadow-[0_0_28px_rgba(16,185,129,0.12)] space-y-5"
+        className="rounded-2xl border border-emerald-500/40 bg-slate-950 p-4 sm:p-6 font-mono text-emerald-300 shadow-[0_0_28px_rgba(16,185,129,0.12)] space-y-4 sm:space-y-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-500/25 pb-4">
           <div className="flex items-center gap-2.5">
@@ -462,7 +462,7 @@ export function PreferencesView() {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[10px]">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-[10px]">
           <div className="rounded-lg border border-emerald-500/20 bg-black/50 p-2.5">
             <p className="text-emerald-600 uppercase">RC Cloud Model</p>
             <p className="font-bold text-amber-300 mt-0.5 truncate">{remoteConfig.cfoCloudModel}</p>

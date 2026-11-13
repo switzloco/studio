@@ -4,6 +4,7 @@ import React, { useRef, useState } from 'react';
 import {
   Camera,
   CheckCircle2,
+  ChevronUp,
   CornerDownLeft,
   Dumbbell,
   Loader2,
@@ -44,6 +45,7 @@ interface HybridTickerTerminalProps {
   healthData?: HealthData | null;
   targetDateIso?: string;
   compact?: boolean;
+  collapsibleOnMobile?: boolean;
   onCommitted?: () => void;
   className?: string;
 }
@@ -79,6 +81,7 @@ export function HybridTickerTerminal({
   healthData,
   targetDateIso,
   compact = false,
+  collapsibleOnMobile = false,
   onCommitted,
   className,
 }: HybridTickerTerminalProps) {
@@ -95,6 +98,7 @@ export function HybridTickerTerminal({
   } = useHybridAi();
 
   const [tickerInput, setTickerInput] = useState('');
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [committedBanner, setCommittedBanner] = useState<string | null>(null);
@@ -106,6 +110,18 @@ export function HybridTickerTerminal({
   const [errorText, setErrorText] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
+
+  const hasActiveContent = Boolean(
+    isParsing ||
+      stagedImage ||
+      tickerResult ||
+      receiptAudit ||
+      complianceAlert ||
+      errorText ||
+      committedBanner
+  );
+  const showCompactMobileLauncher = collapsibleOnMobile && !mobileExpanded && !hasActiveContent;
 
   const activeFoods: ReconciledFoodDraft[] =
     receiptAudit?.foods ?? tickerResult?.foods ?? [];
@@ -300,15 +316,55 @@ export function HybridTickerTerminal({
         className
       )}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={handlePhotoFileChange}
+        className="hidden"
+        data-testid="expense-receipt-file-input"
+      />
+
+      {/* Sleek 1-Line Mobile Launcher (keeps VF Score & Runway above the fold on mobile!) */}
+      {showCompactMobileLauncher && (
+        <div className="sm:hidden flex items-center gap-1.5 p-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileExpanded(true);
+              setTimeout(() => textInputRef.current?.focus(), 40);
+            }}
+            className="flex-1 min-w-0 flex items-center gap-2 rounded-lg border border-emerald-500/35 bg-black/60 px-2.5 py-1.5 text-left"
+          >
+            <span className="text-emerald-400 font-bold text-xs shrink-0">$&gt;</span>
+            <span className="text-[11px] text-emerald-300/85 truncate">
+              Log meal or workout shorthand…
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isParsing}
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/15 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-300 shrink-0"
+            title="Snap meal or nutrition label photo"
+          >
+            <Camera className="w-3.5 h-3.5 text-amber-400" />
+            <span>Receipt</span>
+          </button>
+        </div>
+      )}
+
+      <div className={cn(showCompactMobileLauncher && 'hidden sm:block')}>
       {/* Terminal Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/25 bg-slate-900/90 px-3.5 py-2">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
-            CFO HYBRID TICKER TAPE &amp; EXPENSE RECEIPT AUDITOR
+      <div className="flex items-center justify-between gap-2 border-b border-emerald-500/25 bg-slate-900/90 px-3 py-1.5 sm:px-3.5 sm:py-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider sm:tracking-widest text-emerald-300 truncate">
+            <span className="sm:hidden">HYBRID TICKER &amp; RECEIPT AUDITOR</span>
+            <span className="hidden sm:inline">CFO HYBRID TICKER TAPE &amp; EXPENSE RECEIPT AUDITOR</span>
           </span>
         </div>
-        <div className="flex items-center gap-2 text-[9px] uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 text-[8.5px] sm:text-[9px] uppercase tracking-wider shrink-0">
           <span
             className={cn(
               'rounded px-1.5 py-0.5 border font-bold',
@@ -317,29 +373,43 @@ export function HybridTickerTerminal({
                 : 'border-amber-500/40 bg-slate-950 text-amber-300'
             )}
           >
-            MODE: {secPrivacyLock ? 'ONLY_ON_DEVICE (SEC LOCK)' : 'PREFER_ON_DEVICE'}
+            <span className="sm:hidden">{secPrivacyLock ? 'SEC LOCK' : 'HYBRID'}</span>
+            <span className="hidden sm:inline">
+              MODE: {secPrivacyLock ? 'ONLY_ON_DEVICE (SEC LOCK)' : 'PREFER_ON_DEVICE'}
+            </span>
           </span>
           {!isOnline && (
             <span className="rounded px-1.5 py-0.5 border border-amber-400/60 bg-amber-950/60 text-amber-300 font-bold">
-              OFFLINE READY
+              OFFLINE
             </span>
+          )}
+          {collapsibleOnMobile && !hasActiveContent && (
+            <button
+              type="button"
+              onClick={() => setMobileExpanded(false)}
+              className="sm:hidden inline-flex items-center rounded border border-emerald-500/30 bg-slate-950 px-1.5 py-0.5 text-emerald-300"
+              aria-label="Minimize ticker"
+            >
+              <ChevronUp className="w-3 h-3" />
+            </button>
           )}
         </div>
       </div>
 
       {/* Command Input Row */}
-      <div className="p-3.5 space-y-2.5">
+      <div className="p-2.5 sm:p-3.5 space-y-2 sm:space-y-2.5">
         <form onSubmit={(e) => handleParseSubmit(e)} className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1 flex items-center rounded-lg border border-emerald-500/40 bg-black/70 px-3 py-2 focus-within:border-emerald-400 focus-within:shadow-[0_0_14px_rgba(16,185,129,0.25)]">
+          <div className="relative flex-1 flex items-center rounded-lg border border-emerald-500/40 bg-black/70 px-3 py-1.5 sm:py-2 focus-within:border-emerald-400 focus-within:shadow-[0_0_14px_rgba(16,185,129,0.25)]">
             <span className="text-emerald-400 font-bold text-xs mr-2 shrink-0">$&gt;</span>
             <input
+              ref={textInputRef}
               type="text"
               value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)}
               data-testid="ticker-tape-input"
               aria-label="CFO Natural-Language Macro and Workout Ticker"
-              placeholder='Type shorthand: "3 eggs, 1 cup oats, black coffee, and 35 min heavy squats"'
-              className="w-full bg-transparent text-xs text-emerald-200 placeholder:text-emerald-700/90 focus:outline-none font-mono"
+              placeholder='Type shorthand: "3 eggs, 1 cup oats, 35m squats"'
+              className="w-full bg-transparent text-base sm:text-xs text-emerald-200 placeholder:text-emerald-700/90 focus:outline-none font-mono"
             />
             {tickerInput && (
               <button
@@ -354,20 +424,12 @@ export function HybridTickerTerminal({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handlePhotoFileChange}
-              className="hidden"
-              data-testid="expense-receipt-file-input"
-            />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isParsing}
               data-testid="expense-receipt-upload-btn"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-amber-300 transition-colors disabled:opacity-50"
+              className="flex-1 sm:flex-initial justify-center inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-amber-300 transition-colors disabled:opacity-50"
               title="Upload or snap a JPEG/PNG meal photo or nutrition facts label for Multimodal Expense Audit"
             >
               <Camera className="w-3.5 h-3.5 text-amber-400" />
@@ -378,7 +440,7 @@ export function HybridTickerTerminal({
               type="submit"
               disabled={isParsing || (!tickerInput.trim() && !stagedImage)}
               data-testid="ticker-parse-submit-btn"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-emerald-500/30 px-3.5 py-2 text-[10px] font-bold uppercase tracking-wider text-emerald-200 transition-colors disabled:opacity-40"
+              className="flex-1 sm:flex-initial justify-center inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-emerald-500/30 px-3.5 py-2 text-[10px] font-bold uppercase tracking-wider text-emerald-200 transition-colors disabled:opacity-40"
             >
               {isParsing ? (
                 <>
@@ -395,10 +457,10 @@ export function HybridTickerTerminal({
           </div>
         </form>
 
-        {/* Quick Shorthand Ticker Presets */}
+        {/* Quick Shorthand Ticker Presets (single horizontal scroll strip on mobile) */}
         {!compact && !tickerResult && !receiptAudit && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-            <span className="text-[9px] uppercase tracking-wider text-emerald-600 font-bold">
+          <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto no-scrollbar whitespace-nowrap">
+            <span className="text-[9px] uppercase tracking-wider text-emerald-600 font-bold shrink-0">
               QUICK TAPE:
             </span>
             {QUICK_SHORTHAND_EXAMPLES.map((sample) => (
@@ -409,7 +471,7 @@ export function HybridTickerTerminal({
                   setTickerInput(sample);
                   handleParseSubmit(undefined, sample);
                 }}
-                className="rounded border border-emerald-500/25 bg-emerald-950/30 hover:bg-emerald-900/40 px-2 py-0.5 text-[9px] text-emerald-400/90 hover:text-emerald-200 transition-colors truncate max-w-full"
+                className="rounded border border-emerald-500/25 bg-emerald-950/30 hover:bg-emerald-900/40 px-2 py-0.5 text-[9px] text-emerald-400/90 hover:text-emerald-200 transition-colors shrink-0"
               >
                 {sample}
               </button>
@@ -643,6 +705,7 @@ export function HybridTickerTerminal({
             </div>
           </div>
         )}
+      </div>
       </div>
     </section>
   );

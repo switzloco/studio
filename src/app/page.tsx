@@ -571,7 +571,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col flex-1 w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl md:border-x">
+    <div className="flex flex-col h-[100dvh] md:h-auto md:min-h-0 md:flex-1 w-full md:max-w-6xl mx-auto bg-background md:shadow-2xl md:border-x overflow-hidden">
       <OnboardingTutorial 
         isOpen={showTutorial} 
         onComplete={handleTutorialComplete} 
@@ -584,20 +584,20 @@ export default function Home() {
         freeLimit={entitlement.freeLimit}
       />
       <QuarterlyEarningsModal />
-      <header className="p-4 px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary text-white rounded-xl shadow-md">
-            <Briefcase className="w-5 h-5" />
+      <header className="px-3.5 py-2 md:p-4 md:px-6 flex items-center justify-between glass-morphism border-b z-10 shrink-0">
+        <div className="flex items-center gap-2.5 md:gap-3 min-w-0">
+          <div className="p-1.5 md:p-2 bg-primary text-white rounded-xl shadow-md shrink-0">
+            <Briefcase className="w-4 h-4 md:w-5 md:h-5" />
           </div>
-          <div>
-            <h1 className="text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">the CFO</h1>
-            <p className="text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70">
-              Chief Fitness Officer <span className="opacity-50 font-mono normal-case">· {process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev'}</span>
+          <div className="min-w-0">
+            <h1 className="text-lg md:text-xl font-black tracking-tighter leading-none text-foreground italic uppercase">the CFO</h1>
+            <p className="text-[9px] md:text-[10px] font-black text-muted-foreground uppercase mt-0.5 tracking-widest opacity-70 truncate">
+              Chief Fitness Officer <span className="hidden sm:inline opacity-50 font-mono normal-case">· {process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev'}</span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2.5 md:gap-4 shrink-0">
           {!user?.isAnonymous && (
             <div className="hidden md:flex flex-col items-end mr-1">
               <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">
@@ -609,7 +609,7 @@ export default function Home() {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted relative overflow-hidden h-10 w-10 border-2 border-primary/20 p-0">
+              <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted relative overflow-hidden h-9 w-9 md:h-10 md:w-10 border-2 border-primary/20 p-0">
                 {isAuditing ? (
                   <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 ) : (
@@ -704,26 +704,26 @@ export default function Home() {
             )}
           </div>
 
-          <TabsList className="grid grid-cols-5 h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0">
-            <TabsTrigger value="chat" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <MessageSquare className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">Coach</span>
+          <TabsList className="grid grid-cols-5 h-14 md:h-20 bg-card border-t rounded-none shrink-0 p-0 gap-0 pb-[env(safe-area-inset-bottom)]">
+            <TabsTrigger value="chat" className="flex flex-col gap-1 md:gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <MessageSquare className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[8.5px] md:text-[9px] font-black uppercase tracking-widest">Coach</span>
             </TabsTrigger>
-            <TabsTrigger value="daily" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <Target className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">Metrics</span>
+            <TabsTrigger value="daily" className="flex flex-col gap-1 md:gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <Target className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[8.5px] md:text-[9px] font-black uppercase tracking-widest">Metrics</span>
             </TabsTrigger>
-            <TabsTrigger value="history" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <History className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">Ledger</span>
+            <TabsTrigger value="history" className="flex flex-col gap-1 md:gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <History className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[8.5px] md:text-[9px] font-black uppercase tracking-widest">Ledger</span>
             </TabsTrigger>
-            <TabsTrigger value="assets" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <Settings className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">Settings</span>
+            <TabsTrigger value="assets" className="flex flex-col gap-1 md:gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <Settings className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[8.5px] md:text-[9px] font-black uppercase tracking-widest">Settings</span>
             </TabsTrigger>
-            <TabsTrigger value="about" className="flex flex-col gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
-              <Info className="w-5 h-5" />
-              <span className="text-[9px] font-black uppercase tracking-widest">About</span>
+            <TabsTrigger value="about" className="flex flex-col gap-1 md:gap-1.5 h-full rounded-none data-[state=active]:bg-muted/50 transition-all">
+              <Info className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[8.5px] md:text-[9px] font-black uppercase tracking-widest">About</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>

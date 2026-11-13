@@ -718,30 +718,30 @@ export function HistoryView() {
   }
 
   return (
-    <div className="p-6 sm:p-10 space-y-10 pb-24 h-full overflow-y-auto bg-background">
+    <div className="p-4 sm:p-10 space-y-6 sm:space-y-10 pb-24 h-full overflow-y-auto bg-background">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <div className="space-y-2">
-          <h2 className="text-3xl font-black tracking-tighter uppercase italic text-foreground">Portfolio History</h2>
-          <p className="text-[12px] font-bold text-muted-foreground uppercase tracking-[0.3em]">Historical Asset Audit</p>
+        <div className="space-y-1 sm:space-y-2">
+          <h2 className="text-2xl sm:text-3xl font-black tracking-tighter uppercase italic text-foreground">Portfolio History</h2>
+          <p className="text-[10px] sm:text-[12px] font-bold text-muted-foreground uppercase tracking-[0.25em] sm:tracking-[0.3em]">Historical Asset Audit</p>
         </div>
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setEarningsModalOpen(true)}
             data-testid="ledger-earnings-call-btn"
-            className="inline-flex items-center gap-2 rounded-xl border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-300 shadow-md transition-colors"
+            className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-300 shadow-md transition-colors"
           >
             <TrendingUp className="w-4 h-4 text-amber-400" />
             <span>RUN 30-DAY EARNINGS CALL</span>
           </button>
-          <div className="p-4 bg-emerald-100 rounded-2xl shadow-sm">
-            <TrendingUp className="w-6 h-6 text-emerald-600" />
+          <div className="p-2.5 sm:p-4 bg-emerald-100 rounded-2xl shadow-sm">
+            <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
           </div>
         </div>
       </div>
 
       {/* Bloomberg / CRT Hybrid Ticker Tape & Multimodal Expense Receipt Auditor */}
-      <HybridTickerTerminal healthData={healthData} />
+      <HybridTickerTerminal collapsibleOnMobile healthData={healthData} />
 
       {/* Ledger Analyst — inline query agent */}
       <LedgerChat />

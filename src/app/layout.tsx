@@ -57,14 +57,14 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="font-body antialiased bg-background text-foreground min-h-screen flex flex-col">
+      <body className="font-body antialiased bg-background text-foreground min-h-[100dvh] flex flex-col">
         <FirebaseClientProvider>
           {children}
         </FirebaseClientProvider>
         <Toaster />
         <ServiceWorkerRegister />
         <AddToHomePrompt />
-        <footer className="w-full text-center text-[10px] text-muted-foreground py-4 mt-auto border-t flex flex-col gap-1 items-center">
+        <footer className="hidden md:flex w-full text-center text-[10px] text-muted-foreground py-3 mt-auto border-t flex-col gap-1 items-center">
           <p>v {process.env.NEXT_PUBLIC_PR_NUMBER || pkg.version}</p>
           <div className="flex gap-4">
             <Link href="/privacy" className="hover:underline">Privacy Policy</Link>

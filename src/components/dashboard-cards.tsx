@@ -1209,7 +1209,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             type="button"
             onClick={() => setEarningsModalOpen(true)}
             data-testid="metrics-earnings-call-btn"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 shadow-sm transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-slate-950 hover:bg-slate-900 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 shadow-sm transition-colors"
           >
             <span>RUN 30-DAY EARNINGS CALL</span>
           </button>
@@ -1302,6 +1302,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
       {/* ── Bloomberg / CRT Hybrid Ticker Tape & Multimodal Receipt Auditor ── */}
       <HybridTickerTerminal
+        collapsibleOnMobile
         healthData={data}
         targetDateIso={selectedDateStr}
       />
