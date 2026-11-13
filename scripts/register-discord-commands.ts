@@ -7,7 +7,7 @@
  */
 
 const APP_ID = process.env.NEXT_PUBLIC_DISCORD_APP_ID || '1570868560065077420';
-const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN?.trim();
 
 if (!BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN in environment.');

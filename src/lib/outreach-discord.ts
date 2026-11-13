@@ -129,7 +129,7 @@ export async function openDiscordDmChannel(discordUserId: string): Promise<{
   channelId?: string;
   error?: string;
 }> {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!botToken) {
     return { error: 'DISCORD_BOT_TOKEN not configured' };
   }
@@ -165,7 +165,7 @@ export async function sendOutreachDiscordDM(params: {
   cadence: OutreachCadence;
   composed: ComposedOutreachMessage;
 }): Promise<{ success: boolean; resolvedChannelId?: string; error?: string }> {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!botToken) {
     console.warn('[OutreachDiscord] DISCORD_BOT_TOKEN not configured — skipping live send.');
     return { success: false, error: 'DISCORD_BOT_TOKEN not configured' };
@@ -224,7 +224,7 @@ export async function sendDiscordDmReply(params: {
   loggedFoodId?: string;
   localDate?: string;
 }): Promise<{ success: boolean }> {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!botToken || !params.channelId) return { success: false };
 
   const lines = [

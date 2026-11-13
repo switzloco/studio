@@ -153,11 +153,10 @@ env:
     value: "3074488a6631a04d0b80b4cea61f07ee9ff5a1bb759ca911cf2924936b960f45"
     availability:
       - RUNTIME
-  # Uncomment right after running: npx firebase-tools apphosting:secrets:set DISCORD_BOT_TOKEN
-  # - variable: DISCORD_BOT_TOKEN
-  #   secret: DISCORD_BOT_TOKEN
-  #   availability:
-  #     - RUNTIME
+  - variable: DISCORD_BOT_TOKEN
+    secret: DISCORD_BOT_TOKEN
+    availability:
+      - RUNTIME
 
 runConfig:
   # --- SCALING CONFIGURATION ---

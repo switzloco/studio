@@ -76,7 +76,7 @@ export async function pollDiscordOutreachReplies(): Promise<{
   logged: number;
   errors: number;
 }> {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!botToken) {
     return { polledUsers: 0, processed: 0, logged: 0, errors: 0 };
   }
