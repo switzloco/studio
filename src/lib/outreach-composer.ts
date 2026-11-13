@@ -391,9 +391,9 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
     if (recentlyFed && eatByClean !== 'Now') {
       statusTone = 'good';
       const fatPeakClean = cleanClockLabel(rx.fatPeakTimeLabel);
-      headline = `Last meal is still working — eat next by ${eatByClean}`;
+      headline = `Still digesting last meal — fueled until ${eatByClean}`;
       subject = `Midday Check-In: Fueled until ${eatByClean}`;
-      body = `Digesting morning fuel (fat faucet reaches full speed around ${fatPeakClean}). Hold off on snacks and aim for ~45g protein by ${eatByClean} (${runway.proteinToGoG}g left today).`;
+      body = `Your body is still digesting your last meal (fat burn reaches full speed around ${fatPeakClean}). Hold off on snacks and aim for ~45g protein by ${eatByClean} (${runway.proteinToGoG}g left today).`;
     } else if (eatByClean === 'Now' || runway.status === 'eat_now') {
       statusTone = 'urgent';
       headline = `Midday window is open — eat ~45g protein now`;

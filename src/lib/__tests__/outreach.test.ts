@@ -214,8 +214,8 @@ describe('outreach-composer: Morning, Midday & Night Zero-AI messages', () => {
     });
 
     expect(msg.subject).toMatch(/^Midday Check-In: Fueled until/i);
-    expect(msg.headline).toContain('Last meal is still working');
-    expect(msg.headline).toMatch(/eat next by/i);
+    expect(msg.headline).toContain('Still digesting last meal');
+    expect(msg.headline).toMatch(/fueled until/i);
   });
 
   it('Night: confirms "fueled through 8:00 AM tomorrow" when energy & protein targets are met', () => {
