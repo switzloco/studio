@@ -296,7 +296,7 @@ export function HybridTickerTerminal({
     <section
       data-testid="hybrid-ticker-terminal"
       className={cn(
-        'rounded-xl border border-emerald-500/40 bg-slate-950 text-emerald-300 font-mono shadow-[0_0_28px_rgba(16,185,129,0.12)] overflow-hidden',
+        'shrink-0 rounded-xl border border-emerald-500/40 bg-slate-950 text-emerald-300 font-mono shadow-[0_0_28px_rgba(16,185,129,0.12)] overflow-hidden',
         className
       )}
     >

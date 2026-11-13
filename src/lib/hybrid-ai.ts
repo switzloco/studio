@@ -327,6 +327,8 @@ function isOnDeviceQuotaOrUnavailableError(err: unknown): boolean {
   );
 }
 
+let googleAiStudioQuotaDepleted = false;
+
 async function runResilientHybridGenerateContent(params: {
   ai: ReturnType<typeof getFirebaseAI>;
   mode: InferenceMode;
@@ -358,13 +360,11 @@ async function runResilientHybridGenerateContent(params: {
           : {}),
       },
       onDeviceParams: {
-        ...(multimodal
-          ? {
-              createOptions: {
-                expectedInputs: [{ type: 'image' as const }, { type: 'text' as const }],
-              },
-            }
-          : {}),
+        createOptions: {
+          expectedInputs: multimodal
+            ? [{ type: 'image' as const }, { type: 'text' as const, languages: ['en'] }]
+            : [{ type: 'text' as const, languages: ['en'] }],
+        },
         ...(schema && includeOnDeviceConstraint
           ? {
               promptOptions: {
@@ -396,11 +396,11 @@ async function runResilientHybridGenerateContent(params: {
   }
 
   // Hybrid modes (`PREFER_ON_DEVICE`, `PREFER_IN_CLOUD`, `ONLY_IN_CLOUD`):
-  // Try primary GoogleAIBackend first; if AI Studio prepayment credits return 429, fail over to Blaze AgentPlatformBackend.
-  const backends: Array<ReturnType<typeof getFirebaseAI>> = [
-    ai,
-    getFirebaseAgentPlatformAI(ai.app),
-  ];
+  // Try primary GoogleAIBackend first; once AI Studio prepayment credits return 429, promote Blaze AgentPlatformBackend.
+  const agentPlatformAi = getFirebaseAgentPlatformAI(ai.app);
+  const backends: Array<ReturnType<typeof getFirebaseAI>> = googleAiStudioQuotaDepleted
+    ? [agentPlatformAi, ai]
+    : [ai, agentPlatformAi];
 
   let lastError: unknown = null;
   for (let bIdx = 0; bIdx < backends.length; bIdx++) {
@@ -435,6 +435,7 @@ async function runResilientHybridGenerateContent(params: {
           } catch (cloudErr) {
             lastError = cloudErr;
             if (bIdx === 0 && isQuotaOrBillingDepletedError(cloudErr)) {
+              if (targetAi === ai) googleAiStudioQuotaDepleted = true;
               switchBackend = true;
               break;
             }
@@ -446,6 +447,7 @@ async function runResilientHybridGenerateContent(params: {
         }
 
         if (bIdx === 0 && isQuotaOrBillingDepletedError(err)) {
+          if (targetAi === ai) googleAiStudioQuotaDepleted = true;
           switchBackend = true;
           break;
         }
