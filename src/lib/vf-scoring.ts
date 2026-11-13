@@ -70,10 +70,74 @@ export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): num
   return Math.round(Math.max(500, fatMassLbs * 31)); // floor at 500 to avoid div-by-zero extremes
 }
 
+function parseConsumedAtMinutes(raw?: string): number | null {
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d{1,2}):(\d{2})(?:\s*(am|pm))?$/i);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  const ampm = m[3]?.toLowerCase();
+  if (ampm === 'pm' && h < 12) h += 12;
+  if (ampm === 'am' && h === 12) h = 0;
+  if (Number.isNaN(h) || Number.isNaN(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
 function minuteOfFood(food: FoodLogEntry): number {
-  return food.consumedAt
-    ? (() => { const [h, m] = food.consumedAt!.split(':').map(Number); return (h || 0) * 60 + (m || 0); })()
-    : (MEAL_DEFAULT_MIN[food.meal] ?? 18 * 60 + 30);
+  const parsed = parseConsumedAtMinutes(food.consumedAt);
+  if (parsed !== null) return parsed;
+  if (food.timestamp && typeof (food.timestamp as any).toDate === 'function') {
+    const d = (food.timestamp as any).toDate() as Date;
+    return d.getHours() * 60 + d.getMinutes();
+  }
+  return MEAL_DEFAULT_MIN[food.meal] ?? 18 * 60 + 30;
+}
+
+/**
+ * Derive consecutive fasting hours for a day from its food logs and yesterday's
+ * food logs (e.g. last meal at 23:00 yesterday → first meal at 12:00 today = 13h).
+ * Zero-calorie entries (black coffee, water, electrolytes) and ignored entries do
+ * not break a fast. If an explicit `explicitFastingHours > 0` is provided, it wins.
+ */
+export function computeFastingHoursFromFoodLogs(
+  foodLogs?: FoodLogEntry[],
+  prevFoodLogs?: FoodLogEntry[],
+  explicitFastingHours?: number,
+): number {
+  if (explicitFastingHours != null && explicitFastingHours > 0) {
+    return explicitFastingHours;
+  }
+
+  const isCaloric = (f: FoodLogEntry) => !f.ignored && (f.calories ?? 0) > 0;
+  const activeToday = (foodLogs ?? []).filter(isCaloric);
+  const todayDate = activeToday.find((f) => f.date)?.date;
+  const activePrev = (prevFoodLogs ?? []).filter(
+    (f) => isCaloric(f) && (!todayDate || !f.date || f.date !== todayDate),
+  );
+
+  let bestMinutes = 0;
+
+  if (activePrev.length > 0 && activeToday.length > 0) {
+    const lastPrevMin = Math.max(...activePrev.map(minuteOfFood));
+    const firstTodayMin = Math.min(...activeToday.map(minuteOfFood));
+    const overnightMin = (24 * 60 - lastPrevMin) + firstTodayMin;
+    if (overnightMin > bestMinutes) bestMinutes = overnightMin;
+  } else if (activePrev.length > 0 && foodLogs !== undefined && activeToday.length === 0) {
+    // Full-day fast with 0 caloric intake today
+    const lastPrevMin = Math.max(...activePrev.map(minuteOfFood));
+    bestMinutes = (24 * 60 - lastPrevMin) + 24 * 60;
+  }
+
+  if (activeToday.length >= 2) {
+    const sorted = activeToday.map(minuteOfFood).sort((a, b) => a - b);
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = sorted[i] - sorted[i - 1];
+      if (gap > bestMinutes) bestMinutes = gap;
+    }
+  }
+
+  if (bestMinutes <= 0) return 0;
+  return Math.round((bestMinutes / 60) * 10) / 10;
 }
 
 function slotOfFood(food: FoodLogEntry): number {
@@ -162,6 +226,7 @@ export interface DailyVFInput {
   hasCreatine?: boolean;     // user supplement status
   // Optional: per-entry logs for precise slot simulation
   foodLogs?: FoodLogEntry[];
+  prevFoodLogs?: FoodLogEntry[]; // yesterday's food logs for overnight fasting window calculation
   exerciseLogs?: ExerciseLogEntry[];
   fitbitActivities?: FitbitActivity[];
   // ── Cross-day context (resolved by the caller from history) ──
@@ -192,6 +257,7 @@ export interface DailyVFResult {
     baseScore: number;             // engine score before behavioral penalties
     // Behavioral rule assessments
     proteinMet: boolean;
+    fastingHours: number;
     fastingActive: boolean;
     alcoholDrinks: number;
     // ── Alcohol (v3.1) ──
@@ -223,9 +289,12 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     hrv,
     hasCreatine,
     foodLogs,
+    prevFoodLogs,
     exerciseLogs,
     fitbitActivities,
   } = input;
+
+  const resolvedFastingHours = computeFastingHoursFromFoodLogs(foodLogs, prevFoodLogs, fastingHours);
 
   const alpertNumber = computeAlpertNumber(weightKg, bodyFatPct);
   const D = pointsDenominator(alpertNumber);   // 100 pts = burn 70% of Alpert in fat
@@ -296,7 +365,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
 
   // ── Coaching context ────────────────────────────────────────────────────────
   const proteinMet = proteinG >= proteinGoal;
-  const fastingActive = fastingHours >= 16;
+  const fastingActive = resolvedFastingHours >= 16;
   const glycogenNetKcal = sim.glycogenEndKcal - sim.glycogenStartKcal;
 
   const parts: string[] = [
@@ -308,7 +377,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
     parts.push(`glycogen tank ran ${-glycogenNetKcal} kcal low — carbs refill it without costing points`);
   }
   if (!proteinMet) parts.push(`protein short (${proteinG}/${proteinGoal}g)`);
-  if (fastingActive) parts.push(`${fastingHours}h fast`);
+  if (fastingActive) parts.push(`${resolvedFastingHours}h fast`);
   if (alcoholLoad.penalty < 0) {
     parts.push(
       `${alcoholLoad.drinks} drink(s) suppressed ${alcoholLoad.suppressionHours.toFixed(1)}h of fat oxidation ` +
@@ -342,6 +411,7 @@ export function calculateDailyVFScore(input: DailyVFInput): DailyVFResult {
       muscleKcal,
       baseScore: Math.round(baseScore),
       proteinMet,
+      fastingHours: resolvedFastingHours,
       fastingActive,
       alcoholDrinks,
       alcoholAcutePenalty:      Math.round(alcoholLoad.penalty),

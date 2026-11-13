@@ -163,6 +163,46 @@ export interface HealthData {
   subscriptionStatus?: string;
   cancelAtPeriodEnd?: boolean;
   currentPeriodEnd?: number;
+  // Top-level outreach query fields (mirrored from preferences/settings for 0-index lookups)
+  outreachEnabled?: boolean;
+  outreachEmail?: string;
+  outreachDiscordUserId?: string;
+}
+
+export type OutreachChannel = 'email' | 'discord' | 'both';
+export type OutreachCadence = '3x' | 'morning_only';
+export type OutreachWindow = 'morning' | 'midday' | 'night';
+
+export interface OutreachPreferences {
+  enabled: boolean;
+  channel: OutreachChannel;
+  cadence: OutreachCadence;
+  email?: string;
+  discordUserId?: string;
+  /** Cached Discord DM channel ID or private thread ID for stateless REST sends. */
+  discordChannelId?: string;
+  /** IANA timezone string, e.g. "America/Los_Angeles". */
+  timezone: string;
+  /** Local hour (0-23) for morning dispatch. Default 7. */
+  morningHour: number;
+  /** Local hour (0-23) for midday dispatch. Default 12. */
+  middayHour: number;
+  /** Local hour (0-23) for night dispatch. Default 19. */
+  nightHour: number;
+  /** Optional "YYYY-MM-DD" through which dispatches are snoozed. */
+  pausedUntilDate?: string;
+  /** Last "YYYY-MM-DD" on which the user interacted (clicked preset, logged food, replied). */
+  lastInteractionDate?: string;
+  /** Idempotency marker "${YYYY-MM-DD}:${window}" so duplicate cron runs never double-send. */
+  lastDispatchedKey?: string;
+  /** ISO timestamp if auto-sunset downshifted 3x -> morning_only after quiet days. */
+  autoDownshiftedAt?: string;
+  /** ISO timestamp if auto-sunset paused outreach after extended quiet days. */
+  autoPausedAt?: string;
+  /** "YYYY-MM-DD" counter date for free-text flash-lite meal reply cap. */
+  dailyParseDate?: string;
+  /** Count of free-text flash-lite meal parses used on dailyParseDate. */
+  dailyParseCount?: number;
 }
 
 export interface FoodNickname {
@@ -225,6 +265,8 @@ export interface UserPreferences {
   levelHistory?: LevelConfig[];
   /** Gemini model tier preference for chat ('flash' default or 'flash-lite' economy). */
   aiModelTier?: 'flash' | 'flash-lite';
+  /** Automated free 3x/day Email & Discord outreach configuration. */
+  outreach?: OutreachPreferences;
 }
 
 /** A cached, generated Daily Brief — one per calendar day, doc ID == isoDate. */
@@ -457,6 +499,58 @@ export const healthService = {
   async setExerciseEntryIgnored(db: Firestore, userId: string, entryId: string, ignored: boolean): Promise<void> {
     const docRef = doc(db, 'users', userId, 'exercise_log', entryId);
     await setDoc(docRef, { ignored }, { merge: true });
+  },
+
+  /**
+   * Moves a ledger entry (food, exercise, or fast) to a new date and/or 24h time ("HH:MM"),
+   * and automatically recalculates today's daily macro totals on `users/{userId}` if a food
+   * entry was moved onto or away from today.
+   */
+  async updateLedgerEntryTiming(
+    db: Firestore,
+    userId: string,
+    params: {
+      id: string;
+      type: 'food' | 'exercise' | 'fast';
+      oldDate: string;
+      newDate: string;
+      newTime: string;
+      meal?: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+      todayIso?: string;
+    }
+  ): Promise<void> {
+    const { id, type, oldDate, newDate, newTime, meal, todayIso } = params;
+    const activeTodayIso = todayIso || new Date().toLocaleDateString('en-CA');
+
+    if (type === 'food') {
+      const docRef = doc(db, 'users', userId, 'food_log', id);
+      const updates: Record<string, unknown> = {
+        date: newDate,
+        consumedAt: newTime,
+      };
+      if (meal) updates.meal = meal;
+      await setDoc(docRef, updates, { merge: true });
+
+      if (oldDate === activeTodayIso || newDate === activeTodayIso) {
+        const todaysEntries = await this.queryFoodLog(db, userId, activeTodayIso, 100);
+        const dailyCaloriesIn = todaysEntries.reduce((s, e) => s + (e.calories || 0), 0);
+        const dailyProteinG = todaysEntries.reduce((s, e) => s + (e.proteinG || 0), 0);
+        const dailyCarbsG = todaysEntries.reduce((s, e) => s + (e.carbsG || 0), 0);
+        const dailyPlantG = todaysEntries.reduce((s, e) => s + (e.plantMassG || 0), 0);
+        await this.updateHealthData(db, userId, {
+          dailyCaloriesIn,
+          dailyProteinG,
+          dailyCarbsG,
+          dailyPlantG,
+        });
+      }
+    } else if (type === 'exercise') {
+      const docRef = doc(db, 'users', userId, 'exercise_log', id);
+      await setDoc(docRef, { date: newDate, performedAt: newTime }, { merge: true });
+    } else if (type === 'fast') {
+      const docRef = doc(db, 'users', userId, 'fast_log', id);
+      await setDoc(docRef, { date: newDate, startedAt: newTime }, { merge: true });
+    }
   },
 
 };

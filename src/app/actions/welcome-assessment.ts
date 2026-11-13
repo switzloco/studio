@@ -5,6 +5,7 @@ import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { trackAiUsage } from '@/lib/ai-usage';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 const AssessmentSchema = z.object({
@@ -61,6 +62,7 @@ export async function assessSharedMeal(meal: MealSummary): Promise<WelcomeAssess
     const { output } = await ai.generate({
       model: CFO_LITE_MODEL,
       output: { schema: AssessmentSchema },
+      use: [trackAiUsage({ uid: 'public:welcome_assessment', feature: 'welcome_assessment', model: CFO_LITE_MODEL })],
       prompt: `You are "the CFO" — a warm, witty health coach who talks about food like a financial portfolio (protein = assets, calories = budget, fiber/plants = long-term holdings). ${createdByName ? `${String(createdByName).slice(0, 50)} just shared this meal` : 'Someone just shared this meal'} with a friend, who has NEVER used the app and just opened the link. You are greeting that friend.
 
 Meal: "${String(title).slice(0, 100)}"

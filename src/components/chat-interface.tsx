@@ -17,6 +17,7 @@ import { SHARE_OFFER_SENTINEL, type ChatShareOffer } from '@/lib/share-offer';
 import { ShareMealButton } from '@/components/share-meal-button';
 import { resolveClientEntitlement } from '@/lib/entitlements';
 import { PaywallModal } from '@/components/paywall-modal';
+import { OutreachInlinePrompt } from '@/components/outreach-inline-prompt';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -727,6 +728,34 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             <Zap className="w-4 h-4 mr-2" />
             Get Coaching
           </Button>
+          <OutreachInlinePrompt
+            variant="idle"
+            outreach={prefs?.outreach}
+            onEnrolled={async (res) => {
+              if (res.deliveredNow && user) {
+                try {
+                  const now = new Date();
+                  const today =
+                    now.getFullYear() +
+                    '-' +
+                    String(now.getMonth() + 1).padStart(2, '0') +
+                    '-' +
+                    String(now.getDate()).padStart(2, '0');
+                  const snap = await getDoc(doc(db, 'users', user.uid, 'chat_sessions', today));
+                  const stored = (snap.exists() ? snap.data()?.messages : null) as
+                    | ChatMessage[]
+                    | null
+                    | undefined;
+                  if (stored && stored.length > 0) {
+                    setMessages(stored.map((m) => ({ role: m.role, content: m.content })));
+                    setInitDone(true);
+                  }
+                } catch {
+                  // Non-fatal
+                }
+              }
+            }}
+          />
           <p className="text-[10px] font-bold text-muted-foreground uppercase opacity-50">
             Or snap a photo, or type below to log
           </p>

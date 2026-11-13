@@ -131,6 +131,28 @@ env:
   #   availability:
   #     - RUNTIME
 
+  # --- AUTOMATED 3X/DAY OUTREACH ---
+  - variable: GMAIL_USER
+    value: "nicholas.switzer@gmail.com"
+    availability:
+      - RUNTIME
+  - variable: GMAIL_APP_PASSWORD
+    secret: GMAIL_APP_PASSWORD
+    availability:
+      - RUNTIME
+  # - variable: RESEND_API_KEY
+  #   secret: RESEND_API_KEY
+  #   availability:
+  #     - RUNTIME
+  # - variable: DISCORD_BOT_TOKEN
+  #   secret: DISCORD_BOT_TOKEN
+  #   availability:
+  #     - RUNTIME
+  # - variable: DISCORD_PUBLIC_KEY
+  #   secret: DISCORD_PUBLIC_KEY
+  #   availability:
+  #     - RUNTIME
+
 runConfig:
   # --- SCALING CONFIGURATION ---
   # minInstances: Minimum number of instances kept warm at all times.

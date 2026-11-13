@@ -500,8 +500,15 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
     await adminHealthService.saveFitbitDailySnapshot(firestore, userId, date, snapshot);
 
     // Query logs and health data to recalculate score if history exists
-    const [foodLogs, exerciseLogs, health, prefs] = await Promise.all([
+    const prevDateStr = (() => {
+      const [y, m, d] = date.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+      dt.setUTCDate(dt.getUTCDate() - 1);
+      return dt.toISOString().slice(0, 10);
+    })();
+    const [foodLogs, prevFoodLogs, exerciseLogs, health, prefs] = await Promise.all([
       adminHealthService.queryFoodLog(firestore, userId, date, 50),
+      adminHealthService.queryFoodLog(firestore, userId, prevDateStr, 50),
       adminHealthService.queryExerciseLog(firestore, userId, date, 50),
       adminHealthService.getHealthSummary(firestore, userId),
       adminHealthService.getUserPreferences(firestore, userId),
@@ -534,6 +541,7 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
           age: prefs?.profile?.age,
           hrv: snapshot.hrv || health.fitbitByDate?.[date]?.hrv,
           foodLogs,
+          prevFoodLogs,
           exerciseLogs,
           fitbitActivities: snapshot.activities,
           // Preserve the consecutive-alcohol flag resolved at score time so a
@@ -542,7 +550,8 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
         });
 
         const newScore = newResult.score;
-        if (newScore !== entry.gain) {
+        const fastingChanged = (entry.breakdown?.fastingHours ?? 0) !== newResult.breakdown.fastingHours;
+        if (newScore !== entry.gain || fastingChanged) {
           const diff = newScore - entry.gain;
           
           const updatedHistory = [...health.history];
@@ -559,7 +568,6 @@ export async function syncFitbitSnapshot(userId: string, date: string, timezoneO
               caloriesOut: snapshot.caloriesOut || entry.breakdown?.caloriesOut || health.dailyCaloriesOut || 2000,
               proteinG: totalProteinG,
               proteinGoal: entry.breakdown?.proteinGoal ?? prefs?.targets?.proteinGoal ?? 150,
-              fastingHours: entry.breakdown?.fastingHours ?? 0,
               sleepHours: snapshot.sleepHours || entry.breakdown?.sleepHours || 7,
               ...newResult.breakdown,
             }

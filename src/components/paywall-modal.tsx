@@ -33,6 +33,7 @@ import { useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { CFO_PRICING, FREE_AI_AUDITS_LIMIT } from '@/lib/entitlements';
 import { redeemFounderCodeAction } from '@/app/actions/entitlements';
+import { OutreachInlinePrompt } from '@/components/outreach-inline-prompt';
 import type { StripeCheckoutPlan } from '@/lib/stripe-server';
 
 interface PaywallModalProps {
@@ -261,6 +262,7 @@ export function PaywallModal({
               <ul className="space-y-2 text-xs font-semibold text-foreground">
                 {[
                   'Daily VF Score & Alpert Eat Runway',
+                  'Free 3x/Day Email & Discord Eat-By Briefings',
                   'Zero-AI 3-Day Nutritionist & Glycogen Tank',
                   '1-Tap Ticker Book & Manual Quick Log',
                   'Level Sprint Tracker (500–3,000 pt blocks)',
@@ -456,6 +458,8 @@ export function PaywallModal({
                 <ArrowRight className="w-3.5 h-3.5 ml-2" />
               </Button>
             )}
+
+            <OutreachInlinePrompt variant="paywall" />
           </div>
 
           {/* Founding Partner / Friend of Nick Code Redemption */}

@@ -87,14 +87,14 @@ export function buildScoreHistory(input: BuildScoreHistoryInput): BuildScoreHist
       fastingHours: 0, alcoholDrinks, sleepHours: 7, seedOilMeals,
       weightKg: input.weightKg, bodyFatPct: input.bodyFatPct,
       heightCm: input.heightCm, age: input.age,
-      foodLogs: food, exerciseLogs: exercise, alcoholYesterday,
+      foodLogs: food, prevFoodLogs: prevFood, exerciseLogs: exercise, alcoholYesterday,
     });
 
     const [y, m, d] = date.split('-').map(Number);
     const displayDate = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const breakdown: VFBreakdown = {
       caloriesIn, caloriesOut, proteinG, proteinGoal: input.proteinGoal,
-      fastingHours: 0, sleepHours: 7, alcoholYesterday, caloriesOutEstimated: estimated,
+      sleepHours: 7, alcoholYesterday, caloriesOutEstimated: estimated,
       ...result.breakdown,
     };
 

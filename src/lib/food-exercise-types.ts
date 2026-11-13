@@ -174,6 +174,202 @@ export function extractBetaAlanineG(entry: Partial<FoodLogEntry> | Record<string
 }
 
 /**
+ * Parse structured supplement fields from a free-text item name (and optional gram portion).
+ * Lets users drop supplements directly into the Quick Log or custom food log (e.g.
+ * "Beta-Alanine 4g", "Creatine 5g", "Omega-3 2000mg", "Caffeine 200mg", "LMNT Electrolytes").
+ */
+export function parseSupplementFieldsFromText(
+  rawName: string,
+  portionG?: number
+): Partial<Pick<FoodLogEntry, 'betaAlanineG' | 'creatineG' | 'caffeineMg' | 'omega3Mg' | 'hasElectrolytes'>> {
+  const name = String(rawName || '').toLowerCase();
+  const out: Partial<Pick<FoodLogEntry, 'betaAlanineG' | 'creatineG' | 'caffeineMg' | 'omega3Mg' | 'hasElectrolytes'>> = {};
+
+  if (name.includes('beta alanine') || name.includes('beta-alanine') || /\bba\b/.test(name)) {
+    const match = name.match(/(\d+(?:\.\d+)?)\s*g\b/);
+    if (match) {
+      out.betaAlanineG = Number(match[1]) || 3.2;
+    } else if (typeof portionG === 'number' && portionG > 0 && portionG <= 15) {
+      out.betaAlanineG = portionG;
+    } else {
+      out.betaAlanineG = 3.2;
+    }
+  }
+
+  if (name.includes('creatine')) {
+    const match = name.match(/(\d+(?:\.\d+)?)\s*g\b/);
+    if (match) {
+      out.creatineG = Number(match[1]) || 5;
+    } else if (typeof portionG === 'number' && portionG > 0 && portionG <= 20) {
+      out.creatineG = portionG;
+    } else {
+      out.creatineG = 5;
+    }
+  }
+
+  if (name.includes('caffeine') || name.includes('pre-workout') || name.includes('preworkout')) {
+    const mgMatch = name.match(/(\d+(?:\.\d+)?)\s*mg\b/);
+    if (mgMatch) {
+      out.caffeineMg = Math.round(Number(mgMatch[1]) || 150);
+    } else {
+      out.caffeineMg = 150;
+    }
+  }
+
+  if (
+    name.includes('omega-3') ||
+    name.includes('omega 3') ||
+    name.includes('omega3') ||
+    name.includes('fish oil') ||
+    name.includes('krill oil') ||
+    /\bepa\b/.test(name) ||
+    /\bdha\b/.test(name)
+  ) {
+    const mgMatch = name.match(/(\d+(?:\.\d+)?)\s*mg\b/);
+    const gMatch = name.match(/(\d+(?:\.\d+)?)\s*g\b/);
+    if (mgMatch) {
+      out.omega3Mg = Math.round(Number(mgMatch[1]) || 1000);
+    } else if (gMatch) {
+      out.omega3Mg = Math.round((Number(gMatch[1]) || 1) * 1000);
+    } else {
+      out.omega3Mg = 1000;
+    }
+  }
+
+  if (
+    name.includes('electrolyte') ||
+    name.includes('lmnt') ||
+    name.includes('liquid iv') ||
+    name.includes('nuun') ||
+    name.includes('sea salt')
+  ) {
+    out.hasElectrolytes = true;
+  }
+
+  return out;
+}
+
+/**
+ * Returns human-readable supplement badges for a FoodLogEntry so supplements
+ * show up clearly in the Transaction Ledger and Today's Logged strip.
+ */
+export function formatSupplementBadges(entry: Partial<FoodLogEntry> | Record<string, any>): string[] {
+  if (!entry || entry.ignored) return [];
+  const badges: string[] = [];
+  const ba = extractBetaAlanineG(entry);
+  if (ba > 0) badges.push(`Beta-Alanine ${ba}g`);
+  if (typeof entry.creatineG === 'number' && entry.creatineG > 0) {
+    badges.push(`Creatine ${entry.creatineG}g`);
+  }
+  if (typeof entry.omega3Mg === 'number' && entry.omega3Mg > 0) {
+    badges.push(`Omega-3 ${entry.omega3Mg}mg`);
+  }
+  if (typeof entry.caffeineMg === 'number' && entry.caffeineMg > 0) {
+    badges.push(`Caffeine ${entry.caffeineMg}mg`);
+  }
+  if (entry.hasElectrolytes) {
+    badges.push('Electrolytes');
+  }
+  return badges;
+}
+
+/** Parse "HH:MM" (24h) into minutes since midnight (0..1439). */
+export function hhmmToMinutes(hhmm?: string, fallbackMinutes = 12 * 60): number {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm.trim())) return fallbackMinutes;
+  const [h, m] = hhmm.trim().split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return fallbackMinutes;
+  return Math.max(0, Math.min(23 * 60 + 59, h * 60 + m));
+}
+
+/** Format minutes since midnight (0..1439) into "HH:MM" (24h), optionally snapped to `stepMin`. */
+export function minutesToHHMM(totalMinutes: number, stepMin = 1): string {
+  const stepped = stepMin > 1 ? Math.round(totalMinutes / stepMin) * stepMin : Math.round(totalMinutes);
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, stepped));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Format "HH:MM" (24h) into 12-hour display label like "9:00 PM". */
+export function formatHHMM12h(hhmm?: string): string {
+  const mins = hhmmToMinutes(hhmm, 12 * 60);
+  const h24 = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+/** Infer default meal label from 24-hour "HH:MM" time. */
+export function inferMealFromTime(hhmm: string): 'breakfast' | 'lunch' | 'dinner' | 'snack' {
+  const mins = hhmmToMinutes(hhmm, 12 * 60);
+  if (mins >= 5 * 60 && mins < 11 * 60) return 'breakfast';
+  if (mins >= 11 * 60 && mins < 15 * 60) return 'lunch';
+  if (mins >= 17 * 60 + 30 && mins < 22 * 60) return 'dinner';
+  return 'snack';
+}
+
+/**
+ * Given the neighboring entries around a drop position in the Transaction Ledger
+ * (sorted newest-first), compute the target `date` and interpolated `HH:MM` time.
+ */
+export function interpolateSlotTiming(params: {
+  aboveEntry?: { date: string; time?: string };
+  belowEntry?: { date: string; time?: string };
+  preferDate?: string;
+  fallbackDate: string;
+}): { date: string; time: string } {
+  const { aboveEntry, belowEntry, preferDate, fallbackDate } = params;
+
+  if (aboveEntry && belowEntry) {
+    if (aboveEntry.date === belowEntry.date) {
+      const aMin = hhmmToMinutes(aboveEntry.time, 18 * 60);
+      const bMin = hhmmToMinutes(belowEntry.time, 12 * 60);
+      const mid = Math.round((aMin + bMin) / 2);
+      return {
+        date: aboveEntry.date,
+        time: minutesToHHMM(mid, 5),
+      };
+    }
+    // Boundary between two different dates
+    const targetDate = preferDate || belowEntry.date;
+    if (targetDate === belowEntry.date) {
+      const bMin = hhmmToMinutes(belowEntry.time, 20 * 60);
+      return {
+        date: belowEntry.date,
+        time: minutesToHHMM(Math.min(23 * 60 + 30, bMin + 30), 5),
+      };
+    }
+    const aMin = hhmmToMinutes(aboveEntry.time, 9 * 60);
+    return {
+      date: aboveEntry.date,
+      time: minutesToHHMM(Math.max(6 * 60, aMin - 30), 5),
+    };
+  }
+
+  if (belowEntry) {
+    const bMin = hhmmToMinutes(belowEntry.time, 12 * 60);
+    return {
+      date: preferDate || belowEntry.date,
+      time: minutesToHHMM(Math.min(23 * 60 + 45, bMin + 15), 5),
+    };
+  }
+
+  if (aboveEntry) {
+    const aMin = hhmmToMinutes(aboveEntry.time, 20 * 60);
+    return {
+      date: preferDate || aboveEntry.date,
+      time: minutesToHHMM(Math.max(6 * 60, aMin - 30), 5),
+    };
+  }
+
+  return {
+    date: preferDate || fallbackDate,
+    time: '20:30',
+  };
+}
+
+/**
  * Computes intramuscular carnosine saturation progress from a list of food log entries.
  */
 export function computeCarnosineSaturation(

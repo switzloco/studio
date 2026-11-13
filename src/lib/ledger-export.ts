@@ -59,7 +59,9 @@ export function ledgerToJSON(data: LedgerExport): string {
 
 const CSV_COLUMNS = [
   'date', 'time', 'type', 'name',
-  'calories', 'proteinG', 'carbsG', 'fatG', 'fiberG', 'portionG', 'meal', 'alcoholDrinks', 'hasSeedOils', 'source',
+  'calories', 'proteinG', 'carbsG', 'fatG', 'fiberG', 'portionG', 'meal', 'alcoholDrinks', 'hasSeedOils',
+  'betaAlanineG', 'creatineG', 'caffeineMg', 'omega3Mg', 'hasElectrolytes',
+  'source',
   'category', 'sets', 'reps', 'durationMin', 'weightKg', 'activityTier', 'estimatedCaloriesBurned', 'pointsDelta',
   'startedAt', 'endedAt', 'durationHours',
   'notes',
@@ -77,7 +79,9 @@ export function ledgerToCSV(data: LedgerExport): string {
   for (const f of data.food) {
     rows.push({ date: f.date, time: f.consumedAt, type: 'food', name: f.name,
       calories: f.calories, proteinG: f.proteinG, carbsG: f.carbsG, fatG: f.fatG, fiberG: f.fiberG,
-      portionG: f.portionG, meal: f.meal, alcoholDrinks: f.alcoholDrinks, hasSeedOils: f.hasSeedOils, source: f.source });
+      portionG: f.portionG, meal: f.meal, alcoholDrinks: f.alcoholDrinks, hasSeedOils: f.hasSeedOils,
+      betaAlanineG: f.betaAlanineG, creatineG: f.creatineG, caffeineMg: f.caffeineMg, omega3Mg: f.omega3Mg, hasElectrolytes: f.hasElectrolytes,
+      source: f.source });
   }
   for (const e of data.exercise) {
     rows.push({ date: e.date, time: e.performedAt, type: 'exercise', name: e.name,

@@ -3,6 +3,7 @@ import { ai, SAFETY_SETTINGS, CFO_LITE_MODEL } from '@/ai/genkit';
 import { verifyAuthHeaderDetails } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { checkServerEntitlement } from '@/lib/entitlements-server';
+import { trackAiUsage } from '@/lib/ai-usage';
 
 // ~5 MB of raw audio encodes to ~6.7 MB base64; cap the data URI at 7 MB.
 const MAX_AUDIO_DATA_URI_BYTES = 7 * 1024 * 1024;
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
     const { text } = await ai.generate({
       model: CFO_LITE_MODEL,
       config: { safetySettings: SAFETY_SETTINGS },
+      use: [trackAiUsage({ uid, feature: 'transcribe', model: CFO_LITE_MODEL, tier: entitlement.tier })],
       prompt: [
         { media: { url: audioDataUri } },
         { text: 'Transcribe the audio exactly as spoken. Return only the transcription text, nothing else.' },

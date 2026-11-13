@@ -37,12 +37,13 @@ import {
 } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
 import { fitbitService } from '@/lib/fitbit-service';
-import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, SyncResult } from '@/app/actions/fitbit';
+import { syncFitbitData, syncFitbitSnapshot, disconnectFitbit, rescoreRecentDays, SyncResult } from '@/app/actions/fitbit';
 import { syncOuraData, disconnectOura, getOuraAuthUrl, OuraSyncResult } from '@/app/actions/oura';
 import { syncWithingsData, disconnectWithings, getWithingsAuthUrl } from '@/app/actions/withings';
 import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
-import { computeAlpertNumber, calculateDailyVFScore } from '@/lib/vf-scoring';
+import { OutreachInlinePrompt } from './outreach-inline-prompt';
+import { computeAlpertNumber, calculateDailyVFScore, computeFastingHoursFromFoodLogs } from '@/lib/vf-scoring';
 import { computeAlpertPace, computeEatRunway } from '@/lib/alpert-pace';
 import {
   computeLevelProgress,
@@ -59,8 +60,8 @@ import { doc, collection, query, where, limit, orderBy, Timestamp } from 'fireba
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
-  computeCarnosineSaturation,
-  extractBetaAlanineG,
+  parseSupplementFieldsFromText,
+  formatSupplementBadges,
   type FoodLogEntry,
   type ExerciseLogEntry,
 } from '@/lib/food-exercise-types';
@@ -210,18 +211,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const historyEntry = !isViewingToday ? selectedHistoryEntry : null;
 
-  React.useEffect(() => {
-    const note = getEffectiveDayNote(selectedHistoryEntry ?? { isoDate: selectedDateStr }) ?? '';
-    setLockDayNote(note);
-    if (selectedHistoryEntry?.breakdown) {
-      setLockFastingHours(String(selectedHistoryEntry.breakdown.fastingHours ?? 0));
-      setLockAlcoholDrinks(String(selectedHistoryEntry.breakdown.alcoholDrinks ?? 0));
-    } else {
-      setLockFastingHours('0');
-      setLockAlcoholDrinks('0');
-    }
-  }, [selectedDateStr, selectedHistoryEntry]);
-
   const foodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
@@ -232,102 +221,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   );
   const { data: todayFoodLogs } = useCollection<FoodLogEntry>(foodLogQuery);
 
-  // Recent 250 food logs across all days so we can sort saved Tickers by recency AND track 60d Carnosine Saturation
+  // Recent 60 food logs across all days so we can sort saved Tickers by recency
   const recentFoodLogQuery = useMemoFirebase(
     () => user ? query(
       collection(db, 'users', user.uid, 'food_log'),
       orderBy('timestamp', 'desc'),
-      limit(250)
+      limit(60)
     ) : null,
     [db, user]
   );
   const { data: recentFoodLogs } = useCollection<FoodLogEntry>(recentFoodLogQuery);
-
-  const carnosineSaturation = React.useMemo(
-    () => computeCarnosineSaturation(recentFoodLogs ?? [], selectedDateStr),
-    [recentFoodLogs, selectedDateStr]
-  );
-
-  // One-time idempotent backfill for Nick's Beta-Alanine Carnosine Saturation protocol:
-  // 4g/day for the 10 days 2026-10-19 .. 2026-10-28 + 3g on 2026-10-29 (= 43g / 24.0% saturation)
-  const hasBackfilledBetaAlanineRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!user || !recentFoodLogs || hasBackfilledBetaAlanineRef.current) return;
-    const storageKey = `vf_beta_alanine_backfill_oct29_v1_${user.uid}`;
-    try {
-      if (window.localStorage.getItem(storageKey) === 'done') {
-        hasBackfilledBetaAlanineRef.current = true;
-        return;
-      }
-    } catch {
-      // ignore storage errors
-    }
-
-    const schedule: Array<{ date: string; grams: number }> = [
-      { date: '2026-10-19', grams: 4 },
-      { date: '2026-10-20', grams: 4 },
-      { date: '2026-10-21', grams: 4 },
-      { date: '2026-10-22', grams: 4 },
-      { date: '2026-10-23', grams: 4 },
-      { date: '2026-10-24', grams: 4 },
-      { date: '2026-10-25', grams: 4 },
-      { date: '2026-10-26', grams: 4 },
-      { date: '2026-10-27', grams: 4 },
-      { date: '2026-10-28', grams: 4 },
-      { date: '2026-10-29', grams: 3 },
-    ];
-
-    const existingDatesWithBA = new Set<string>();
-    for (const entry of recentFoodLogs) {
-      if (extractBetaAlanineG(entry) > 0 && entry.date) {
-        existingDatesWithBA.add(entry.date);
-      }
-    }
-
-    const missing = schedule.filter((s) => !existingDatesWithBA.has(s.date));
-    hasBackfilledBetaAlanineRef.current = true;
-    if (missing.length === 0) {
-      try {
-        window.localStorage.setItem(storageKey, 'done');
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    (async () => {
-      try {
-        for (const item of missing) {
-          await healthService.logFood(db, user.uid, {
-            date: item.date,
-            meal: 'breakfast',
-            name: `Beta-Alanine (${item.grams}g)`,
-            portionG: item.grams,
-            calories: 0,
-            proteinG: 0,
-            carbsG: 0,
-            fatG: 0,
-            fiberG: 0,
-            betaAlanineG: item.grams,
-            source: 'user_estimate',
-            consumedAt: '09:00',
-          });
-        }
-        try {
-          window.localStorage.setItem(storageKey, 'done');
-        } catch {
-          // ignore
-        }
-        toast({
-          title: 'Beta-Alanine Backfill Logged (43g Total)',
-          description: `Added ${missing.length} day(s) of Beta-Alanine (4g × 10d + 3g Today) → 24.0% Carnosine Saturation (43g / 179g).`,
-        });
-      } catch (err) {
-        console.error('[BetaAlanineBackfill] Failed:', err);
-        hasBackfilledBetaAlanineRef.current = false;
-      }
-    })();
-  }, [user, db, recentFoodLogs, toast]);
 
   const exerciseLogQuery = useMemoFirebase(
     () => user ? query(
@@ -358,6 +261,47 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     [db, user, prevDateStr]
   );
   const { data: prevExerciseLogs } = useCollection<ExerciseLogEntry>(prevExerciseLogQuery);
+
+  const inferredFastingHours = React.useMemo(
+    () => computeFastingHoursFromFoodLogs(todayFoodLogs ?? undefined, prevFoodLogs ?? undefined),
+    [todayFoodLogs, prevFoodLogs],
+  );
+
+  React.useEffect(() => {
+    const note = getEffectiveDayNote(selectedHistoryEntry ?? { isoDate: selectedDateStr }) ?? '';
+    setLockDayNote(note);
+    if (selectedHistoryEntry?.breakdown) {
+      const storedFasting = selectedHistoryEntry.breakdown.fastingHours ?? 0;
+      setLockFastingHours(String(storedFasting > 0 ? storedFasting : inferredFastingHours));
+      setLockAlcoholDrinks(String(selectedHistoryEntry.breakdown.alcoholDrinks ?? 0));
+    } else {
+      setLockFastingHours(String(inferredFastingHours));
+      setLockAlcoholDrinks('0');
+    }
+  }, [selectedDateStr, selectedHistoryEntry, inferredFastingHours]);
+
+  // Auto-heal historical entries whose fastingHours was recorded as 0 before meal-timestamp inference
+  const healedFastingDatesRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!user || !data?.history || !selectedHistoryEntry?.breakdown) return;
+    if ((selectedHistoryEntry.breakdown.fastingHours ?? 0) > 0) return;
+    if (inferredFastingHours <= 0) return;
+    if (healedFastingDatesRef.current.has(selectedDateStr)) return;
+    healedFastingDatesRef.current.add(selectedDateStr);
+
+    const updatedHistory = data.history.map((h) => {
+      if ((h.isoDate || h.date) !== selectedDateStr || !h.breakdown) return h;
+      return {
+        ...h,
+        breakdown: {
+          ...h.breakdown,
+          fastingHours: inferredFastingHours,
+          fastingActive: inferredFastingHours >= 16,
+        },
+      };
+    });
+    healthService.updateHealthData(db, user.uid, { history: updatedHistory }).catch(() => {});
+  }, [user, db, data?.history, selectedHistoryEntry, selectedDateStr, inferredFastingHours]);
 
   const morningGlycogenPct = React.useMemo(() => {
     const totalMax  = computeMaxGlycogenKcal(data?.weightKg, data?.bodyFatPct);
@@ -526,13 +470,14 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       heightCm: data.heightCm,
       age: prefs?.profile?.age,
       foodLogs: todayFoodLogs ?? undefined,
+      prevFoodLogs: prevFoodLogs ?? undefined,
       exerciseLogs: todayExerciseLogs ?? undefined,
       fitbitActivities,
     });
     return result.score;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, isViewingToday, historyEntry, selectedHistoryEntry, dailyCaloriesOut, dailyCaloriesIn, dailyProteinG,
-      proteinGoal, alpertNumber, todayFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age, lockFastingHours, lockAlcoholDrinks]);
+      proteinGoal, alpertNumber, todayFoodLogs, prevFoodLogs, todayExerciseLogs, fitbitActivities, prefs?.profile?.age, lockFastingHours, lockAlcoholDrinks]);
 
   // Build 3-day recent history summary for Zero-AI 3-Day Nutritionist
   const recentDaysSummary = React.useMemo(() => {
@@ -824,38 +769,30 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     }
   };
 
-  // Zero-AI 1-Tap Beta-Alanine (Carnosine Saturation) Dose Logger
-  const handleQuickLogBetaAlanine = async (grams: number) => {
-    if (!user || isLoggingQuick) return;
-    setIsLoggingQuick(true);
+  // Zero-AI 1-Tap Move Food Entry to Last Night (for items logged today that were actually eaten yesterday evening)
+  const handleMoveFoodToLastNight = async (entry: FoodLogEntry) => {
+    if (!user || !entry.id || removingFoodId) return;
+    setRemovingFoodId(entry.id);
     try {
-      const now = new Date();
-      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      await healthService.logFood(db, user.uid, {
-        date: selectedDateStr,
-        meal: 'breakfast',
-        name: `Beta-Alanine (${grams}g)`,
-        portionG: grams,
-        calories: 0,
-        proteinG: 0,
-        carbsG: 0,
-        fatG: 0,
-        fiberG: 0,
-        betaAlanineG: grams,
-        source: 'user_estimate',
-        consumedAt: hhmm,
+      await healthService.updateLedgerEntryTiming(db, user.uid, {
+        id: entry.id,
+        type: 'food',
+        oldDate: entry.date,
+        newDate: prevDateStr,
+        newTime: '20:30',
+        meal: 'dinner',
+        todayIso: todayStr,
       });
-      const newCum = Math.round((carnosineSaturation.cumulativeGrams + grams) * 10) / 10;
-      const newPct = Math.min(100, Math.round((newCum / carnosineSaturation.targetGrams) * 1000) / 10);
+      rescoreRecentDays(user.uid, todayStr, 14).catch(() => {});
       toast({
-        title: `Logged +${grams}g Beta-Alanine (Zero AI)`,
-        description: `Carnosine saturation: ${newCum}g / ${carnosineSaturation.targetGrams}g (${newPct}%).`,
+        title: `Moved "${entry.name}" to Last Night`,
+        description: `Shifted to ${prevDateStr} at 8:30 PM (Dinner). You can also drag entries in the Ledger tab to fine-tune timing.`,
       });
     } catch (err) {
-      console.error('[handleQuickLogBetaAlanine] Failed:', err);
-      toast({ variant: 'destructive', title: 'Supplement Log Failed', description: 'Could not save Beta-Alanine entry.' });
+      console.error('[handleMoveFoodToLastNight] Failed:', err);
+      toast({ variant: 'destructive', title: 'Move Failed', description: 'Could not move food entry to last night.' });
     } finally {
-      setIsLoggingQuick(false);
+      setRemovingFoodId(null);
     }
   };
 
@@ -869,6 +806,12 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     const name = quickItemName.trim() || 'Quick Entry';
     if (kcal === 0 && prot === 0 && !quickItemName.trim()) return;
 
+    const supplementFields = parseSupplementFieldsFromText(name);
+    const inferredPortionG =
+      supplementFields.betaAlanineG ??
+      supplementFields.creatineG ??
+      (kcal === 0 && prot === 0 ? 5 : 250);
+
     setIsLoggingQuick(true);
     try {
       const now = new Date();
@@ -877,16 +820,17 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         date: selectedDateStr,
         meal: quickMeal,
         name,
-        portionG: 250,
+        portionG: inferredPortionG,
         calories: kcal,
         proteinG: prot,
         carbsG: carbs,
         fatG: fat,
         fiberG: 0,
+        ...supplementFields,
         source: 'user_estimate',
         consumedAt: hhmm,
       });
-      if (isViewingToday) {
+      if (isViewingToday && (kcal > 0 || prot > 0 || carbs > 0)) {
         await healthService.updateHealthData(db, user.uid, {
           dailyCaloriesIn: dailyCaloriesIn + kcal,
           dailyProteinG: dailyProteinG + prot,
@@ -899,9 +843,13 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       setQuickCarbs('');
       setQuickFat('');
       setQuickFoodOpen(false);
+      const suppBadges = formatSupplementBadges({ name, ...supplementFields });
       toast({
         title: `Logged ${name} (Zero AI)`,
-        description: `+${kcal} kcal · +${prot}g protein recorded directly to Ledger.`,
+        description:
+          suppBadges.length > 0 && kcal === 0
+            ? `${suppBadges.join(' · ')} recorded directly to ${selectedDateStr} Ledger.`
+            : `+${kcal} kcal · +${prot}g protein recorded directly to Ledger.`,
       });
     } catch (err) {
       console.error('[handleQuickCustomFoodSubmit] Failed:', err);
@@ -933,6 +881,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         heightCm: data.heightCm,
         age: prefs?.profile?.age,
         foodLogs: todayFoodLogs ?? undefined,
+        prevFoodLogs: prevFoodLogs ?? undefined,
         exerciseLogs: todayExerciseLogs ?? undefined,
         fitbitActivities,
       });
@@ -960,7 +909,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           caloriesOut: dailyCaloriesOut,
           proteinG: dailyProteinG,
           proteinGoal,
-          fastingHours: fastingH,
           sleepHours: sleepH,
           ...calc.breakdown,
         },
@@ -1605,6 +1553,10 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
               </p>
             </div>
 
+            {selectedDateStr === todayStr && (
+              <OutreachInlinePrompt variant="runway" outreach={prefs?.outreach} />
+            )}
+
             {alpertPace && eatRunway.status === 'clear' && (
               <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-amber-800 bg-amber-100/70 px-3.5 py-2 rounded-lg">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -1657,69 +1609,26 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                 className="h-8 px-3 text-xs font-black uppercase tracking-wider"
               >
                 <Plus className="w-3.5 h-3.5 mr-1" />
-                {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Macro'}
+                {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Supplement'}
               </Button>
             </div>
           </div>
 
-          {/* Carnosine Saturation (Beta-Alanine) Tracker & 1-Tap Zero-AI Dose Bar */}
-          <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-xl p-3 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider">
-                  Carnosine Saturation
-                </span>
-                <span className="text-xs sm:text-sm font-black text-indigo-950">
-                  {carnosineSaturation.cumulativeGrams}g / {carnosineSaturation.targetGrams}g Beta-Alanine ({carnosineSaturation.saturationPct}%)
-                </span>
-                <span className="text-xs font-bold text-indigo-800/80">
-                  · {carnosineSaturation.daysLogged}d logged
-                  {carnosineSaturation.todayGrams > 0 ? ` · ${carnosineSaturation.todayGrams}g on ${isViewingToday ? 'Today' : selectedDateStr} ✓` : ''}
-                  {carnosineSaturation.daysToSaturationAt4g > 0
-                    ? ` · ~${carnosineSaturation.daysToSaturationAt4g}d at 4g/d to 100%`
-                    : ' · Saturated ✓'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={isLoggingQuick}
-                  onClick={() => handleQuickLogBetaAlanine(3)}
-                  className="h-7 px-2.5 text-xs font-black border-indigo-300 text-indigo-800 hover:bg-indigo-100"
-                >
-                  +3g BA
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isLoggingQuick}
-                  onClick={() => handleQuickLogBetaAlanine(4)}
-                  className="h-7 px-2.5 text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white"
-                >
-                  +4g BA
-                </Button>
-              </div>
-            </div>
-            <Progress value={carnosineSaturation.saturationPct} className="h-2 bg-indigo-100" />
-          </div>
-
-          {/* Logged Today Strip — allows 1-tap removal of accidental entries like Atlantic Acquisition */}
+          {/* Logged Today Strip — allows 1-tap removal or moving to Last Night */}
           {activeTodayFoodLogs.length > 0 && (
             <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
-              <div className="flex items-center justify-between px-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                 <span className="text-xs font-black uppercase tracking-wider text-slate-600">
                   Logged on {isViewingToday ? 'Today' : selectedDateStr} ({activeTodayFoodLogs.length})
                 </span>
                 <span className="text-xs font-medium text-muted-foreground">
-                  Tap <Trash2 className="w-3 h-3 inline mx-0.5" /> to remove accidental entries
+                  {isViewingToday ? 'Tap 🌙 Last Night to move to yesterday · ' : ''}Tap <Trash2 className="w-3 h-3 inline mx-0.5" /> to remove
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {activeTodayFoodLogs.map((entry) => {
                   const isRemoving = removingFoodId === entry.id;
-                  const baGrams = extractBetaAlanineG(entry);
+                  const suppBadges = formatSupplementBadges(entry);
                   return (
                     <div
                       key={entry.id}
@@ -1729,10 +1638,21 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                         {entry.name}
                       </span>
                       <span className="text-slate-500 font-semibold whitespace-nowrap">
-                        {baGrams > 0 && entry.calories === 0
-                          ? `${baGrams}g Beta-Alanine · 0 kcal`
+                        {suppBadges.length > 0 && entry.calories === 0
+                          ? `${suppBadges.join(' · ')} · 0 kcal`
                           : `${entry.calories} kcal · ${entry.proteinG}g P`}
                       </span>
+                      {isViewingToday && (
+                        <button
+                          type="button"
+                          disabled={isRemoving}
+                          onClick={() => handleMoveFoodToLastNight(entry)}
+                          title={`Move "${entry.name}" to Last Night (${prevDateStr} 8:30 PM)`}
+                          className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] uppercase tracking-wider transition-colors"
+                        >
+                          🌙 Last Night
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={isRemoving}
@@ -1850,18 +1770,18 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           {quickFoodOpen && (
             <form onSubmit={handleQuickCustomFoodSubmit} className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-2 border-t">
               <Input
-                placeholder="Item name (e.g. Greek Yogurt)"
+                placeholder="Food or supplement (e.g. Sardines, Creatine 5g, Beta-Alanine 4g)"
                 value={quickItemName}
                 onChange={(e) => setQuickItemName(e.target.value)}
                 className="h-9 text-sm sm:col-span-2"
+                required
               />
               <Input
                 type="number"
-                placeholder="Calories"
+                placeholder="Calories (0 for supps)"
                 value={quickCalories}
                 onChange={(e) => setQuickCalories(e.target.value)}
                 className="h-9 text-sm"
-                required
               />
               <Input
                 type="number"

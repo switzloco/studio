@@ -5,6 +5,7 @@ import { verifyAuthHeaderDetails, getAdminFirestore } from '@/firebase/admin';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { checkServerEntitlement, recordAiAuditTurn, DAILY_HIGH_SPEED_TURNS } from '@/lib/entitlements-server';
 import { fetchSlimUserContext } from '@/lib/user-context';
+import { trackAiUsage } from '@/lib/ai-usage';
 
 export async function POST(req: Request) {
   try {
@@ -66,6 +67,8 @@ export async function POST(req: Request) {
         ? CFO_LITE_MODEL
         : undefined;
 
+    const usageTracker = trackAiUsage({ uid, feature: 'ledger_chat', model: selectedModel, tier: entitlement.tier });
+
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
@@ -74,6 +77,7 @@ export async function POST(req: Request) {
           const { stream } = await ledgerAnalystPrompt.stream(input, {
             ...(selectedModel ? { model: selectedModel } : {}),
             maxTurns: 8,
+            use: [usageTracker],
           });
           for await (const chunk of stream) {
             if (chunk.text) {
@@ -85,7 +89,10 @@ export async function POST(req: Request) {
           console.warn('[LedgerChatRoute] SSE stream failed, falling back to non-streaming:', streamErr?.message ?? String(streamErr));
           if (!hasOutput) {
             try {
-              const fallback = await ledgerAnalystPrompt(input, { maxTurns: 8 });
+              const fallback = await ledgerAnalystPrompt(input, {
+                maxTurns: 8,
+                use: [trackAiUsage({ uid, feature: 'ledger_chat', tier: entitlement.tier })],
+              });
               if (fallback?.text) {
                 hasOutput = true;
                 controller.enqueue(encoder.encode(fallback.text));

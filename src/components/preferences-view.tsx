@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Share2, Send } from 'lucide-react';
 import { isNativeShell } from '@/lib/auth-environment';
 import { signOut } from 'firebase/auth';
+import { OutreachSettingsCard } from '@/components/outreach-settings-card';
 
 // Rank tiers — financial seniority ladder matching the app's portfolio metaphor
 const RANKS = [
@@ -1019,6 +1020,9 @@ export function PreferencesView() {
               })()}
             </CardContent>
           </Card>
+
+          {/* Automated Free 3x/Day Email & Discord Briefings */}
+          <OutreachSettingsCard user={user} initialOutreach={prefs?.outreach} />
 
           {/* Direct Feedback Loop to Founder (Nick) */}
           <Card className="border-none shadow-lg bg-white/70 backdrop-blur-sm ring-1 ring-primary/5">

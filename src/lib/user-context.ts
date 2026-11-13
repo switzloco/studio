@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
+import { syncFitbitData } from '@/lib/fitbit-sync';
 import { computeAlpertNumber } from '@/lib/vf-scoring';
 import { computeAlpertPace } from '@/lib/alpert-pace';
 import { runMetabolicSimulation, computeMuscleGlycogenMaxKcal, NUM_SLOTS } from '@/lib/metabolic-engine';
@@ -34,7 +35,7 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
   const sixtyDaysAgoDate = new Date(y, m - 1, d - 60);
   const sixtyDaysAgo = sixtyDaysAgoDate.toLocaleDateString('en-CA');
 
-  const [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts, recent60dFood] = await Promise.all([
+  let [prefs, health, recentFood, recentExercise, yesterdayFood, fitbitCreds, recentFasts, recent60dFood] = await Promise.all([
     healthService.getUserPreferences(firestore, userId),
     healthService.getHealthSummary(firestore, userId),
     healthService.queryFoodLog(firestore, userId, today, 20),
@@ -45,23 +46,54 @@ export async function fetchSlimUserContext(firestore: Firestore, userId: string,
     healthService.queryLogRangeAll(firestore, userId, 'food_log', sixtyDaysAgo, today, 1000).catch(() => []),
   ]);
 
-  const isNewDay = health?.lastActiveDate !== today;
-
   const fitbitStatus: {
     connected: boolean;
+    provider?: 'fitbit' | 'google';
     lastSyncedAt?: number;
     lastSyncedAgo?: string;
     tokenExpired?: boolean;
   } = { connected: false };
   if (fitbitCreds) {
+    const provider = fitbitCreds.provider || 'google';
     fitbitStatus.connected = true;
+    fitbitStatus.provider = provider;
+
+    // Note: fitbitCreds.expiresAt is only the 1-hour OAuth2 access-token TTL,
+    // NOT refresh-token expiration. Google Health auto-refreshes via refreshToken.
+    // If the access token is past its 1h TTL or telemetry hasn't synced in >30m,
+    // auto-refresh & sync right now so the AI coach has fresh data and never
+    // falsely claims the token expired.
+    const staleMs = Date.now() - (fitbitCreds.lastSyncedAt ?? 0);
+    const needsAutoSync = Boolean(fitbitCreds.refreshToken) && (Date.now() >= fitbitCreds.expiresAt || staleMs > 30 * 60 * 1000);
+    let refreshFailed = !fitbitCreds.refreshToken;
+
+    if (needsAutoSync) {
+      try {
+        const syncRes = await syncFitbitData(userId, today, fitbitCreds.timezoneOffset);
+        if (syncRes.success) {
+          const [freshHealth, freshCreds] = await Promise.all([
+            healthService.getHealthSummary(firestore, userId),
+            healthService.getFitbitCredentials(firestore, userId),
+          ]);
+          if (freshHealth) health = freshHealth;
+          if (freshCreds) fitbitCreds = freshCreds;
+        } else if (syncRes.reason === 'token_refresh_failed') {
+          refreshFailed = true;
+        }
+      } catch {
+        // Do not mark tokenExpired on transient network errors
+      }
+    }
+
     fitbitStatus.lastSyncedAt = fitbitCreds.lastSyncedAt;
-    fitbitStatus.tokenExpired = Date.now() >= fitbitCreds.expiresAt;
+    fitbitStatus.tokenExpired = refreshFailed;
     if (fitbitCreds.lastSyncedAt) {
       const hoursAgo = Math.round((Date.now() - fitbitCreds.lastSyncedAt) / (1000 * 60 * 60));
       fitbitStatus.lastSyncedAgo = hoursAgo <= 1 ? 'just now' : `${hoursAgo}h ago`;
     }
   }
+
+  const isNewDay = health?.lastActiveDate !== today;
 
   // Build compact index: key -> meal
   const foodNicknamesIndex: Record<string, string> = {};

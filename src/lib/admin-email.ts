@@ -1,31 +1,16 @@
-import { Resend } from 'resend';
+import { deliverRawOutreachEmail } from './outreach-email';
 
 export async function sendAdminReportEmail(to: string, subject: string, html: string) {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('RESEND_API_KEY not configured — email not sent.');
-    console.log('--- REPORT CONTENT ---');
-    console.log(html);
-    return { success: false, error: 'API key missing' };
+  const res = await deliverRawOutreachEmail({
+    to,
+    subject,
+    html,
+  });
+
+  if (!res.success) {
+    console.warn('[AdminEmail] Email not sent:', res.error);
+    return { success: false, error: res.error };
   }
 
-  const resend = new Resend(process.env.RESEND_API_KEY);
-
-  try {
-    const { data, error } = await resend.emails.send({
-      from: 'the CFO <reports@updates.thecfo.app>', // Change to your verified domain later
-      to,
-      subject,
-      html,
-    });
-
-    if (error) {
-      console.error('Failed to send email:', error);
-      return { success: false, error };
-    }
-
-    return { success: true, data };
-  } catch (err) {
-    console.error('Unexpected error sending email:', err);
-    return { success: false, error: err };
-  }
+  return { success: true, data: { provider: res.provider } };
 }

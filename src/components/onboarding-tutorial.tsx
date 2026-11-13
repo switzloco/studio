@@ -14,6 +14,7 @@ import {
   Zap
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { OutreachInlinePrompt } from "@/components/outreach-inline-prompt";
 import { 
   Dialog, 
   DialogContent, 
@@ -115,6 +116,12 @@ export function OnboardingTutorial({ onComplete, isOpen }: OnboardingTutorialPro
               />
             ))}
           </div>
+
+          {currentStep === steps.length - 1 && (
+            <div className="w-full">
+              <OutreachInlinePrompt variant="onboarding" />
+            </div>
+          )}
 
           <div className="w-full pt-4">
             <Button 

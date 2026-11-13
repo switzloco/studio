@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
-import { calculateDailyVFScore, DailyVFInput, computeAlpertNumber } from '../vf-scoring';
+import { calculateDailyVFScore, DailyVFInput, computeAlpertNumber, computeFastingHoursFromFoodLogs } from '../vf-scoring';
 import { estimateBmrKcal, creditedCaloriesOut } from '../metabolic-engine';
-import type { FoodLogEntry, ExerciseLogEntry } from '../food-exercise-types';
+import {
+  parseSupplementFieldsFromText,
+  formatSupplementBadges,
+  interpolateSlotTiming,
+  inferMealFromTime,
+  formatHHMM12h,
+  type FoodLogEntry,
+  type ExerciseLogEntry,
+} from '../food-exercise-types';
 import { SCORING_RELEASES, CURRENT_SCORING_RELEASE, hasOneFictionalHero } from '../scoring-releases';
 
 // ─── Mock Firebase so tests never touch a real database ───────────────────────
@@ -537,5 +545,75 @@ describe('VF v3.2 — glycogen is neutral, fat = deficit − muscle', () => {
     expect(r.breakdown.baseScore).toBeLessThan(
       Math.round((r.breakdown.fatBalanceKcal / r.breakdown.pointsDenominator) * 100),
     );
+  });
+
+  it('automatically derives overnight fasting hours from yesterday last meal to today first meal (11pm -> 12pm = 13h)', () => {
+    const prevFood = [
+      food({ date: '2026-06-02', meal: 'dinner', consumedAt: '19:00', calories: 800 }),
+      food({ date: '2026-06-02', meal: 'snack', consumedAt: '23:00', calories: 350 }),
+    ];
+    const todayFood = [
+      food({ date: '2026-06-03', meal: 'breakfast', consumedAt: '08:00', calories: 0, proteinG: 0, carbsG: 0, fatG: 0 }), // black coffee (0 kcal) does not break fast
+      food({ date: '2026-06-03', meal: 'lunch', consumedAt: '12:00', calories: 900 }),
+      food({ date: '2026-06-03', meal: 'dinner', consumedAt: '19:30', calories: 1100 }),
+    ];
+
+    expect(computeFastingHoursFromFoodLogs(todayFood, prevFood, 0)).toBe(13);
+
+    const r = calculateDailyVFScore(cleanDay({
+      fastingHours: 0,
+      foodLogs: todayFood,
+      prevFoodLogs: prevFood,
+    }));
+    expect(r.breakdown.fastingHours).toBe(13);
+    expect(r.breakdown.fastingActive).toBe(false);
+  });
+});
+
+// ─── Supplement Log Parsing & Ledger Drag-and-Drop Timing Interpolation ──────
+describe('Supplement logging & Ledger drag-and-drop timing interpolation', () => {
+  it('parses supplement fields from free-text Quick Log names', () => {
+    expect(parseSupplementFieldsFromText('Beta-Alanine 4g')).toEqual({ betaAlanineG: 4 });
+    expect(parseSupplementFieldsFromText('Creatine 5g')).toEqual({ creatineG: 5 });
+    expect(parseSupplementFieldsFromText('Omega-3 Fish Oil 2000mg')).toEqual({ omega3Mg: 2000 });
+    expect(parseSupplementFieldsFromText('Caffeine 200mg')).toEqual({ caffeineMg: 200 });
+    expect(parseSupplementFieldsFromText('LMNT Electrolytes')).toEqual({ hasElectrolytes: true });
+  });
+
+  it('formats supplement badges for display in the Transaction Ledger', () => {
+    const badges = formatSupplementBadges({
+      name: 'Morning Stack',
+      betaAlanineG: 4,
+      creatineG: 5,
+      omega3Mg: 1000,
+      hasElectrolytes: true,
+    });
+    expect(badges).toEqual([
+      'Beta-Alanine 4g',
+      'Creatine 5g',
+      'Omega-3 1000mg',
+      'Electrolytes',
+    ]);
+  });
+
+  it('interpolates midpoint time when dragging between two entries on the same day', () => {
+    const slot = interpolateSlotTiming({
+      aboveEntry: { date: '2026-11-03', time: '20:00' },
+      belowEntry: { date: '2026-11-03', time: '18:00' },
+      fallbackDate: '2026-11-04',
+    });
+    expect(slot).toEqual({ date: '2026-11-03', time: '19:00' });
+    expect(inferMealFromTime(slot.time)).toBe('dinner');
+    expect(formatHHMM12h(slot.time)).toBe('7:00 PM');
+  });
+
+  it('moves to the previous day (Last Night) when dragging across a day boundary', () => {
+    const slot = interpolateSlotTiming({
+      aboveEntry: { date: '2026-11-04', time: '09:00' },
+      belowEntry: { date: '2026-11-03', time: '20:00' },
+      fallbackDate: '2026-11-04',
+    });
+    expect(slot).toEqual({ date: '2026-11-03', time: '20:30' });
+    expect(formatHHMM12h(slot.time)).toBe('8:30 PM');
   });
 });

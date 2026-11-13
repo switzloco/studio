@@ -3,6 +3,7 @@
 import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { trackAiUsage } from '@/lib/ai-usage';
 import type { SharedMealItem } from '@/lib/food-exercise-types';
 
 const ItemSchema = z.object({
@@ -58,6 +59,7 @@ export async function editSharedMeal(
     const { output } = await ai.generate({
       model: CFO_LITE_MODEL,
       output: { schema: EditResponseSchema },
+      use: [trackAiUsage({ uid: 'public:shared_meal_edit', feature: 'shared_meal_edit', model: CFO_LITE_MODEL })],
       prompt: `You are editing a meal's food items based on a user's natural language request.
 
 Current items (JSON):

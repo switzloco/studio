@@ -10,7 +10,7 @@ try {
 }
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ['imapflow', 'nodemailer'],
   experimental: {
     serverActions: {
       bodySizeLimit: '20mb',

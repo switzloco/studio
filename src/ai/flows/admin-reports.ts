@@ -1,6 +1,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getWeeklyMetrics } from '@/lib/admin-metrics';
+import { trackAiUsage } from '@/lib/ai-usage';
 
 /**
  * @fileOverview Genkit flow to generate a weekly executive summary of app usage.
@@ -19,6 +20,7 @@ export const adminReportFlow = ai.defineFlow(
     const metrics = await getWeeklyMetrics();
 
     const response = await ai.generate({
+      use: [trackAiUsage({ uid: 'system:admin_report', feature: 'admin_report' })],
       prompt: `
         You are the Executive Reporting Assistant for the "the CFO" (Chief Fitness Officer) app.
         Generate a professional, concise weekly summary for the founder (Nicholas Switzer).

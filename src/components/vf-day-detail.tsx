@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { healthService, type HistoryEntry, type HealthData } from '@/lib/health-service';
+import { computeFastingHoursFromFoodLogs } from '@/lib/vf-scoring';
 import { inferScoringRelease } from '@/lib/scoring-releases';
 import { getEffectiveDayNote } from '@/lib/level-tracker';
 import { useUser, useFirestore, useDoc, useMemoFirebase } from '@/firebase';
@@ -63,17 +64,67 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
 
   const [noteText, setNoteText] = useState('');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [inferredFastingHours, setInferredFastingHours] = useState<number | null>(null);
 
   useEffect(() => {
     if (entry) {
       setNoteText(getEffectiveDayNote(entry) ?? '');
     }
+    setInferredFastingHours(null);
   }, [entry]);
+
+  // Auto-resolve fasting window from food_log timestamps when stored breakdown has 0h
+  useEffect(() => {
+    if (!open || !user || !entry?.isoDate || !entry.breakdown) return;
+    if ((entry.breakdown.fastingHours ?? 0) > 0) return;
+
+    const iso = entry.isoDate;
+    const [y, m, d] = iso.split('-').map(Number);
+    const prevDt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+    prevDt.setUTCDate(prevDt.getUTCDate() - 1);
+    const prevIso = prevDt.toISOString().slice(0, 10);
+
+    let cancelled = false;
+    Promise.all([
+      healthService.queryFoodLog(db, user.uid, iso, 50),
+      healthService.queryFoodLog(db, user.uid, prevIso, 50),
+    ])
+      .then(([dayFood, prevFood]) => {
+        if (cancelled) return;
+        const computed = computeFastingHoursFromFoodLogs(dayFood, prevFood);
+        if (computed > 0) {
+          setInferredFastingHours(computed);
+          if (healthData?.history) {
+            const updatedHistory = healthData.history.map((h) => {
+              if ((h.isoDate || h.date) !== iso || !h.breakdown) return h;
+              return {
+                ...h,
+                breakdown: {
+                  ...h.breakdown,
+                  fastingHours: computed,
+                  fastingActive: computed >= 16,
+                },
+              };
+            });
+            healthService.updateHealthData(db, user.uid, { history: updatedHistory }).catch(() => {});
+          }
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user, db, entry, healthData?.history]);
 
   if (!entry) return null;
 
   const b = entry.breakdown;
   const hasBreakdown = !!b;
+  const effectiveFastingHours = (b?.fastingHours && b.fastingHours > 0)
+    ? b.fastingHours
+    : (inferredFastingHours ?? b?.fastingHours ?? 0);
+  const effectiveFastingActive = Boolean(b?.fastingActive ?? b?.fastingOverride ?? (effectiveFastingHours >= 16));
   const release = inferScoringRelease(entry);
 
   const handleSaveNote = async () => {
@@ -258,11 +309,11 @@ export function VFDayDetail({ entry, open, onOpenChange }: VFDayDetailProps) {
             />
 
             <RuleRow
-              icon={<Zap className={`w-5 h-5 ${(b.fastingActive ?? b.fastingOverride) ? 'text-emerald-600' : 'text-gray-400'}`} />}
+              icon={<Zap className={`w-5 h-5 ${effectiveFastingActive ? 'text-emerald-600' : effectiveFastingHours >= 12 ? 'text-emerald-600' : 'text-gray-400'}`} />}
               label="Rule 2 — Fasting Window"
-              value={`${b.fastingHours}h fasted`}
-              impact={(b.fastingActive ?? b.fastingOverride) ? 'Fat window open' : 'N/A'}
-              status={(b.fastingActive ?? b.fastingOverride) ? 'positive' : 'neutral'}
+              value={`${effectiveFastingHours}h fasted`}
+              impact={effectiveFastingActive ? 'Fat window open' : effectiveFastingHours >= 12 ? 'Overnight fast' : effectiveFastingHours > 0 ? 'Short fast' : 'N/A'}
+              status={effectiveFastingActive || effectiveFastingHours >= 12 ? 'positive' : 'neutral'}
             />
 
             <RuleRow

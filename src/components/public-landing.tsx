@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Briefcase, ShieldCheck, MessageSquare, Target, History, ArrowRight, Activity, Zap, BarChart3, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { OutreachEnrollmentCard } from '@/components/outreach-enrollment-card';
 
 interface PublicLandingProps {
   onLogin: () => void;
@@ -114,6 +115,9 @@ export function PublicLanding({ onLogin, onAnonymousLogin, isLoggingIn }: Public
           </div>
         </div>
       </section>
+
+      {/* Free 3x/Day Email & Discord Briefings */}
+      <OutreachEnrollmentCard />
 
       {/* Purpose Section */}
       <section id="purpose" className="py-24 px-6 bg-muted/30">

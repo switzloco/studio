@@ -2,6 +2,7 @@ import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { adminHealthService as healthService } from '@/lib/health-service-admin';
+import { trackAiUsage } from '@/lib/ai-usage';
 
 const calculateStatsTool = ai.defineTool(
   {
@@ -112,7 +113,8 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
 
     try {
       result = await ai.generate({
-        ...generateConfig
+        ...generateConfig,
+        use: [trackAiUsage({ uid: input.userId, feature: 'data_analyst' })],
       });
     } catch (err: any) {
       const msg = String(err?.message ?? err ?? '').toLowerCase();
@@ -123,7 +125,8 @@ You have tools to fetch their historical data (up to 180 days) and to calculate 
       console.warn(`[DataAnalystFlow] Primary model failed, trying fallback model (${CFO_LITE_MODEL}):`, err?.message ?? String(err));
       result = await ai.generate({
         model: CFO_LITE_MODEL,
-        ...generateConfig
+        ...generateConfig,
+        use: [trackAiUsage({ uid: input.userId, feature: 'data_analyst', model: CFO_LITE_MODEL })],
       });
     }
 

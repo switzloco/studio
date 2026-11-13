@@ -7,10 +7,15 @@ import {
   syncFitbitSnapshot as _syncFitbitSnapshot,
   refreshStalePastSnapshots as _refreshStalePastSnapshots,
 } from '@/lib/fitbit-sync';
+import { backfillScoreHistory } from '@/lib/score-history-sync';
 import { fitbitService } from '@/lib/fitbit-service';
 import type { SyncResult } from '@/lib/fitbit-sync';
 
 export type { SyncResult };
+
+export async function rescoreRecentDays(userId: string, localDate: string, days = 14): Promise<{ ok: boolean; scoredDays: number }> {
+  return backfillScoreHistory(userId, localDate, days);
+}
 
 export async function syncFitbitData(userId: string, localDate?: string, timezoneOffset?: number): Promise<SyncResult> {
   return _syncFitbitData(userId, localDate, timezoneOffset);

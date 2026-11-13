@@ -8,6 +8,7 @@
  */
 
 import { ai, CFO_LITE_MODEL } from '@/ai/genkit';
+import { trackAiUsage } from '@/lib/ai-usage';
 import { z } from 'genkit';
 import { getAdminFirestore } from '@/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -151,13 +152,15 @@ export const shareIngestionFlow = ai.defineFlow(
 
       try {
         llmResult = await ai.generate({
-          ...generateConfig
+          ...generateConfig,
+          use: [trackAiUsage({ uid: input.userId, feature: 'share_ingestion' })],
         });
       } catch (err: any) {
         console.warn(`[ShareIngestion] Primary model failed, trying fallback model (${CFO_LITE_MODEL}):`, err?.message ?? String(err));
         llmResult = await ai.generate({
           model: CFO_LITE_MODEL,
-          ...generateConfig
+          ...generateConfig,
+          use: [trackAiUsage({ uid: input.userId, feature: 'share_ingestion', model: CFO_LITE_MODEL })],
         });
       }
 

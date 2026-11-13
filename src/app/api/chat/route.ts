@@ -9,6 +9,7 @@ import { adminHealthService } from '@/lib/health-service-admin';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { SHARE_OFFER_SENTINEL } from '@/lib/share-offer';
 import { fetchSlimUserContext } from '@/lib/user-context';
+import { trackAiUsage } from '@/lib/ai-usage';
 
 /**
  * Cap on how many prior messages we feed back into the model each turn. We
@@ -145,6 +146,8 @@ export async function POST(req: Request) {
         ? CFO_LITE_MODEL
         : undefined;
 
+    const usageTracker = trackAiUsage({ uid, feature: 'chat', model: selectedModel, tier: entitlement.tier });
+
     const encoder = new TextEncoder();
     const hasPhotos = Array.isArray(photoDataUris) && photoDataUris.length > 0;
     const readableStream = new ReadableStream({
@@ -158,6 +161,7 @@ export async function POST(req: Request) {
             const { stream } = await cfoChatPrompt.stream(input, {
               ...(selectedModel ? { model: selectedModel } : {}),
               maxTurns: 8,
+              use: [usageTracker],
             });
             for await (const chunk of stream) {
               if (chunk.text) {
@@ -188,6 +192,7 @@ export async function POST(req: Request) {
                 const nonStreamResult = await cfoChatPrompt(input, {
                   ...(selectedModel ? { model: selectedModel } : {}),
                   maxTurns: 8,
+                  use: [usageTracker],
                 });
                 if (nonStreamResult?.text) {
                   fullText = nonStreamResult.text;
