@@ -6,13 +6,14 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles, Lock, Unlock, Terminal, TrendingUp } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles, Check } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebaseApp, useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import type { ChatMessage } from '@/lib/food-exercise-types';
-import { HealthData, UserPreferences } from '@/lib/health-service';
+import { inferMealFromTime } from '@/lib/food-exercise-types';
+import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
 import { SHARE_OFFER_SENTINEL, type ChatShareOffer } from '@/lib/share-offer';
 import { ShareMealButton } from '@/components/share-meal-button';
 import { resolveClientEntitlement } from '@/lib/entitlements';
@@ -20,14 +21,16 @@ import { PaywallModal } from '@/components/paywall-modal';
 import { OutreachInlinePrompt } from '@/components/outreach-inline-prompt';
 import { useHybridAi } from '@/components/hybrid-ai-provider';
 import { ExecutionReceiptBadge, SecComplianceAlertPanel } from '@/components/execution-receipt-badge';
-import { HybridTickerTerminal } from '@/components/hybrid-ticker-terminal';
 import {
+  auditMealPhotoReceiptHybrid,
   dataUriToInlineImage,
+  parseTickerTapeHybrid,
   runHybridCoachTurn,
   SecPrivacyLockBlockedError,
   type NormalizedInferenceSource,
   type SecComplianceAlert,
 } from '@/lib/hybrid-ai';
+import type { ReconciledFoodDraft, ReconciledWorkoutDraft } from '@/lib/usda-local-reconciler';
 import {
   loadGIS,
   getPhotosPickerToken,
@@ -39,6 +42,13 @@ import {
   extractTimestampFromMediaItem,
 } from '@/lib/google-photos-picker';
 
+interface HybridDraftPayload {
+  foods: ReconciledFoodDraft[];
+  workouts: ReconciledWorkoutDraft[];
+  cfoNote: string;
+  committed?: boolean;
+}
+
 interface Message {
   role: 'user' | 'model';
   content: string;
@@ -47,6 +57,7 @@ interface Message {
   inferenceSource?: NormalizedInferenceSource;
   inferenceLatencyMs?: number;
   secAlert?: SecComplianceAlert;
+  hybridDraft?: HybridDraftPayload;
 }
 
 /**
@@ -157,12 +168,12 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     warmNano,
     isOnline,
     recordReceipt,
-    setEarningsModalOpen,
   } = useHybridAi();
   const [messages, setMessages] = useState<Message[]>([]);
   const [initDone, setInitDone] = useState(false);
   const [coachingRequested, setCoachingRequested] = useState(false);
-  const [showTickerDrawer, setShowTickerDrawer] = useState(false);
+  const [instantParseMode, setInstantParseMode] = useState(false);
+  const [committingMsgIdx, setCommittingMsgIdx] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
@@ -462,6 +473,70 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
     const fullMessage = exifContext + userMessage;
 
+    // Unified Hybrid Instant Parse Path (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE` structured output in main Coach box!)
+    if (instantParseMode) {
+      try {
+        if (photos.length > 0) {
+          const receiptRes = await auditMealPhotoReceiptHybrid({
+            firebaseApp,
+            image: dataUriToInlineImage(photos[0].dataUri),
+            note: userMessage || undefined,
+            secPrivacyLock,
+          });
+          recordReceipt(receiptRes.receipt);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'model',
+              content: `**${receiptRes.receiptTitle}** · *${receiptRes.auditVerdict.replace(/_/g, ' ')}*\n\n${receiptRes.cfoCommentary}`,
+              inferenceSource: receiptRes.receipt.inferenceSource,
+              inferenceLatencyMs: receiptRes.receipt.latencyMs,
+              hybridDraft: {
+                foods: receiptRes.foods,
+                workouts: [],
+                cfoNote: receiptRes.cfoCommentary,
+              },
+            },
+          ]);
+        } else {
+          const parsedRes = await parseTickerTapeHybrid({
+            firebaseApp,
+            shorthandInput: userMessage,
+            secPrivacyLock,
+            userWeightKg: healthData?.weightKg ?? prefs?.profile?.weightKg ?? 78,
+          });
+          recordReceipt(parsedRes.receipt);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'model',
+              content: parsedRes.cfoAuditNote,
+              inferenceSource: parsedRes.receipt.inferenceSource,
+              inferenceLatencyMs: parsedRes.receipt.latencyMs,
+              hybridDraft: {
+                foods: parsedRes.foods,
+                workouts: parsedRes.workouts,
+                cfoNote: parsedRes.cfoAuditNote,
+              },
+            },
+          ]);
+        }
+      } catch (err) {
+        if (err instanceof SecPrivacyLockBlockedError) {
+          setMessages((prev) => [...prev, { role: 'model', content: '', secAlert: err.alert }]);
+        } else {
+          const msg = err instanceof Error ? err.message : 'Instant Hybrid parse failed.';
+          setMessages((prev) => [
+            ...prev,
+            { role: 'model', content: `**Instant Parse Notice**\n\n${msg}` },
+          ]);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     // Hybrid AI Client Path: Strict On-Device SEC Privacy Lock (`ONLY_ON_DEVICE`) or Offline Mode (`PREFER_ON_DEVICE`)
     if (secPrivacyLock || !isOnline) {
       try {
@@ -593,10 +668,107 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
   };
 
+  const handleCommitHybridDraft = async (msgIndex: number, draft: HybridDraftPayload) => {
+    if (!user || draft.committed || committingMsgIdx !== null) return;
+    setCommittingMsgIdx(msgIndex);
+    try {
+      const now = new Date();
+      const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const mealSlot = inferMealFromTime(nowTime);
+      const msg = messages[msgIndex];
+
+      for (const f of draft.foods) {
+        await healthService.logFood(db, user.uid, {
+          name: f.name,
+          portionG: f.portionG,
+          calories: f.calories,
+          proteinG: f.proteinG,
+          carbsG: f.carbsG,
+          fatG: f.fatG,
+          fiberG: f.fiberG,
+          plantMassG: f.plantMassG,
+          glycemicIndex: f.glycemicIndex,
+          omega3Mg: f.omega3Mg,
+          caffeineMg: f.caffeineMg,
+          creatineG: f.creatineG,
+          betaAlanineG: f.betaAlanineG,
+          hasElectrolytes: f.hasElectrolytes,
+          alcoholDrinks: f.alcoholDrinks,
+          hasSeedOils: f.hasSeedOils,
+          meal: mealSlot,
+          source: f.source,
+          consumedAt: nowTime,
+          date: todayIso,
+          inferenceSource: msg?.inferenceSource,
+          inferenceLatencyMs: msg?.inferenceLatencyMs,
+          cfoClass: f.cfoClass,
+        });
+      }
+
+      for (const w of draft.workouts) {
+        await healthService.logExercise(db, user.uid, {
+          name: w.name,
+          category: w.category,
+          durationMin: w.durationMin,
+          sets: w.sets,
+          reps: w.reps,
+          weightKg: w.weightKg,
+          estimatedCaloriesBurned: w.estimatedCaloriesBurned,
+          adjustedCalories: w.adjustedCalories,
+          activityTier: w.activityTier,
+          pointsDelta: w.pointsDelta,
+          performedAt: nowTime,
+          date: todayIso,
+          inferenceSource: msg?.inferenceSource,
+          inferenceLatencyMs: msg?.inferenceLatencyMs,
+          cfoClass: w.cfoClass,
+        });
+      }
+
+      if (draft.foods.length > 0) {
+        const addedCalories = draft.foods.reduce((s, f) => s + f.calories, 0);
+        const addedProtein = draft.foods.reduce((s, f) => s + f.proteinG, 0);
+        const addedCarbs = draft.foods.reduce((s, f) => s + f.carbsG, 0);
+        const addedPlants = draft.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+
+        await healthService.updateHealthData(db, user.uid, {
+          dailyCaloriesIn: (healthData?.dailyCaloriesIn || 0) + addedCalories,
+          dailyProteinG: (healthData?.dailyProteinG || 0) + addedProtein,
+          dailyCarbsG: (healthData?.dailyCarbsG || 0) + addedCarbs,
+          dailyPlantG: (healthData?.dailyPlantG || 0) + addedPlants,
+          lastActiveDate: todayIso,
+        });
+      }
+
+      setMessages((prev) =>
+        prev.map((m, idx) =>
+          idx === msgIndex && m.hybridDraft
+            ? { ...m, hybridDraft: { ...m.hybridDraft, committed: true } }
+            : m
+        )
+      );
+      toast({
+        title: isOnline ? 'Logged to Ledger' : 'Saved to Offline Ledger',
+        description: `${draft.foods.length} food & ${draft.workouts.length} workout item(s) committed.`,
+      });
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Commit Failed',
+        description: err instanceof Error ? err.message : 'Could not write to Ledger.',
+      });
+    } finally {
+      setCommittingMsgIdx(null);
+    }
+  };
+
   const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints != null && healthData.visceralFatPoints > 0);
-  const placeholder = hasTargets
-    ? "Log a meal, workout, or ask the CFO..."
-    : "Tell me about your goals, equipment, routine...";
+  const placeholder = instantParseMode
+    ? 'Instant Log: "3 eggs, 1 cup oats, 35m squats" or snap plate…'
+    : hasTargets
+      ? "Log a meal, workout, or ask the CFO..."
+      : "Tell me about your goals, equipment, routine...";
 
   /** Google Photos colorful pinwheel icon. */
   const GooglePhotosIcon = ({ className }: { className?: string }) => (
@@ -752,20 +924,18 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
 
         <button
           type="button"
-          onClick={() => setShowTickerDrawer((prev) => !prev)}
+          onClick={() => setInstantParseMode((prev) => !prev)}
           data-testid="coach-ticker-drawer-btn"
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 h-8 sm:h-9 font-mono text-[10px] font-bold uppercase tracking-wider transition-all shrink-0 ${
-            showTickerDrawer
-              ? 'border-emerald-400 bg-slate-950 text-emerald-300 shadow-sm'
-              : 'border-slate-300 bg-slate-950 text-emerald-300 hover:bg-slate-900'
+          aria-pressed={instantParseMode}
+          className={`inline-flex items-center gap-1 rounded-full border px-2.5 sm:px-3 h-8 sm:h-9 text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${
+            instantParseMode
+              ? 'border-emerald-500 bg-emerald-600 text-white shadow-xs'
+              : 'border-border bg-secondary/70 text-muted-foreground hover:text-foreground'
           }`}
-          title="Toggle instant natural-language Ticker Tape & Receipt Auditor"
+          title="Toggle Instant Hybrid Macro & Receipt Parser inside this box"
         >
-          <Terminal className="w-3 h-3 text-emerald-400 shrink-0" />
-          <span className="sm:hidden">{showTickerDrawer ? 'Hide Ticker' : 'Ticker'}</span>
-          <span className="hidden sm:inline">
-            {showTickerDrawer ? 'Hide Ticker & Receipt Bar' : 'Ticker Tape & Receipt Auditor'}
-          </span>
+          <Zap className="w-3 h-3 shrink-0" />
+          <span>{instantParseMode ? 'Instant Log: ON' : 'Instant Log'}</span>
         </button>
 
         <div className="flex-1" />
@@ -810,21 +980,10 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     </div>
   );
 
-  const HybridCoachToolbar = showTickerDrawer ? (
-    <div className="border-b border-emerald-500/30 bg-slate-950 p-2 sm:p-3 font-mono shrink-0 max-h-[56vh] overflow-y-auto">
-      <HybridTickerTerminal
-        compact
-        healthData={healthData}
-        onCommitted={() => setShowTickerDrawer(false)}
-      />
-    </div>
-  ) : null;
-
   // Idle screen when auto-chat is disabled and no messages yet
   if (!autoChatEnabled && messages.length === 0 && !isLoading) {
     return (
       <div className="flex flex-col flex-1 h-0">
-        {HybridCoachToolbar}
         <PaywallModal
           isOpen={paywallOpen}
           onClose={() => setPaywallOpen(false)}
@@ -886,7 +1045,6 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
 
   return (
     <div className="flex flex-col flex-1 h-0">
-      {HybridCoachToolbar}
       <PaywallModal
         isOpen={paywallOpen}
         onClose={() => setPaywallOpen(false)}
@@ -930,6 +1088,41 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
                     </div>
                   ) : (
                     m.content
+                  )}
+                  {m.hybridDraft && (m.hybridDraft.foods.length > 0 || m.hybridDraft.workouts.length > 0) && (
+                    <div className="mt-3 pt-2.5 border-t border-border/70 space-y-2">
+                      <div className="space-y-1.5">
+                        {m.hybridDraft.foods.map((f, fIdx) => (
+                          <div key={fIdx} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-200/80 px-2.5 py-1.5 text-xs">
+                            <span className="font-bold text-slate-800 truncate">{f.name}</span>
+                            <span className="text-slate-600 font-semibold shrink-0">
+                              {f.calories} kcal · <span className="text-emerald-700 font-bold">{f.proteinG}g P</span>
+                            </span>
+                          </div>
+                        ))}
+                        {m.hybridDraft.workouts.map((w, wIdx) => (
+                          <div key={wIdx} className="flex items-center justify-between gap-2 rounded-lg bg-cyan-50/70 border border-cyan-200/80 px-2.5 py-1.5 text-xs">
+                            <span className="font-bold text-slate-800 truncate">{w.name} ({w.durationMin}m)</span>
+                            <span className="text-cyan-800 font-bold shrink-0">-{w.adjustedCalories} kcal</span>
+                          </div>
+                        ))}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={m.hybridDraft.committed || committingMsgIdx === i}
+                        onClick={() => handleCommitHybridDraft(i, m.hybridDraft!)}
+                        className="w-full h-8 rounded-lg text-[11px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        {committingMsgIdx === i ? (
+                          <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Logging…</>
+                        ) : m.hybridDraft.committed ? (
+                          <><Check className="w-3.5 h-3.5 mr-1.5" />Logged to Ledger</>
+                        ) : (
+                          `+ Log ${m.hybridDraft.foods.length + m.hybridDraft.workouts.length} Item(s) to Ledger`
+                        )}
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}

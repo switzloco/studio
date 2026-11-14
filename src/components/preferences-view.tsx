@@ -351,7 +351,7 @@ export function PreferencesView() {
   );
 
   return (
-    <div className="p-6 sm:p-10 space-y-10 pb-24 overflow-y-auto h-full bg-background">
+    <div className="p-4 sm:p-10 space-y-6 sm:space-y-10 pb-24 bg-background w-full max-w-full overflow-x-hidden">
       <div className="flex items-center justify-between px-1">
         <div className="space-y-1">
           <h2 className="text-3xl font-black tracking-tighter uppercase italic text-foreground">Portfolio Management</h2>

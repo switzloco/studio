@@ -33,6 +33,7 @@ import {
   Sparkles,
   Trash2,
   Search,
+  Camera,
   X,
 } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
@@ -42,11 +43,20 @@ import type { SyncResult } from '@/lib/fitbit-sync';
 import { syncOuraData, disconnectOura, getOuraAuthUrl } from '@/app/actions/oura';
 import type { OuraSyncResult } from '@/lib/oura-sync';
 import { syncWithingsData, disconnectWithings, getWithingsAuthUrl } from '@/app/actions/withings';
-import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
+import { useFirebaseApp, useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { OutreachInlinePrompt } from './outreach-inline-prompt';
-import { HybridTickerTerminal } from './hybrid-ticker-terminal';
 import { useHybridAi } from './hybrid-ai-provider';
+import { ExecutionReceiptBadge, SecComplianceAlertPanel } from './execution-receipt-badge';
+import {
+  auditMealPhotoReceiptHybrid,
+  normalizeImageFileForHybrid,
+  parseTickerTapeHybrid,
+  SecPrivacyLockBlockedError,
+  type HybridExecutionReceipt,
+  type SecComplianceAlert,
+} from '@/lib/hybrid-ai';
+import type { ReconciledFoodDraft, ReconciledWorkoutDraft } from '@/lib/usda-local-reconciler';
 import { computeAlpertNumber, calculateDailyVFScore, computeFastingHoursFromFoodLogs } from '@/lib/vf-scoring';
 import { computeAlpertPace, computeEatRunway } from '@/lib/alpert-pace';
 import {
@@ -66,6 +76,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   parseSupplementFieldsFromText,
   formatSupplementBadges,
+  inferMealFromTime,
   type FoodLogEntry,
   type ExerciseLogEntry,
 } from '@/lib/food-exercise-types';
@@ -117,10 +128,18 @@ const WithingsLogo = ({ className }: { className?: string }) => (
 );
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
+  const firebaseApp = useFirebaseApp();
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
-  const { setEarningsModalOpen } = useHybridAi();
+  const {
+    setEarningsModalOpen,
+    secPrivacyLock,
+    setSecPrivacyLock,
+    warmNano,
+    recordReceipt,
+    isOnline,
+  } = useHybridAi();
 
   const prefsRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
@@ -178,6 +197,19 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const [nicknameQuery, setNicknameQuery] = React.useState('');
   const [previewNickKey, setPreviewNickKey] = React.useState<string | null>(null);
   const [removingFoodId, setRemovingFoodId] = React.useState<string | null>(null);
+
+  // Unified Hybrid AI Parse inside Quick Log
+  const quickPhotoInputRef = React.useRef<HTMLInputElement>(null);
+  const [isAiParsingQuick, setIsAiParsingQuick] = React.useState(false);
+  const [isCommittingAiQuick, setIsCommittingAiQuick] = React.useState(false);
+  const [aiQuickDraft, setAiQuickDraft] = React.useState<{
+    foods: ReconciledFoodDraft[];
+    workouts: ReconciledWorkoutDraft[];
+    note: string;
+    receipt: HybridExecutionReceipt;
+  } | null>(null);
+  const [aiQuickComplianceAlert, setAiQuickComplianceAlert] = React.useState<SecComplianceAlert | null>(null);
+  const [aiQuickError, setAiQuickError] = React.useState<string | null>(null);
 
   // Zero-AI Score Lock state
   const [scoreLockOpen, setScoreLockOpen] = React.useState(false);
@@ -864,6 +896,155 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
     }
   };
 
+  const handleQuickAiParseText = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const raw = nicknameQuery.trim();
+    if (!raw || isAiParsingQuick) return;
+    setIsAiParsingQuick(true);
+    setAiQuickError(null);
+    setAiQuickComplianceAlert(null);
+    try {
+      const parsed = await parseTickerTapeHybrid({
+        firebaseApp,
+        shorthandInput: raw,
+        secPrivacyLock,
+        userWeightKg: data?.weightKg ?? prefs?.profile?.weightKg ?? 78,
+      });
+      recordReceipt(parsed.receipt);
+      setAiQuickDraft({
+        foods: parsed.foods,
+        workouts: parsed.workouts,
+        note: parsed.cfoAuditNote,
+        receipt: parsed.receipt,
+      });
+    } catch (err) {
+      if (err instanceof SecPrivacyLockBlockedError) {
+        setAiQuickComplianceAlert(err.alert);
+      } else {
+        setAiQuickError(err instanceof Error ? err.message : 'Unable to parse shorthand right now.');
+      }
+    } finally {
+      setIsAiParsingQuick(false);
+    }
+  };
+
+  const handleQuickAiPhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || isAiParsingQuick) return;
+    setIsAiParsingQuick(true);
+    setAiQuickError(null);
+    setAiQuickComplianceAlert(null);
+    try {
+      const normalized = await normalizeImageFileForHybrid(file);
+      const audited = await auditMealPhotoReceiptHybrid({
+        firebaseApp,
+        image: normalized,
+        note: nicknameQuery.trim() || undefined,
+        secPrivacyLock,
+      });
+      recordReceipt(audited.receipt);
+      setAiQuickDraft({
+        foods: audited.foods,
+        workouts: [],
+        note: `${audited.receiptTitle} — ${audited.cfoCommentary}`,
+        receipt: audited.receipt,
+      });
+    } catch (err) {
+      if (err instanceof SecPrivacyLockBlockedError) {
+        setAiQuickComplianceAlert(err.alert);
+      } else {
+        setAiQuickError(err instanceof Error ? err.message : 'Unable to audit meal photo right now.');
+      }
+    } finally {
+      setIsAiParsingQuick(false);
+    }
+  };
+
+  const handleCommitAiQuickDraft = async () => {
+    if (!user || !aiQuickDraft || isCommittingAiQuick) return;
+    setIsCommittingAiQuick(true);
+    try {
+      const now = new Date();
+      const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const mealSlot = inferMealFromTime(nowTime);
+
+      for (const f of aiQuickDraft.foods) {
+        await healthService.logFood(db, user.uid, {
+          name: f.name,
+          portionG: f.portionG,
+          calories: f.calories,
+          proteinG: f.proteinG,
+          carbsG: f.carbsG,
+          fatG: f.fatG,
+          fiberG: f.fiberG,
+          plantMassG: f.plantMassG,
+          glycemicIndex: f.glycemicIndex,
+          omega3Mg: f.omega3Mg,
+          caffeineMg: f.caffeineMg,
+          creatineG: f.creatineG,
+          betaAlanineG: f.betaAlanineG,
+          hasElectrolytes: f.hasElectrolytes,
+          alcoholDrinks: f.alcoholDrinks,
+          hasSeedOils: f.hasSeedOils,
+          meal: mealSlot,
+          source: f.source,
+          consumedAt: nowTime,
+          date: selectedDateStr,
+          inferenceSource: aiQuickDraft.receipt.inferenceSource,
+          inferenceLatencyMs: aiQuickDraft.receipt.latencyMs,
+          cfoClass: f.cfoClass,
+        });
+      }
+
+      for (const w of aiQuickDraft.workouts) {
+        await healthService.logExercise(db, user.uid, {
+          name: w.name,
+          category: w.category,
+          durationMin: w.durationMin,
+          sets: w.sets,
+          reps: w.reps,
+          weightKg: w.weightKg,
+          estimatedCaloriesBurned: w.estimatedCaloriesBurned,
+          adjustedCalories: w.adjustedCalories,
+          activityTier: w.activityTier,
+          pointsDelta: w.pointsDelta,
+          performedAt: nowTime,
+          date: selectedDateStr,
+          inferenceSource: aiQuickDraft.receipt.inferenceSource,
+          inferenceLatencyMs: aiQuickDraft.receipt.latencyMs,
+          cfoClass: w.cfoClass,
+        });
+      }
+
+      if (isViewingToday && aiQuickDraft.foods.length > 0) {
+        const addedCalories = aiQuickDraft.foods.reduce((s, f) => s + f.calories, 0);
+        const addedProtein = aiQuickDraft.foods.reduce((s, f) => s + f.proteinG, 0);
+        const addedCarbs = aiQuickDraft.foods.reduce((s, f) => s + f.carbsG, 0);
+        const addedPlants = aiQuickDraft.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+
+        await healthService.updateHealthData(db, user.uid, {
+          dailyCaloriesIn: dailyCaloriesIn + addedCalories,
+          dailyProteinG: dailyProteinG + addedProtein,
+          dailyCarbsG: dailyCarbsG + addedCarbs,
+          dailyPlantG: (data?.dailyPlantG || 0) + addedPlants,
+          lastActiveDate: selectedDateStr,
+        });
+      }
+
+      toast({
+        title: isOnline ? 'Logged to Ledger' : 'Saved to Offline Ledger',
+        description: `${aiQuickDraft.foods.length} food & ${aiQuickDraft.workouts.length} workout item(s) added to ${selectedDateStr}.`,
+      });
+      setAiQuickDraft(null);
+      setNicknameQuery('');
+    } catch (err) {
+      setAiQuickError(err instanceof Error ? err.message : 'Could not commit items to Ledger.');
+    } finally {
+      setIsCommittingAiQuick(false);
+    }
+  };
+
   // Zero-AI Deterministic Score & Day Note Saver
   const handleLockDayScore = async () => {
     if (!user || !data || isLockingScore) return;
@@ -1192,7 +1373,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   }[eatRunway.status];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 md:p-10 pb-24 bg-background h-full overflow-y-auto">
+    <div className="flex flex-col gap-5 sm:gap-6 p-3.5 sm:p-6 md:p-10 pb-24 bg-background w-full max-w-full overflow-x-hidden">
       {/* ── Compact Top Bar: Date Picker + Slim Device Sync Pill ── */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-2.5">
@@ -1299,13 +1480,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
           )}
         </div>
       </div>
-
-      {/* ── Bloomberg / CRT Hybrid Ticker Tape & Multimodal Receipt Auditor ── */}
-      <HybridTickerTerminal
-        collapsibleOnMobile
-        healthData={data}
-        targetDateIso={selectedDateStr}
-      />
 
       {/* ── ROW 1: Daily Cockpit (VF Score + Calories + 3-Signal "Should I Eat Now?" & Protein To Go) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -1589,103 +1763,222 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </Card>
       </div>
 
-      {/* ── ROW 2: Zero-AI Quick Log Bar (Recent Tickers w/ Descriptions + Today's Logged Items w/ Undo) ── */}
-      <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5">
-        <CardContent className="p-4 sm:p-6 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-black uppercase tracking-widest">
-                Zero-AI Quick Log
+      {/* ── ROW 2: Unified Quick Log (Zero-AI Saved Tickers + Hybrid AI Shorthand/Photo + Today's Logged Items) ── */}
+      <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5 overflow-hidden">
+        <CardContent className="p-3.5 sm:p-6 space-y-3.5 sm:space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-black uppercase tracking-widest shrink-0">
+                Quick Log
               </span>
-              <span className="text-xs sm:text-sm font-bold text-muted-foreground">
-                Recent saved Tickers (tap card to inspect ingredients · tap <span className="text-emerald-700 font-black">+ Log</span> to add)
+              <span className="hidden sm:inline text-xs sm:text-sm font-bold text-muted-foreground truncate">
+                Saved Tickers, Hybrid AI shorthand, or meal photo
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              {Object.keys(prefs?.foodNicknames ?? {}).length > RECENT_TICKER_LIMIT && (
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Filter tickers..."
-                    value={nicknameQuery}
-                    onChange={(e) => setNicknameQuery(e.target.value)}
-                    className="h-8 pl-8 pr-7 w-40 sm:w-52 text-xs sm:text-sm"
-                  />
-                  {nicknameQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setNicknameQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setQuickFoodOpen((v) => !v)}
-                className="h-8 px-3 text-xs font-black uppercase tracking-wider"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" />
-                {quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Supplement'}
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setQuickFoodOpen((v) => !v)}
+              className="h-8 px-2.5 sm:px-3 text-xs font-black uppercase tracking-wider shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              <span className="sm:hidden">{quickFoodOpen ? 'Close' : 'Custom'}</span>
+              <span className="hidden sm:inline">{quickFoodOpen ? 'Close Quick Entry' : 'Custom Food / Supplement'}</span>
+            </Button>
           </div>
 
-          {/* Logged Today Strip — allows 1-tap removal or moving to Last Night */}
+          {/* Unified Smart Filter + Hybrid AI Shorthand & Photo Bar */}
+          <form onSubmit={handleQuickAiParseText} className="flex items-center gap-1.5 w-full">
+            <input
+              ref={quickPhotoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleQuickAiPhotoSelect}
+              className="hidden"
+              data-testid="expense-receipt-file-input"
+            />
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={nicknameQuery}
+                onChange={(e) => setNicknameQuery(e.target.value)}
+                data-testid="ticker-tape-input"
+                placeholder="Filter tickers or type '3 eggs, oats, 35m squats'…"
+                className="h-9 pl-8 pr-7 w-full text-base sm:text-sm"
+              />
+              {nicknameQuery && (
+                <button
+                  type="button"
+                  onClick={() => setNicknameQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={isAiParsingQuick}
+              onClick={() => quickPhotoInputRef.current?.click()}
+              data-testid="expense-receipt-upload-btn"
+              className="h-9 px-2.5 shrink-0"
+              title="Snap or upload a meal / nutrition label photo"
+            >
+              <Camera className="w-4 h-4 text-muted-foreground" />
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={isAiParsingQuick || !nicknameQuery.trim()}
+              data-testid="ticker-parse-submit-btn"
+              className="h-9 px-3 text-xs font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+            >
+              {isAiParsingQuick ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 mr-1" />
+                  <span>AI Log</span>
+                </>
+              )}
+            </Button>
+          </form>
+
+          {aiQuickComplianceAlert && (
+            <SecComplianceAlertPanel
+              alert={aiQuickComplianceAlert}
+              onWarmNano={warmNano}
+              onDisableLock={() => {
+                setSecPrivacyLock(false);
+                setAiQuickComplianceAlert(null);
+              }}
+            />
+          )}
+
+          {aiQuickError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 flex items-center justify-between gap-2">
+              <span className="min-w-0 break-words">{aiQuickError}</span>
+              <button type="button" onClick={() => setAiQuickError(null)} className="shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {aiQuickDraft && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-900">
+                  AI Reconciled Draft ({aiQuickDraft.foods.length + aiQuickDraft.workouts.length})
+                </span>
+                <ExecutionReceiptBadge
+                  compact
+                  inferenceSource={aiQuickDraft.receipt.inferenceSource}
+                  latencyMs={aiQuickDraft.receipt.latencyMs}
+                />
+              </div>
+              {aiQuickDraft.note && (
+                <p className="text-xs text-slate-700 leading-snug">{aiQuickDraft.note}</p>
+              )}
+              <div className="space-y-1.5">
+                {aiQuickDraft.foods.map((f, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-emerald-200/80 px-2.5 py-1.5 text-xs">
+                    <span className="font-bold text-slate-800 truncate min-w-0">{f.name}</span>
+                    <span className="text-slate-600 font-semibold shrink-0">
+                      {f.calories} kcal · <strong className="text-emerald-700">{f.proteinG}g P</strong>
+                    </span>
+                  </div>
+                ))}
+                {aiQuickDraft.workouts.map((w, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-cyan-200/80 px-2.5 py-1.5 text-xs">
+                    <span className="font-bold text-slate-800 truncate min-w-0">{w.name} ({w.durationMin}m)</span>
+                    <span className="text-cyan-800 font-bold shrink-0">-{w.adjustedCalories} kcal</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setAiQuickDraft(null)}
+                  className="h-8 px-2.5 text-xs font-bold uppercase text-muted-foreground"
+                >
+                  Discard
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isCommittingAiQuick}
+                  onClick={handleCommitAiQuickDraft}
+                  data-testid="commit-to-audit-ledger-btn"
+                  className="h-8 px-3.5 text-xs font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {isCommittingAiQuick ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  + Log All to {isViewingToday ? 'Today' : selectedDateStr}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Logged Today Strip — responsive zero-overflow layout */}
           {activeTodayFoodLogs.length > 0 && (
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 sm:p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-1 px-0.5">
                 <span className="text-xs font-black uppercase tracking-wider text-slate-600">
                   Logged on {isViewingToday ? 'Today' : selectedDateStr} ({activeTodayFoodLogs.length})
                 </span>
-                <span className="text-xs font-medium text-muted-foreground">
-                  {isViewingToday ? 'Tap 🌙 Last Night to move to yesterday · ' : ''}Tap <Trash2 className="w-3 h-3 inline mx-0.5" /> to remove
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {isViewingToday ? '🌙 = move to yesterday · ' : ''}Tap <Trash2 className="w-3 h-3 inline mx-0.5" /> to remove
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
                 {activeTodayFoodLogs.map((entry) => {
                   const isRemoving = removingFoodId === entry.id;
                   const suppBadges = formatSupplementBadges(entry);
                   return (
                     <div
                       key={entry.id}
-                      className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs sm:text-sm shadow-2xs"
+                      className="w-full sm:w-auto flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs sm:text-sm shadow-2xs min-w-0"
                     >
-                      <span className="font-bold text-slate-800 truncate max-w-[200px] sm:max-w-[260px]">
-                        {entry.name}
-                      </span>
-                      <span className="text-slate-500 font-semibold whitespace-nowrap">
-                        {suppBadges.length > 0 && entry.calories === 0
-                          ? `${suppBadges.join(' · ')} · 0 kcal`
-                          : `${entry.calories} kcal · ${entry.proteinG}g P`}
-                      </span>
-                      {isViewingToday && (
+                      <div className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-2">
+                        <p className="font-bold text-slate-800 truncate sm:max-w-[240px]">
+                          {entry.name}
+                        </p>
+                        <p className="text-[11px] sm:text-xs text-slate-500 font-semibold whitespace-nowrap">
+                          {suppBadges.length > 0 && entry.calories === 0
+                            ? `${suppBadges.join(' · ')} · 0 kcal`
+                            : `${entry.calories} kcal · ${entry.proteinG}g P`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isViewingToday && (
+                          <button
+                            type="button"
+                            disabled={isRemoving}
+                            onClick={() => handleMoveFoodToLastNight(entry)}
+                            title={`Move "${entry.name}" to Last Night (${prevDateStr} 8:30 PM)`}
+                            className="px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] uppercase tracking-wider transition-colors whitespace-nowrap"
+                          >
+                            🌙 <span className="hidden sm:inline">Last Night</span><span className="sm:hidden">Prev</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={isRemoving}
-                          onClick={() => handleMoveFoodToLastNight(entry)}
-                          title={`Move "${entry.name}" to Last Night (${prevDateStr} 8:30 PM)`}
-                          className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] uppercase tracking-wider transition-colors"
+                          onClick={() => handleRemoveFoodEntry(entry)}
+                          title={`Remove ${entry.name}`}
+                          className="p-1.5 rounded-md hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
                         >
-                          🌙 Last Night
+                          {isRemoving ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isRemoving}
-                        onClick={() => handleRemoveFoodEntry(entry)}
-                        title={`Remove ${entry.name}`}
-                        className="ml-0.5 p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                      >
-                        {isRemoving ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      </div>
                     </div>
                   );
                 })}

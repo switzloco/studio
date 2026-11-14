@@ -42,7 +42,7 @@ export function LocalAiTelemetryBar() {
   const pct = nanoDownloadPct ?? 0;
 
   return (
-    <div className="w-full bg-slate-950 border-b border-emerald-500/30 px-2.5 md:px-6 py-1 md:py-1.5 font-mono text-[9.5px] md:text-[10px] text-emerald-400 select-none shrink-0">
+    <div className="hidden sm:block w-full bg-slate-950 border-b border-emerald-500/30 px-2.5 md:px-6 py-1 md:py-1.5 font-mono text-[9.5px] md:text-[10px] text-emerald-400 select-none shrink-0">
       <div className="flex items-center justify-between gap-1.5 whitespace-nowrap overflow-x-auto no-scrollbar">
         {/* Left: Local AI Engine Status + 1-Click Warmup */}
         <div className="flex items-center gap-1.5 shrink-0">

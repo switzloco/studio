@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, Loader2, User as UserIcon, Info, RefreshCw, Settings, Sparkles } from 'lucide-react';
+import { Briefcase, ShieldCheck, MessageSquare, Target, History, LogOut, Cloud, Loader2, User as UserIcon, Info, RefreshCw, Settings, Sparkles, Lock, Unlock, TrendingUp, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -39,6 +39,7 @@ import { redeemFounderCodeAction } from '@/app/actions/entitlements';
 import { PaywallModal } from '@/components/paywall-modal';
 import { LocalAiTelemetryBar } from '@/components/local-ai-telemetry-bar';
 import { QuarterlyEarningsModal } from '@/components/quarterly-earnings-modal';
+import { useHybridAi } from '@/components/hybrid-ai-provider';
 import { syncFitbitData, getFitbitLastSyncedAt, backfillFitbitHistory, refreshStalePastSnapshots } from '@/app/actions/fitbit';
 import { backfillScoreHistory } from '@/app/actions/score-history';
 import { syncWithingsData } from '@/app/actions/withings';
@@ -78,6 +79,7 @@ export default function Home() {
   const auth = useAuth();
   const db = useFirestore();
   const { toast } = useToast();
+  const { secPrivacyLock, setSecPrivacyLock, setEarningsModalOpen, isOnline } = useHybridAi();
   const [activeTab, setActiveTab] = useState('chat');
   const [isAuditing, setIsAuditing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -597,7 +599,40 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 md:gap-4 shrink-0">
+        <div className="flex items-center gap-1.5 md:gap-4 shrink-0">
+          {/* Compact native header pills on mobile (replaces separate dark telemetry bar) */}
+          <div className="flex sm:hidden items-center gap-1">
+            {!isOnline && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 border border-amber-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-amber-900">
+                <WifiOff className="w-3 h-3" />
+                Offline
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setSecPrivacyLock(!secPrivacyLock)}
+              aria-pressed={secPrivacyLock}
+              title="Toggle SEC Insider Privacy Lock (Strict On-Device Mode)"
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9.5px] font-black uppercase tracking-wider transition-colors ${
+                secPrivacyLock
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                  : 'border-border bg-muted/50 text-muted-foreground'
+              }`}
+            >
+              {secPrivacyLock ? <Lock className="w-3 h-3 text-emerald-600" /> : <Unlock className="w-3 h-3" />}
+              <span>{secPrivacyLock ? 'SEC' : 'SEC'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEarningsModalOpen(true)}
+              title="Run 30-Day Metabolic Earnings Call"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-50 px-2 py-1 text-[9.5px] font-black uppercase tracking-wider text-amber-900"
+            >
+              <TrendingUp className="w-3 h-3 text-amber-600" />
+              <span>30D</span>
+            </button>
+          </div>
+
           {!user?.isAnonymous && (
             <div className="hidden md:flex flex-col items-end mr-1">
               <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">
@@ -666,7 +701,7 @@ export default function Home() {
               </div>
             )}
             {activeTab === 'daily' && (
-              <div ref={dailyScrollRef} className="h-full w-full absolute inset-0 overflow-y-auto overscroll-y-contain">
+              <div ref={dailyScrollRef} className="h-full w-full absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-y-contain">
                 {/* Pull-to-refresh indicator */}
                 <div
                   className="flex items-center justify-center overflow-hidden transition-all duration-150"
@@ -688,17 +723,17 @@ export default function Home() {
               </div>
             )}
             {activeTab === 'history' && (
-              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+              <div className="h-full w-full absolute inset-0 overflow-y-auto overflow-x-hidden">
                 <HistoryView />
               </div>
             )}
             {activeTab === 'assets' && (
-              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+              <div className="h-full w-full absolute inset-0 overflow-y-auto overflow-x-hidden">
                 <PreferencesView />
               </div>
             )}
             {activeTab === 'about' && (
-              <div className="h-full w-full absolute inset-0 overflow-y-auto">
+              <div className="h-full w-full absolute inset-0 overflow-y-auto overflow-x-hidden">
                 <AboutView />
               </div>
             )}

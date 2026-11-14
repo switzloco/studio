@@ -37,7 +37,7 @@ export function AboutView() {
   };
 
   return (
-    <div className="flex flex-col gap-10 p-6 md:p-12 lg:p-16 pb-24 bg-background h-full overflow-y-auto">
+    <div className="flex flex-col gap-6 sm:gap-10 p-4 sm:p-6 md:p-12 lg:p-16 pb-24 bg-background w-full max-w-full overflow-x-hidden">
 
       {/* Header */}
       <div className="space-y-6">

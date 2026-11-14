@@ -718,7 +718,7 @@ export function HistoryView() {
   }
 
   return (
-    <div className="p-4 sm:p-10 space-y-6 sm:space-y-10 pb-24 h-full overflow-y-auto bg-background">
+    <div className="p-4 sm:p-10 space-y-6 sm:space-y-10 pb-24 bg-background w-full max-w-full overflow-x-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div className="space-y-1 sm:space-y-2">
           <h2 className="text-2xl sm:text-3xl font-black tracking-tighter uppercase italic text-foreground">Portfolio History</h2>
@@ -740,8 +740,8 @@ export function HistoryView() {
         </div>
       </div>
 
-      {/* Bloomberg / CRT Hybrid Ticker Tape & Multimodal Expense Receipt Auditor */}
-      <HybridTickerTerminal collapsibleOnMobile healthData={healthData} />
+      {/* Desktop Bloomberg / CRT Hybrid Ticker Tape & Multimodal Expense Receipt Auditor */}
+      <HybridTickerTerminal className="hidden sm:block" healthData={healthData} />
 
       {/* Ledger Analyst — inline query agent */}
       <LedgerChat />
@@ -775,8 +775,8 @@ export function HistoryView() {
       {history.length > 0 && (
         <Card className="border-none shadow-md bg-white/80 backdrop-blur-sm ring-1 ring-primary/5">
           <CardContent className="p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
                 <h3 className="text-xs font-black uppercase tracking-[0.15em] text-foreground">
                   Daily VF Score & Sheet Notes Log
                 </h3>
@@ -784,7 +784,7 @@ export function HistoryView() {
                   Click any day to inspect full math, engine vintage, or edit its spreadsheet note
                 </p>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setLogScope('level')}
@@ -812,7 +812,7 @@ export function HistoryView() {
                 {history.filter((h) => h.detail !== 'Account Created').length} days
               </span>
             </div>
-            <div className="max-h-72 overflow-y-auto border rounded-xl">
+            <div className="max-h-72 overflow-auto border rounded-xl">
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-slate-100 border-b text-[9px] font-black uppercase text-slate-600">
                   <tr>
@@ -1091,21 +1091,6 @@ export function HistoryView() {
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {entry.date === todayIso && (
-                              <button
-                                type="button"
-                                disabled={savingTiming}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleApplyTimingUpdate(entry, yesterdayIso, '20:30', 'dinner', false);
-                                }}
-                                title={`Move "${entry.name}" to Last Night (${yesterdayIso} 8:30 PM)`}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-black uppercase tracking-wider transition-colors"
-                              >
-                                <Moon className="w-3 h-3" />
-                                Last Night
-                              </button>
-                            )}
                             <ChevronDown
                               className={`w-4 h-4 text-muted-foreground opacity-30 group-hover:opacity-100 transition-all shrink-0 ml-1 ${
                                 isExpanded ? 'rotate-180' : ''
@@ -1151,6 +1136,22 @@ export function HistoryView() {
                                   ))}
                                 </div>
                                 <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                                  {entry.date === todayIso && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={savingTiming}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleApplyTimingUpdate(entry, yesterdayIso, '20:30', 'dinner', false);
+                                      }}
+                                      className="h-7 px-2.5 text-[10px] font-bold uppercase text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                                    >
+                                      <Moon className="w-3 h-3 mr-1" />
+                                      Move to Last Night
+                                    </Button>
+                                  )}
                                   <Button
                                     type="button"
                                     variant="outline"
