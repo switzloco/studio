@@ -33,7 +33,6 @@ import {
   Sparkles,
   Trash2,
   Search,
-  Camera,
   X,
 } from "lucide-react";
 import { HealthData, UserPreferences, FitbitCredentials, OuraCredentials, FoodNickname, HistoryEntry, healthService } from '@/lib/health-service';
@@ -43,20 +42,10 @@ import type { SyncResult } from '@/lib/fitbit-sync';
 import { syncOuraData, disconnectOura, getOuraAuthUrl } from '@/app/actions/oura';
 import type { OuraSyncResult } from '@/lib/oura-sync';
 import { syncWithingsData, disconnectWithings, getWithingsAuthUrl } from '@/app/actions/withings';
-import { useFirebaseApp, useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useDoc, useMemoFirebase, useCollection } from '@/firebase';
 import { DashboardCharts, computeMaxGlycogenKcal, LIVER_MAX_KCAL } from './dashboard-charts';
 import { OutreachInlinePrompt } from './outreach-inline-prompt';
 import { useHybridAi } from './hybrid-ai-provider';
-import { ExecutionReceiptBadge, SecComplianceAlertPanel } from './execution-receipt-badge';
-import {
-  auditMealPhotoReceiptHybrid,
-  normalizeImageFileForHybrid,
-  parseTickerTapeHybrid,
-  SecPrivacyLockBlockedError,
-  type HybridExecutionReceipt,
-  type SecComplianceAlert,
-} from '@/lib/hybrid-ai';
-import type { ReconciledFoodDraft, ReconciledWorkoutDraft } from '@/lib/usda-local-reconciler';
 import { computeAlpertNumber, calculateDailyVFScore, computeFastingHoursFromFoodLogs } from '@/lib/vf-scoring';
 import { computeAlpertPace, computeEatRunway } from '@/lib/alpert-pace';
 import {
@@ -128,18 +117,10 @@ const WithingsLogo = ({ className }: { className?: string }) => (
 );
 
 export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
-  const firebaseApp = useFirebaseApp();
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
-  const {
-    setEarningsModalOpen,
-    secPrivacyLock,
-    setSecPrivacyLock,
-    warmNano,
-    recordReceipt,
-    isOnline,
-  } = useHybridAi();
+  const { setEarningsModalOpen } = useHybridAi();
 
   const prefsRef = useMemoFirebase(
     () => user ? doc(db, 'users', user.uid, 'preferences', 'settings') : null,
@@ -197,19 +178,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const [nicknameQuery, setNicknameQuery] = React.useState('');
   const [previewNickKey, setPreviewNickKey] = React.useState<string | null>(null);
   const [removingFoodId, setRemovingFoodId] = React.useState<string | null>(null);
-
-  // Unified Hybrid AI Parse inside Quick Log
-  const quickPhotoInputRef = React.useRef<HTMLInputElement>(null);
-  const [isAiParsingQuick, setIsAiParsingQuick] = React.useState(false);
-  const [isCommittingAiQuick, setIsCommittingAiQuick] = React.useState(false);
-  const [aiQuickDraft, setAiQuickDraft] = React.useState<{
-    foods: ReconciledFoodDraft[];
-    workouts: ReconciledWorkoutDraft[];
-    note: string;
-    receipt: HybridExecutionReceipt;
-  } | null>(null);
-  const [aiQuickComplianceAlert, setAiQuickComplianceAlert] = React.useState<SecComplianceAlert | null>(null);
-  const [aiQuickError, setAiQuickError] = React.useState<string | null>(null);
 
   // Zero-AI Score Lock state
   const [scoreLockOpen, setScoreLockOpen] = React.useState(false);
@@ -893,155 +861,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       toast({ variant: 'destructive', title: 'Log Failed', description: 'Could not write to food log.' });
     } finally {
       setIsLoggingQuick(false);
-    }
-  };
-
-  const handleQuickAiParseText = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const raw = nicknameQuery.trim();
-    if (!raw || isAiParsingQuick) return;
-    setIsAiParsingQuick(true);
-    setAiQuickError(null);
-    setAiQuickComplianceAlert(null);
-    try {
-      const parsed = await parseTickerTapeHybrid({
-        firebaseApp,
-        shorthandInput: raw,
-        secPrivacyLock,
-        userWeightKg: data?.weightKg ?? prefs?.profile?.weightKg ?? 78,
-      });
-      recordReceipt(parsed.receipt);
-      setAiQuickDraft({
-        foods: parsed.foods,
-        workouts: parsed.workouts,
-        note: parsed.cfoAuditNote,
-        receipt: parsed.receipt,
-      });
-    } catch (err) {
-      if (err instanceof SecPrivacyLockBlockedError) {
-        setAiQuickComplianceAlert(err.alert);
-      } else {
-        setAiQuickError(err instanceof Error ? err.message : 'Unable to parse shorthand right now.');
-      }
-    } finally {
-      setIsAiParsingQuick(false);
-    }
-  };
-
-  const handleQuickAiPhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || isAiParsingQuick) return;
-    setIsAiParsingQuick(true);
-    setAiQuickError(null);
-    setAiQuickComplianceAlert(null);
-    try {
-      const normalized = await normalizeImageFileForHybrid(file);
-      const audited = await auditMealPhotoReceiptHybrid({
-        firebaseApp,
-        image: normalized,
-        note: nicknameQuery.trim() || undefined,
-        secPrivacyLock,
-      });
-      recordReceipt(audited.receipt);
-      setAiQuickDraft({
-        foods: audited.foods,
-        workouts: [],
-        note: `${audited.receiptTitle} — ${audited.cfoCommentary}`,
-        receipt: audited.receipt,
-      });
-    } catch (err) {
-      if (err instanceof SecPrivacyLockBlockedError) {
-        setAiQuickComplianceAlert(err.alert);
-      } else {
-        setAiQuickError(err instanceof Error ? err.message : 'Unable to audit meal photo right now.');
-      }
-    } finally {
-      setIsAiParsingQuick(false);
-    }
-  };
-
-  const handleCommitAiQuickDraft = async () => {
-    if (!user || !aiQuickDraft || isCommittingAiQuick) return;
-    setIsCommittingAiQuick(true);
-    try {
-      const now = new Date();
-      const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const mealSlot = inferMealFromTime(nowTime);
-
-      for (const f of aiQuickDraft.foods) {
-        await healthService.logFood(db, user.uid, {
-          name: f.name,
-          portionG: f.portionG,
-          calories: f.calories,
-          proteinG: f.proteinG,
-          carbsG: f.carbsG,
-          fatG: f.fatG,
-          fiberG: f.fiberG,
-          plantMassG: f.plantMassG,
-          glycemicIndex: f.glycemicIndex,
-          omega3Mg: f.omega3Mg,
-          caffeineMg: f.caffeineMg,
-          creatineG: f.creatineG,
-          betaAlanineG: f.betaAlanineG,
-          hasElectrolytes: f.hasElectrolytes,
-          alcoholDrinks: f.alcoholDrinks,
-          hasSeedOils: f.hasSeedOils,
-          meal: mealSlot,
-          source: f.source,
-          consumedAt: nowTime,
-          date: selectedDateStr,
-          inferenceSource: aiQuickDraft.receipt.inferenceSource,
-          inferenceLatencyMs: aiQuickDraft.receipt.latencyMs,
-          cfoClass: f.cfoClass,
-        });
-      }
-
-      for (const w of aiQuickDraft.workouts) {
-        await healthService.logExercise(db, user.uid, {
-          name: w.name,
-          category: w.category,
-          durationMin: w.durationMin,
-          sets: w.sets,
-          reps: w.reps,
-          weightKg: w.weightKg,
-          estimatedCaloriesBurned: w.estimatedCaloriesBurned,
-          adjustedCalories: w.adjustedCalories,
-          activityTier: w.activityTier,
-          pointsDelta: w.pointsDelta,
-          performedAt: nowTime,
-          date: selectedDateStr,
-          inferenceSource: aiQuickDraft.receipt.inferenceSource,
-          inferenceLatencyMs: aiQuickDraft.receipt.latencyMs,
-          cfoClass: w.cfoClass,
-        });
-      }
-
-      if (isViewingToday && aiQuickDraft.foods.length > 0) {
-        const addedCalories = aiQuickDraft.foods.reduce((s, f) => s + f.calories, 0);
-        const addedProtein = aiQuickDraft.foods.reduce((s, f) => s + f.proteinG, 0);
-        const addedCarbs = aiQuickDraft.foods.reduce((s, f) => s + f.carbsG, 0);
-        const addedPlants = aiQuickDraft.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
-
-        await healthService.updateHealthData(db, user.uid, {
-          dailyCaloriesIn: dailyCaloriesIn + addedCalories,
-          dailyProteinG: dailyProteinG + addedProtein,
-          dailyCarbsG: dailyCarbsG + addedCarbs,
-          dailyPlantG: (data?.dailyPlantG || 0) + addedPlants,
-          lastActiveDate: selectedDateStr,
-        });
-      }
-
-      toast({
-        title: isOnline ? 'Logged to Ledger' : 'Saved to Offline Ledger',
-        description: `${aiQuickDraft.foods.length} food & ${aiQuickDraft.workouts.length} workout item(s) added to ${selectedDateStr}.`,
-      });
-      setAiQuickDraft(null);
-      setNicknameQuery('');
-    } catch (err) {
-      setAiQuickError(err instanceof Error ? err.message : 'Could not commit items to Ledger.');
-    } finally {
-      setIsCommittingAiQuick(false);
     }
   };
 
@@ -1763,16 +1582,16 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
         </Card>
       </div>
 
-      {/* ── ROW 2: Unified Quick Log (Zero-AI Saved Tickers + Hybrid AI Shorthand/Photo + Today's Logged Items) ── */}
+      {/* ── ROW 2: Zero-AI Saved Tickers & Today's Logged Items ── */}
       <Card className="border-none shadow-sm bg-white/80 ring-1 ring-black/5 overflow-hidden">
         <CardContent className="p-3.5 sm:p-6 space-y-3.5 sm:space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-black uppercase tracking-widest shrink-0">
-                Quick Log
+                Zero-AI Quick Log
               </span>
               <span className="hidden sm:inline text-xs sm:text-sm font-bold text-muted-foreground truncate">
-                Saved Tickers, Hybrid AI shorthand, or meal photo
+                Recent saved Tickers (tap card to inspect ingredients · tap + Log to add)
               </span>
             </div>
             <Button
@@ -1787,23 +1606,15 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
             </Button>
           </div>
 
-          {/* Unified Smart Filter + Hybrid AI Shorthand & Photo Bar */}
-          <form onSubmit={handleQuickAiParseText} className="flex items-center gap-1.5 w-full">
-            <input
-              ref={quickPhotoInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handleQuickAiPhotoSelect}
-              className="hidden"
-              data-testid="expense-receipt-file-input"
-            />
-            <div className="relative flex-1 min-w-0">
+          {/* Pure Zero-AI Saved Ticker Filter */}
+          {sortedNicknames.length > 0 && (
+            <div className="relative w-full">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={nicknameQuery}
                 onChange={(e) => setNicknameQuery(e.target.value)}
-                data-testid="ticker-tape-input"
-                placeholder="Filter tickers or type '3 eggs, oats, 35m squats'…"
+                data-testid="zero-ai-ticker-filter"
+                placeholder="Filter saved tickers…"
                 className="h-9 pl-8 pr-7 w-full text-base sm:text-sm"
               />
               {nicknameQuery && (
@@ -1816,110 +1627,6 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={isAiParsingQuick}
-              onClick={() => quickPhotoInputRef.current?.click()}
-              data-testid="expense-receipt-upload-btn"
-              className="h-9 px-2.5 shrink-0"
-              title="Snap or upload a meal / nutrition label photo"
-            >
-              <Camera className="w-4 h-4 text-muted-foreground" />
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={isAiParsingQuick || !nicknameQuery.trim()}
-              data-testid="ticker-parse-submit-btn"
-              className="h-9 px-3 text-xs font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
-            >
-              {isAiParsingQuick ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <>
-                  <Zap className="w-3.5 h-3.5 mr-1" />
-                  <span>AI Log</span>
-                </>
-              )}
-            </Button>
-          </form>
-
-          {aiQuickComplianceAlert && (
-            <SecComplianceAlertPanel
-              alert={aiQuickComplianceAlert}
-              onWarmNano={warmNano}
-              onDisableLock={() => {
-                setSecPrivacyLock(false);
-                setAiQuickComplianceAlert(null);
-              }}
-            />
-          )}
-
-          {aiQuickError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 flex items-center justify-between gap-2">
-              <span className="min-w-0 break-words">{aiQuickError}</span>
-              <button type="button" onClick={() => setAiQuickError(null)} className="shrink-0">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {aiQuickDraft && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-1.5">
-                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-900">
-                  AI Reconciled Draft ({aiQuickDraft.foods.length + aiQuickDraft.workouts.length})
-                </span>
-                <ExecutionReceiptBadge
-                  compact
-                  inferenceSource={aiQuickDraft.receipt.inferenceSource}
-                  latencyMs={aiQuickDraft.receipt.latencyMs}
-                />
-              </div>
-              {aiQuickDraft.note && (
-                <p className="text-xs text-slate-700 leading-snug">{aiQuickDraft.note}</p>
-              )}
-              <div className="space-y-1.5">
-                {aiQuickDraft.foods.map((f, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-emerald-200/80 px-2.5 py-1.5 text-xs">
-                    <span className="font-bold text-slate-800 truncate min-w-0">{f.name}</span>
-                    <span className="text-slate-600 font-semibold shrink-0">
-                      {f.calories} kcal · <strong className="text-emerald-700">{f.proteinG}g P</strong>
-                    </span>
-                  </div>
-                ))}
-                {aiQuickDraft.workouts.map((w, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-cyan-200/80 px-2.5 py-1.5 text-xs">
-                    <span className="font-bold text-slate-800 truncate min-w-0">{w.name} ({w.durationMin}m)</span>
-                    <span className="text-cyan-800 font-bold shrink-0">-{w.adjustedCalories} kcal</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setAiQuickDraft(null)}
-                  className="h-8 px-2.5 text-xs font-bold uppercase text-muted-foreground"
-                >
-                  Discard
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isCommittingAiQuick}
-                  onClick={handleCommitAiQuickDraft}
-                  data-testid="commit-to-audit-ledger-btn"
-                  className="h-8 px-3.5 text-xs font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  {isCommittingAiQuick ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
-                  + Log All to {isViewingToday ? 'Today' : selectedDateStr}
-                </Button>
-              </div>
             </div>
           )}
 

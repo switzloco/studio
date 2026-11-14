@@ -49,7 +49,6 @@ import { ChatHistoryLog } from './chat-history-log';
 import { ProteinChart } from './protein-chart';
 import { ShareMealButton } from './share-meal-button';
 import { MySharesSection } from './my-shares-section';
-import { HybridTickerTerminal } from './hybrid-ticker-terminal';
 import { ExecutionReceiptBadge } from './execution-receipt-badge';
 import { useHybridAi } from './hybrid-ai-provider';
 import { CFO_CLASS_META, type CfoLedgerClass } from '@/lib/usda-local-reconciler';
@@ -739,9 +738,6 @@ export function HistoryView() {
           </div>
         </div>
       </div>
-
-      {/* Desktop Bloomberg / CRT Hybrid Ticker Tape & Multimodal Expense Receipt Auditor */}
-      <HybridTickerTerminal className="hidden sm:block" healthData={healthData} />
 
       {/* Ledger Analyst — inline query agent */}
       <LedgerChat />

@@ -6,11 +6,11 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles, Check } from "lucide-react";
+import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck, Sparkles, Check, RotateCcw, Brain } from "lucide-react";
 import { useTranscription } from "@/hooks/use-transcription";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebaseApp, useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { inferMealFromTime } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
@@ -42,11 +42,19 @@ import {
   extractTimestampFromMediaItem,
 } from '@/lib/google-photos-picker';
 
-interface HybridDraftPayload {
+type ComposerMode = 'entry' | 'coach';
+
+/** Soft character ceiling for Low-Data Entry Mode (`firebase/ai`). Typing past 200 chars auto-flips to Full Coach. */
+const ENTRY_CHAR_THRESHOLD = 200;
+
+interface HybridLoggedReceipt {
   foods: ReconciledFoodDraft[];
   workouts: ReconciledWorkoutDraft[];
-  cfoNote: string;
-  committed?: boolean;
+  foodDocIds: string[];
+  workoutDocIds: string[];
+  dateIso: string;
+  undone?: boolean;
+  rawPrompt?: string;
 }
 
 interface Message {
@@ -57,7 +65,8 @@ interface Message {
   inferenceSource?: NormalizedInferenceSource;
   inferenceLatencyMs?: number;
   secAlert?: SecComplianceAlert;
-  hybridDraft?: HybridDraftPayload;
+  hybridReceipt?: HybridLoggedReceipt;
+  suggestCoachPrompt?: string;
 }
 
 /**
@@ -172,8 +181,9 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [initDone, setInitDone] = useState(false);
   const [coachingRequested, setCoachingRequested] = useState(false);
-  const [instantParseMode, setInstantParseMode] = useState(false);
-  const [committingMsgIdx, setCommittingMsgIdx] = useState<number | null>(null);
+  const [composerMode, setComposerMode] = useState<ComposerMode>('entry');
+  const [autoFlippedToCoach, setAutoFlippedToCoach] = useState(false);
+  const [undoingMsgIdx, setUndoingMsgIdx] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
@@ -188,8 +198,28 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const applyInputUpdate = useCallback(
+    (updater: string | ((prev: string) => string)) => {
+      setInput((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        if (next.length > ENTRY_CHAR_THRESHOLD && isOnline && !secPrivacyLock) {
+          setComposerMode((cur) => {
+            if (cur === 'entry') {
+              setAutoFlippedToCoach(true);
+              return 'coach';
+            }
+            return cur;
+          });
+        }
+        return next;
+      });
+    },
+    [isOnline, secPrivacyLock]
+  );
+
   const { status: micStatus, toggle: toggleMic, error: micError } = useTranscription(
-    useCallback((text: string) => setInput(prev => prev ? `${prev} ${text}` : text), []),
+    useCallback((text: string) => applyInputUpdate((prev) => (prev ? `${prev} ${text}` : text)), [applyInputUpdate]),
     useCallback(() => user!.getIdToken(), [user]),
   );
 
@@ -439,16 +469,56 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
   const EXPLAIN_PROMPT =
     "Show me your reasoning — walk me through exactly how you got that answer, the inputs and calculations behind any numbers, and flag anything that looks off.";
 
-  const handleSend = async (overrideText?: string) => {
+  const persistLocalChatTurn = async (
+    uid: string,
+    dateIso: string,
+    userText: string,
+    hasImages: boolean,
+    modelText: string
+  ) => {
+    try {
+      const ts = Date.now();
+      const entries: ChatMessage[] = [];
+      if (userText) {
+        entries.push({
+          role: 'user',
+          content: userText,
+          ...(hasImages ? { hasImages: true } : {}),
+          ts,
+        });
+      }
+      if (modelText.trim()) {
+        entries.push({ role: 'model', content: modelText, ts: ts + 1 });
+      }
+      if (entries.length === 0) return;
+      await setDoc(
+        doc(db, 'users', uid, 'chat_sessions', dateIso),
+        {
+          date: dateIso,
+          messages: arrayUnion(...entries),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch {
+      // Non-fatal transcript persistence
+    }
+  };
+
+  const handleSend = async (overrideText?: string, overrideMode?: ComposerMode) => {
     const hasPhotos = selectedPhotos.length > 0;
     const typedText = (overrideText ?? input).trim();
     if (!user || (!typedText && !hasPhotos) || isLoading) return;
     setInitDone(true); // prevent init effect from firing after a manual send
 
+    const effectiveMode: ComposerMode = overrideMode ?? composerMode;
+    setAutoFlippedToCoach(false);
+
     const userMessage = typedText;
     const photos = selectedPhotos;
     const now = new Date();
     const localDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+    const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     if (overrideText === undefined) setInput('');
     setSelectedPhotos([]);
@@ -473,31 +543,31 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
     const fullMessage = exifContext + userMessage;
 
-    // Unified Hybrid Instant Parse Path (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE` structured output in main Coach box!)
-    if (instantParseMode) {
+    // 1. Default Low-Data Entry Mode (`firebase/ai` `PREFER_ON_DEVICE` / `ONLY_ON_DEVICE` -> 1-step auto-log + Undo)
+    if (effectiveMode === 'entry') {
       try {
+        let allFoods: ReconciledFoodDraft[] = [];
+        let allWorkouts: ReconciledWorkoutDraft[] = [];
+        let summaryText = '';
+        let latestSource: NormalizedInferenceSource = 'ON_DEVICE';
+        let totalLatency = 0;
+
         if (photos.length > 0) {
-          const receiptRes = await auditMealPhotoReceiptHybrid({
-            firebaseApp,
-            image: dataUriToInlineImage(photos[0].dataUri),
-            note: userMessage || undefined,
-            secPrivacyLock,
-          });
-          recordReceipt(receiptRes.receipt);
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: 'model',
-              content: `**${receiptRes.receiptTitle}** · *${receiptRes.auditVerdict.replace(/_/g, ' ')}*\n\n${receiptRes.cfoCommentary}`,
-              inferenceSource: receiptRes.receipt.inferenceSource,
-              inferenceLatencyMs: receiptRes.receipt.latencyMs,
-              hybridDraft: {
-                foods: receiptRes.foods,
-                workouts: [],
-                cfoNote: receiptRes.cfoCommentary,
-              },
-            },
-          ]);
+          const notes: string[] = [];
+          for (const photo of photos) {
+            const receiptRes = await auditMealPhotoReceiptHybrid({
+              firebaseApp,
+              image: dataUriToInlineImage(photo.dataUri),
+              note: userMessage || undefined,
+              secPrivacyLock,
+            });
+            recordReceipt(receiptRes.receipt);
+            latestSource = receiptRes.receipt.inferenceSource;
+            totalLatency += receiptRes.receipt.latencyMs;
+            allFoods = [...allFoods, ...receiptRes.foods];
+            notes.push(`**${receiptRes.receiptTitle}** — ${receiptRes.cfoCommentary}`);
+          }
+          summaryText = notes.join('\n\n');
         } else {
           const parsedRes = await parseTickerTapeHybrid({
             firebaseApp,
@@ -506,29 +576,148 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             userWeightKg: healthData?.weightKg ?? prefs?.profile?.weightKg ?? 78,
           });
           recordReceipt(parsedRes.receipt);
+          latestSource = parsedRes.receipt.inferenceSource;
+          totalLatency = parsedRes.receipt.latencyMs;
+          allFoods = parsedRes.foods;
+          allWorkouts = parsedRes.workouts;
+          summaryText = parsedRes.cfoAuditNote;
+        }
+
+        if (allFoods.length === 0 && allWorkouts.length === 0) {
+          const fallbackNote =
+            summaryText ||
+            'No food or workout items detected in Entry Mode.';
           setMessages((prev) => [
             ...prev,
             {
               role: 'model',
-              content: parsedRes.cfoAuditNote,
-              inferenceSource: parsedRes.receipt.inferenceSource,
-              inferenceLatencyMs: parsedRes.receipt.latencyMs,
-              hybridDraft: {
-                foods: parsedRes.foods,
-                workouts: parsedRes.workouts,
-                cfoNote: parsedRes.cfoAuditNote,
-              },
+              content: fallbackNote,
+              inferenceSource: latestSource,
+              inferenceLatencyMs: totalLatency,
+              suggestCoachPrompt: userMessage || undefined,
             },
           ]);
+          return;
         }
+
+        // Auto-log immediately to Firestore Ledger (1-step UX) and capture IDs for 1-tap Undo!
+        const entryDate = photos[0]?.exifDate || localDate;
+        const entryTime = photos[0]?.exifTime || nowTime;
+        const mealSlot = inferMealFromTime(entryTime);
+
+        const foodDocIds: string[] = [];
+        for (const f of allFoods) {
+          const docId = await healthService.logFood(db, user.uid, {
+            name: f.name,
+            portionG: f.portionG,
+            calories: f.calories,
+            proteinG: f.proteinG,
+            carbsG: f.carbsG,
+            fatG: f.fatG,
+            fiberG: f.fiberG,
+            plantMassG: f.plantMassG,
+            glycemicIndex: f.glycemicIndex,
+            omega3Mg: f.omega3Mg,
+            caffeineMg: f.caffeineMg,
+            creatineG: f.creatineG,
+            betaAlanineG: f.betaAlanineG,
+            hasElectrolytes: f.hasElectrolytes,
+            alcoholDrinks: f.alcoholDrinks,
+            hasSeedOils: f.hasSeedOils,
+            meal: mealSlot,
+            source: f.source,
+            consumedAt: entryTime,
+            date: entryDate,
+            inferenceSource: latestSource,
+            inferenceLatencyMs: totalLatency,
+            cfoClass: f.cfoClass,
+          });
+          foodDocIds.push(docId);
+        }
+
+        const workoutDocIds: string[] = [];
+        for (const w of allWorkouts) {
+          const docId = await healthService.logExercise(db, user.uid, {
+            name: w.name,
+            category: w.category,
+            durationMin: w.durationMin,
+            sets: w.sets,
+            reps: w.reps,
+            weightKg: w.weightKg,
+            estimatedCaloriesBurned: w.estimatedCaloriesBurned,
+            adjustedCalories: w.adjustedCalories,
+            activityTier: w.activityTier,
+            pointsDelta: w.pointsDelta,
+            performedAt: entryTime,
+            date: entryDate,
+            inferenceSource: latestSource,
+            inferenceLatencyMs: totalLatency,
+            cfoClass: w.cfoClass,
+          });
+          workoutDocIds.push(docId);
+        }
+
+        if (entryDate === localDate && allFoods.length > 0) {
+          const isSameDay = healthData?.lastActiveDate === localDate;
+          const baseCal = isSameDay ? (healthData?.dailyCaloriesIn || 0) : 0;
+          const baseProt = isSameDay ? (healthData?.dailyProteinG || 0) : 0;
+          const baseCarbs = isSameDay ? (healthData?.dailyCarbsG || 0) : 0;
+          const basePlants = isSameDay ? (healthData?.dailyPlantG || 0) : 0;
+
+          const addedCalories = allFoods.reduce((s, f) => s + f.calories, 0);
+          const addedProtein = allFoods.reduce((s, f) => s + f.proteinG, 0);
+          const addedCarbs = allFoods.reduce((s, f) => s + f.carbsG, 0);
+          const addedPlants = allFoods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+
+          await healthService.updateHealthData(db, user.uid, {
+            dailyCaloriesIn: baseCal + addedCalories,
+            dailyProteinG: baseProt + addedProtein,
+            dailyCarbsG: baseCarbs + addedCarbs,
+            dailyPlantG: basePlants + addedPlants,
+            lastActiveDate: localDate,
+          });
+        }
+
+        const totalKcal = allFoods.reduce((s, f) => s + f.calories, 0);
+        const totalProt = allFoods.reduce((s, f) => s + f.proteinG, 0);
+        const transcriptSummary = `${summaryText}\n\n*(Logged ${allFoods.length} food & ${allWorkouts.length} workout item(s): +${totalKcal} kcal, +${totalProt}g P)*`;
+        void persistLocalChatTurn(
+          user.uid,
+          localDate,
+          userMessage || 'Photo logged',
+          photos.length > 0,
+          transcriptSummary
+        );
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'model',
+            content: summaryText,
+            inferenceSource: latestSource,
+            inferenceLatencyMs: totalLatency,
+            hybridReceipt: {
+              foods: allFoods,
+              workouts: allWorkouts,
+              foodDocIds,
+              workoutDocIds,
+              dateIso: entryDate,
+              rawPrompt: userMessage || undefined,
+            },
+          },
+        ]);
       } catch (err) {
         if (err instanceof SecPrivacyLockBlockedError) {
           setMessages((prev) => [...prev, { role: 'model', content: '', secAlert: err.alert }]);
         } else {
-          const msg = err instanceof Error ? err.message : 'Instant Hybrid parse failed.';
+          const msg = err instanceof Error ? err.message : 'Fast Entry parse failed.';
           setMessages((prev) => [
             ...prev,
-            { role: 'model', content: `**Instant Parse Notice**\n\n${msg}` },
+            {
+              role: 'model',
+              content: `**Fast Entry Notice**\n\n${msg}`,
+              suggestCoachPrompt: userMessage || undefined,
+            },
           ]);
         }
       } finally {
@@ -668,107 +857,63 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     }
   };
 
-  const handleCommitHybridDraft = async (msgIndex: number, draft: HybridDraftPayload) => {
-    if (!user || draft.committed || committingMsgIdx !== null) return;
-    setCommittingMsgIdx(msgIndex);
+  const handleUndoHybridReceipt = async (msgIndex: number, receipt: HybridLoggedReceipt) => {
+    if (!user || receipt.undone || undoingMsgIdx !== null) return;
+    setUndoingMsgIdx(msgIndex);
     try {
       const now = new Date();
       const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const mealSlot = inferMealFromTime(nowTime);
-      const msg = messages[msgIndex];
 
-      for (const f of draft.foods) {
-        await healthService.logFood(db, user.uid, {
-          name: f.name,
-          portionG: f.portionG,
-          calories: f.calories,
-          proteinG: f.proteinG,
-          carbsG: f.carbsG,
-          fatG: f.fatG,
-          fiberG: f.fiberG,
-          plantMassG: f.plantMassG,
-          glycemicIndex: f.glycemicIndex,
-          omega3Mg: f.omega3Mg,
-          caffeineMg: f.caffeineMg,
-          creatineG: f.creatineG,
-          betaAlanineG: f.betaAlanineG,
-          hasElectrolytes: f.hasElectrolytes,
-          alcoholDrinks: f.alcoholDrinks,
-          hasSeedOils: f.hasSeedOils,
-          meal: mealSlot,
-          source: f.source,
-          consumedAt: nowTime,
-          date: todayIso,
-          inferenceSource: msg?.inferenceSource,
-          inferenceLatencyMs: msg?.inferenceLatencyMs,
-          cfoClass: f.cfoClass,
-        });
+      for (const id of receipt.foodDocIds) {
+        await healthService.setFoodEntryIgnored(db, user.uid, id, true);
+      }
+      for (const id of receipt.workoutDocIds) {
+        await healthService.setExerciseEntryIgnored(db, user.uid, id, true);
       }
 
-      for (const w of draft.workouts) {
-        await healthService.logExercise(db, user.uid, {
-          name: w.name,
-          category: w.category,
-          durationMin: w.durationMin,
-          sets: w.sets,
-          reps: w.reps,
-          weightKg: w.weightKg,
-          estimatedCaloriesBurned: w.estimatedCaloriesBurned,
-          adjustedCalories: w.adjustedCalories,
-          activityTier: w.activityTier,
-          pointsDelta: w.pointsDelta,
-          performedAt: nowTime,
-          date: todayIso,
-          inferenceSource: msg?.inferenceSource,
-          inferenceLatencyMs: msg?.inferenceLatencyMs,
-          cfoClass: w.cfoClass,
-        });
-      }
-
-      if (draft.foods.length > 0) {
-        const addedCalories = draft.foods.reduce((s, f) => s + f.calories, 0);
-        const addedProtein = draft.foods.reduce((s, f) => s + f.proteinG, 0);
-        const addedCarbs = draft.foods.reduce((s, f) => s + f.carbsG, 0);
-        const addedPlants = draft.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+      if (receipt.dateIso === todayIso && receipt.foods.length > 0 && healthData?.lastActiveDate === todayIso) {
+        const removedCalories = receipt.foods.reduce((s, f) => s + f.calories, 0);
+        const removedProtein = receipt.foods.reduce((s, f) => s + f.proteinG, 0);
+        const removedCarbs = receipt.foods.reduce((s, f) => s + f.carbsG, 0);
+        const removedPlants = receipt.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
 
         await healthService.updateHealthData(db, user.uid, {
-          dailyCaloriesIn: (healthData?.dailyCaloriesIn || 0) + addedCalories,
-          dailyProteinG: (healthData?.dailyProteinG || 0) + addedProtein,
-          dailyCarbsG: (healthData?.dailyCarbsG || 0) + addedCarbs,
-          dailyPlantG: (healthData?.dailyPlantG || 0) + addedPlants,
-          lastActiveDate: todayIso,
+          dailyCaloriesIn: Math.max(0, (healthData.dailyCaloriesIn || 0) - removedCalories),
+          dailyProteinG: Math.max(0, (healthData.dailyProteinG || 0) - removedProtein),
+          dailyCarbsG: Math.max(0, (healthData.dailyCarbsG || 0) - removedCarbs),
+          dailyPlantG: Math.max(0, (healthData.dailyPlantG || 0) - removedPlants),
         });
       }
 
       setMessages((prev) =>
         prev.map((m, idx) =>
-          idx === msgIndex && m.hybridDraft
-            ? { ...m, hybridDraft: { ...m.hybridDraft, committed: true } }
+          idx === msgIndex && m.hybridReceipt
+            ? { ...m, hybridReceipt: { ...m.hybridReceipt, undone: true } }
             : m
         )
       );
       toast({
-        title: isOnline ? 'Logged to Ledger' : 'Saved to Offline Ledger',
-        description: `${draft.foods.length} food & ${draft.workouts.length} workout item(s) committed.`,
+        title: 'Undone from Ledger',
+        description: `Removed ${receipt.foods.length + receipt.workouts.length} logged item(s).`,
       });
     } catch (err) {
       toast({
         variant: 'destructive',
-        title: 'Commit Failed',
-        description: err instanceof Error ? err.message : 'Could not write to Ledger.',
+        title: 'Undo Failed',
+        description: err instanceof Error ? err.message : 'Could not undo Ledger entry.',
       });
     } finally {
-      setCommittingMsgIdx(null);
+      setUndoingMsgIdx(null);
     }
   };
 
   const hasTargets = healthData?.onboardingComplete || (healthData?.visceralFatPoints != null && healthData.visceralFatPoints > 0);
-  const placeholder = instantParseMode
-    ? 'Instant Log: "3 eggs, 1 cup oats, 35m squats" or snap plate…'
-    : hasTargets
-      ? "Log a meal, workout, or ask the CFO..."
-      : "Tell me about your goals, equipment, routine...";
+  const placeholder =
+    composerMode === 'entry'
+      ? 'Fast log: "3 eggs, oats, 35m squats"…'
+      : hasTargets
+        ? 'Ask the CFO about your pace, workouts, or plan…'
+        : 'Tell me about your goals, equipment, routine…';
 
   /** Google Photos colorful pinwheel icon. */
   const GooglePhotosIcon = ({ className }: { className?: string }) => (
@@ -780,25 +925,63 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     </svg>
   );
 
-  /** Transparent status banner above the input bar (Seth Godin open-book style). */
+  /** Dynamic status banner above the input bar reflecting Fast Entry (`firebase/ai`) vs. Full Coach (`/api/chat`). */
   const EntitlementBanner = (() => {
+    if (composerMode === 'entry') {
+      const charLen = input.length;
+      const nearThreshold = charLen >= 160;
+      return (
+        <div
+          data-testid="entry-mode-banner"
+          className="mb-1.5 sm:mb-2 flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-bold text-emerald-800"
+        >
+          <span className="flex items-center gap-1.5 truncate">
+            <Zap className="w-3 h-3 text-emerald-600 shrink-0" />
+            <span className="sm:hidden font-black uppercase tracking-wider">Fast Entry · Free &amp; Unlimited</span>
+            <span className="hidden sm:inline font-black uppercase tracking-wider">
+              Fast Entry · Free &amp; Unlimited (Local/Hybrid AI)
+            </span>
+          </span>
+          <span
+            className={`shrink-0 font-mono text-[9px] font-bold ${
+              nearThreshold ? 'text-amber-700' : 'text-emerald-700/80'
+            }`}
+          >
+            {charLen > 0 ? `${charLen}/${ENTRY_CHAR_THRESHOLD}` : `≤${ENTRY_CHAR_THRESHOLD} chars`}
+          </span>
+        </div>
+      );
+    }
+
     if (entitlement.tier === 'founder') {
       return (
-        <div className="hidden sm:flex mb-2 items-center justify-between px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-700">
-          <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            Founder Immunity · Unlimited AI CFO
+        <div
+          data-testid="coach-mode-banner"
+          className="mb-1.5 sm:mb-2 flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary"
+        >
+          <span className="flex items-center gap-1.5 truncate">
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              {autoFlippedToCoach ? 'Switched to Coach (>200 chars)' : 'Founder Immunity · Unlimited AI CFO'}
+            </span>
           </span>
-          <span className="text-[9px] font-mono opacity-75">Exempt</span>
+          <span className="text-[9px] font-mono opacity-75 shrink-0">Coach</span>
         </div>
       );
     }
     if (entitlement.tier === 'vip' || entitlement.tier === 'pro') {
       return (
-        <div className="hidden sm:flex mb-2 items-center justify-between px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary">
-          <span className="flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" />
-            {entitlement.badgeLabel} · Unlimited AI Audits
+        <div
+          data-testid="coach-mode-banner"
+          className="mb-1.5 sm:mb-2 flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 rounded-xl bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary"
+        >
+          <span className="flex items-center gap-1.5 truncate">
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              {autoFlippedToCoach
+                ? 'Switched to Coach (>200 chars)'
+                : `${entitlement.badgeLabel} · Unlimited Coach`}
+            </span>
           </span>
         </div>
       );
@@ -807,18 +990,24 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     const isLow = remaining <= 5;
     return (
       <div
+        data-testid="coach-mode-banner"
         className={`mb-1.5 sm:mb-2 flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-[10px] font-bold ${
           isLow
             ? 'bg-amber-500/10 border-amber-500/30 text-amber-900'
-            : 'bg-muted/40 border-border/50 text-muted-foreground'
+            : 'bg-primary/5 border-primary/20 text-foreground'
         }`}
       >
         <span className="truncate">
+          {autoFlippedToCoach ? (
+            <strong className="font-black uppercase tracking-wider text-primary mr-1.5">
+              &gt;200 chars → Coach ·
+            </strong>
+          ) : null}
           <strong className="font-black uppercase tracking-wider">
             {remaining}/{entitlement.freeLimit}
           </strong>{' '}
-          <span className="sm:hidden">free AI audits left</span>
-          <span className="hidden sm:inline">free AI audits left · Zero-AI Cockpit is free forever</span>
+          <span className="sm:hidden">free Coach audits left</span>
+          <span className="hidden sm:inline">free Coach audits left · Fast Entry is unlimited</span>
         </span>
         <button
           type="button"
@@ -922,21 +1111,50 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
           </Button>
         )}
 
-        <button
-          type="button"
-          onClick={() => setInstantParseMode((prev) => !prev)}
-          data-testid="coach-ticker-drawer-btn"
-          aria-pressed={instantParseMode}
-          className={`inline-flex items-center gap-1 rounded-full border px-2.5 sm:px-3 h-8 sm:h-9 text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${
-            instantParseMode
-              ? 'border-emerald-500 bg-emerald-600 text-white shadow-xs'
-              : 'border-border bg-secondary/70 text-muted-foreground hover:text-foreground'
-          }`}
-          title="Toggle Instant Hybrid Macro & Receipt Parser inside this box"
+        {/* Segmented [ ⚡ Entry | 🧠 Coach ] Mode Switch */}
+        <div
+          role="group"
+          aria-label="Input mode"
+          data-testid="coach-mode-switch"
+          className="inline-flex items-center rounded-full border border-border/80 bg-secondary/80 p-0.5 h-8 sm:h-9 shrink-0"
         >
-          <Zap className="w-3 h-3 shrink-0" />
-          <span>{instantParseMode ? 'Instant Log: ON' : 'Instant Log'}</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              setComposerMode('entry');
+              setAutoFlippedToCoach(false);
+            }}
+            data-testid="coach-ticker-drawer-btn"
+            aria-pressed={composerMode === 'entry'}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 sm:px-3 h-7 sm:h-8 text-[10px] font-black uppercase tracking-wider transition-all ${
+              composerMode === 'entry'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            title="Low-Data Fast Entry Mode (firebase/ai — Free & Unlimited)"
+          >
+            <Zap className="w-3 h-3 shrink-0" />
+            <span>Entry</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setComposerMode('coach');
+              setAutoFlippedToCoach(false);
+            }}
+            data-testid="coach-full-mode-btn"
+            aria-pressed={composerMode === 'coach'}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 sm:px-3 h-7 sm:h-8 text-[10px] font-black uppercase tracking-wider transition-all ${
+              composerMode === 'coach'
+                ? 'bg-primary text-primary-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            title="Full CFO Coach Mode (Cloud Genkit + Live Portfolio Tools)"
+          >
+            <Brain className="w-3 h-3 shrink-0" />
+            <span>Coach</span>
+          </button>
+        </div>
 
         <div className="flex-1" />
 
@@ -966,7 +1184,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
       <Textarea
         placeholder={placeholder}
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => applyInputUpdate(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1001,7 +1219,11 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
           </div>
           <Button
             className="h-14 px-10 rounded-2xl text-sm font-black uppercase tracking-widest shadow-xl"
-            onClick={() => setCoachingRequested(true)}
+            onClick={() => {
+              setComposerMode('coach');
+              setAutoFlippedToCoach(false);
+              setCoachingRequested(true);
+            }}
           >
             <Zap className="w-4 h-4 mr-2" />
             Get Coaching
@@ -1089,38 +1311,87 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
                   ) : (
                     m.content
                   )}
-                  {m.hybridDraft && (m.hybridDraft.foods.length > 0 || m.hybridDraft.workouts.length > 0) && (
+                  {m.hybridReceipt && (m.hybridReceipt.foods.length > 0 || m.hybridReceipt.workouts.length > 0) && (
                     <div className="mt-3 pt-2.5 border-t border-border/70 space-y-2">
                       <div className="space-y-1.5">
-                        {m.hybridDraft.foods.map((f, fIdx) => (
-                          <div key={fIdx} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-200/80 px-2.5 py-1.5 text-xs">
-                            <span className="font-bold text-slate-800 truncate">{f.name}</span>
+                        {m.hybridReceipt.foods.map((f, fIdx) => (
+                          <div
+                            key={fIdx}
+                            className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${
+                              m.hybridReceipt?.undone
+                                ? 'bg-slate-100/60 border-slate-200 text-muted-foreground line-through opacity-60'
+                                : 'bg-emerald-50/60 border-emerald-200/80'
+                            }`}
+                          >
+                            <span className="font-bold text-slate-800 truncate min-w-0">{f.name}</span>
                             <span className="text-slate-600 font-semibold shrink-0">
                               {f.calories} kcal · <span className="text-emerald-700 font-bold">{f.proteinG}g P</span>
                             </span>
                           </div>
                         ))}
-                        {m.hybridDraft.workouts.map((w, wIdx) => (
-                          <div key={wIdx} className="flex items-center justify-between gap-2 rounded-lg bg-cyan-50/70 border border-cyan-200/80 px-2.5 py-1.5 text-xs">
-                            <span className="font-bold text-slate-800 truncate">{w.name} ({w.durationMin}m)</span>
+                        {m.hybridReceipt.workouts.map((w, wIdx) => (
+                          <div
+                            key={wIdx}
+                            className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${
+                              m.hybridReceipt?.undone
+                                ? 'bg-slate-100/60 border-slate-200 text-muted-foreground line-through opacity-60'
+                                : 'bg-cyan-50/70 border-cyan-200/80'
+                            }`}
+                          >
+                            <span className="font-bold text-slate-800 truncate min-w-0">
+                              {w.name} ({w.durationMin}m)
+                            </span>
                             <span className="text-cyan-800 font-bold shrink-0">-{w.adjustedCalories} kcal</span>
                           </div>
                         ))}
                       </div>
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider text-emerald-700">
+                          {m.hybridReceipt.undone ? (
+                            <span className="text-muted-foreground">Removed from Ledger</span>
+                          ) : (
+                            <>
+                              <Check className="w-3.5 h-3.5 shrink-0" />
+                              <span>Logged to Ledger</span>
+                            </>
+                          )}
+                        </span>
+                        {!m.hybridReceipt.undone && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={undoingMsgIdx === i}
+                            onClick={() => handleUndoHybridReceipt(i, m.hybridReceipt!)}
+                            data-testid="undo-hybrid-receipt-btn"
+                            className="h-7 px-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-muted-foreground hover:text-destructive"
+                          >
+                            {undoingMsgIdx === i ? (
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                            )}
+                            Undo
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {m.suggestCoachPrompt && (
+                    <div className="mt-2.5 pt-2 border-t border-border/60">
                       <Button
                         type="button"
                         size="sm"
-                        disabled={m.hybridDraft.committed || committingMsgIdx === i}
-                        onClick={() => handleCommitHybridDraft(i, m.hybridDraft!)}
-                        className="w-full h-8 rounded-lg text-[11px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white"
+                        variant="outline"
+                        onClick={() => {
+                          setComposerMode('coach');
+                          setAutoFlippedToCoach(false);
+                          void handleSend(m.suggestCoachPrompt, 'coach');
+                        }}
+                        className="h-8 rounded-lg text-[11px] font-black uppercase tracking-wider border-primary/30 text-primary hover:bg-primary/10"
                       >
-                        {committingMsgIdx === i ? (
-                          <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Logging…</>
-                        ) : m.hybridDraft.committed ? (
-                          <><Check className="w-3.5 h-3.5 mr-1.5" />Logged to Ledger</>
-                        ) : (
-                          `+ Log ${m.hybridDraft.foods.length + m.hybridDraft.workouts.length} Item(s) to Ledger`
-                        )}
+                        <Brain className="w-3.5 h-3.5 mr-1.5" />
+                        Ask Full Coach Instead →
                       </Button>
                     </div>
                   )}
@@ -1141,7 +1412,10 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
                   <Button
                     variant="ghost" size="sm"
                     className="rounded-full text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-primary hover:bg-primary/10 h-7 px-3"
-                    onClick={() => handleSend(EXPLAIN_PROMPT)}
+                    onClick={() => {
+                      setComposerMode('coach');
+                      void handleSend(EXPLAIN_PROMPT, 'coach');
+                    }}
                     title="Have the CFO show its work"
                   >
                     <Search className="w-3 h-3 mr-1.5" />
@@ -1155,7 +1429,9 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             <div className="flex flex-col items-start">
               <div className="chat-bubble-ai flex items-center gap-2">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                <span className="text-[10px] font-bold uppercase">Auditing Assets...</span>
+                <span className="text-[10px] font-bold uppercase">
+                  {composerMode === 'entry' ? 'Logging Entry...' : 'Auditing Assets...'}
+                </span>
               </div>
             </div>
           )}
@@ -1171,28 +1447,28 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
               <Button 
                 variant="outline" size="sm" 
                 className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("I'm trying to reduce visceral fat."); }}
+                onClick={() => { setComposerMode('coach'); setInput("I'm trying to reduce visceral fat."); }}
               >
                 Reduce Visceral Fat
               </Button>
               <Button 
                 variant="outline" size="sm" 
                 className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("I want to build lean muscle."); }}
+                onClick={() => { setComposerMode('coach'); setInput("I want to build lean muscle."); }}
               >
                 Build Muscle
               </Button>
               <Button 
                 variant="outline" size="sm" 
                 className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("I have some home gym equipment."); }}
+                onClick={() => { setComposerMode('coach'); setInput("I have some home gym equipment."); }}
               >
                 I have a gym
               </Button>
               <Button 
                 variant="outline" size="sm" 
                 className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("How does the point system work?"); }}
+                onClick={() => { setComposerMode('coach'); setInput("How does the point system work?"); }}
               >
                 How it works
               </Button>
@@ -1201,22 +1477,22 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             <>
               <Button 
                 variant="outline" size="sm" 
-                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("I just finished a workout."); }}
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 whitespace-nowrap"
+                onClick={() => { setComposerMode('entry'); setInput("35m barbell squats"); }}
               >
                 Log Workout
               </Button>
               <Button 
                 variant="outline" size="sm" 
-                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("I just ate a healthy meal."); }}
+                className="rounded-full text-[10px] font-bold uppercase tracking-wider border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 whitespace-nowrap"
+                onClick={() => { setComposerMode('entry'); setInput("3 eggs, sourdough toast, coffee"); }}
               >
                 Log Meal
               </Button>
               <Button 
                 variant="outline" size="sm" 
                 className="rounded-full text-[10px] font-bold uppercase tracking-wider border-primary/20 bg-primary/5 hover:bg-primary/10 whitespace-nowrap"
-                onClick={() => { setInput("What's my status today?"); }}
+                onClick={() => { setComposerMode('coach'); setInput("What's my status today?"); }}
               >
                 Daily Audit
               </Button>
