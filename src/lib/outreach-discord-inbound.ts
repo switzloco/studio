@@ -101,13 +101,26 @@ export async function pollDiscordOutreachReplies(): Promise<{
   let logged = 0;
   let errors = 0;
   const firstPollCutoffMs = Date.now() - 20 * 60 * 1000;
+  const seenDiscordUserIds = new Set<string>();
 
-  for (const userDoc of snap.docs) {
+  // Always prioritize real Firebase Auth UIDs ahead of synthetic `discord_<id>` accounts
+  const sortedDocs = [...snap.docs].sort((a, b) => {
+    const aSyn = a.id.startsWith('discord_') ? 1 : 0;
+    const bSyn = b.id.startsWith('discord_') ? 1 : 0;
+    return aSyn - bSyn;
+  });
+
+  for (const userDoc of sortedDocs) {
     const uid = userDoc.id;
     const prefs = await adminHealthService.getUserPreferences(db, uid);
     const outreach = prefs?.outreach;
     if (!outreach?.enabled) continue;
     if (outreach.channel !== 'discord' && outreach.channel !== 'both') continue;
+
+    if (outreach.discordUserId) {
+      if (seenDiscordUserIds.has(outreach.discordUserId)) continue;
+      seenDiscordUserIds.add(outreach.discordUserId);
+    }
 
     let channelId = outreach.discordChannelId?.trim();
     if (!channelId && outreach.discordUserId) {
@@ -259,7 +272,10 @@ export async function pollDiscordOutreachReplies(): Promise<{
           replyToMessageId: msg.id,
           headline: parseRes.headline,
           agentReply: parseRes.agentReply || parseRes.detail,
+          loggedMacros: parseRes.loggedMacros,
           updatedHeadline: parseRes.updatedHeadline,
+          updatedBody: parseRes.updatedBody,
+          metricsLine: parseRes.metricsLine,
           lastFoodLine: parseRes.lastFoodLine,
           loggedFoodId: parseRes.loggedFoodId,
           localDate: parseRes.localDate,

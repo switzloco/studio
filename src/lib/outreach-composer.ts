@@ -105,7 +105,9 @@ export function buildLastFoodOnRecordLine(
     const latest = activeYesterday[0];
     const atLabel = format12hClock(latest.consumedAt);
     const timePart = atLabel ? ` yesterday at ${atLabel}` : ' yesterday';
-    return `Last on record: ${latest.name}${timePart} (${Math.round(latest.calories || 0)} kcal, ${Math.round(latest.proteinG || 0)}g protein) — nothing logged yet today.`;
+    const yTotalKcal = Math.round(activeYesterday.reduce((s, f) => s + (f.calories || 0), 0));
+    const yTotalP = Math.round(activeYesterday.reduce((s, f) => s + (f.proteinG || 0), 0));
+    return `Last on record: ${latest.name}${timePart} (${Math.round(latest.calories || 0)} kcal, ${Math.round(latest.proteinG || 0)}g P · Yesterday total: ${yTotalKcal} kcal, ${yTotalP}g P) — today starts at 0 kcal.`;
   }
 
   return 'Last on record: Nothing logged yet today.';
@@ -445,7 +447,7 @@ export function composeOutreachDispatch(input: ComposeOutreachInput): ComposedOu
 
   const lastFoodLine = buildLastFoodOnRecordLine(input.todayFoods, input.yesterdayFoods);
   const scoreBadge = `VF ${vfPreview.score >= 0 ? '+' : ''}${vfPreview.score}`;
-  const metricsLine = `${todayCaloriesIn.toLocaleString()} kcal in · ${todayProteinG}/${proteinGoal}g protein · Fat faucet ${runway.fatFaucetHourlyKcal} kcal/hr · ${scoreBadge}`;
+  const metricsLine = `${todayCaloriesIn.toLocaleString()} kcal today · ${todayProteinG}/${proteinGoal}g protein · Fat faucet ${runway.fatFaucetHourlyKcal} kcal/hr · ${scoreBadge}`;
 
   return {
     window: input.window,

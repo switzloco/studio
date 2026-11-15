@@ -34,6 +34,98 @@ export const maxDuration = 60;
 
 const EPHEMERAL_FLAG = 64;
 
+function buildLogMealModalResponse() {
+  return NextResponse.json({
+    type: 9, // MODAL
+    data: {
+      custom_id: 'outreach:modal_submit:log_meal',
+      title: 'Log Meal to CFO Ledger',
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 4, // TEXT_INPUT
+              custom_id: 'meal_description',
+              label: "What did you eat? (Today or 'Last night...')",
+              style: 2, // Paragraph
+              placeholder: 'e.g. Chickpea curry & rice (or "Last night at 9pm: 2 slices pizza")',
+              required: true,
+              max_length: 400,
+            },
+          ],
+        },
+      ],
+    },
+  });
+}
+
+async function findRecentUnloggedDmMessage(params: {
+  uid: string;
+  discordUserId: string;
+  channelId?: string;
+}): Promise<{ id: string; text: string; attachments: any[] } | null> {
+  const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
+  if (!botToken || !params.channelId) return null;
+
+  try {
+    const res = await fetch(
+      `https://discord.com/api/v10/channels/${params.channelId}/messages?limit=6`,
+      {
+        headers: { Authorization: `Bot ${botToken}` },
+        signal: AbortSignal.timeout(1500),
+      },
+    );
+    if (!res.ok) return null;
+
+    const messages = (await res.json()) as Array<{
+      id: string;
+      content?: string;
+      timestamp?: string;
+      author?: { id?: string; bot?: boolean };
+      attachments?: any[];
+    }>;
+    if (!Array.isArray(messages)) return null;
+
+    const cutoffMs = Date.now() - 2 * 60 * 60 * 1000;
+    const db = getAdminFirestore();
+
+    for (const msg of messages) {
+      if (msg.author?.bot || String(msg.author?.id || '') !== params.discordUserId) continue;
+      const msgMs = msg.timestamp ? Date.parse(msg.timestamp) : 0;
+      if (msgMs > 0 && msgMs < cutoffMs) continue;
+
+      const text = (msg.content || '').trim();
+      const imageAtts = (msg.attachments ?? []).filter((a: any) =>
+        String(a?.content_type || '').toLowerCase().startsWith('image/'),
+      );
+      if (!text && imageAtts.length === 0) continue;
+      if (/^!(vibe|agy)\b/i.test(text) || /^\/(start|status|stop|eat)\b/i.test(text)) continue;
+
+      const receiptRef = db.doc(`users/${params.uid}/outreach_actions/discord_mid_${msg.id}`);
+      const claimed = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(receiptRef);
+        if (snap.exists) return false;
+        tx.set(receiptRef, {
+          type: 'discord_dm_reply',
+          discordMessageId: msg.id,
+          claimedAtMs: Date.now(),
+        });
+        return true;
+      });
+
+      if (claimed) {
+        return { id: msg.id, text, attachments: imageAtts };
+      }
+      // If the newest user message already has a receipt, don't reach further back into already-handled history
+      break;
+    }
+  } catch {
+    // Non-fatal: fall back to opening modal
+  }
+  return null;
+}
+
 async function resolveOrCreateUidForDiscordUser(
   discordUserId: string,
   channelId?: string,
@@ -43,8 +135,34 @@ async function resolveOrCreateUidForDiscordUser(
   const snap = await db
     .collection('users')
     .where('outreachDiscordUserId', '==', discordUserId)
-    .limit(1)
+    .limit(5)
     .get();
+
+  // Always prefer a real Firebase Auth UID over a synthetic `discord_<id>` document
+  const realDoc = snap.docs.find((d) => !d.id.startsWith('discord_'));
+  if (realDoc) {
+    return realDoc.id;
+  }
+
+  // Self-healing fallback: check if a real user's preferences/settings owns this discordUserId
+  // (e.g. if a client write ever cleared root mirror fields)
+  try {
+    const founderEmail = 'nicholas.switzer@gmail.com';
+    const founderAuth = await getAdminAuth().getUserByEmail(founderEmail).catch(() => null);
+    if (founderAuth?.uid) {
+      const founderPrefs = await adminHealthService.getUserPreferences(db, founderAuth.uid);
+      if (founderPrefs?.outreach?.discordUserId === discordUserId) {
+        await adminHealthService.updateHealthData(db, founderAuth.uid, {
+          outreachEnabled: Boolean(founderPrefs.outreach.enabled),
+          outreachDiscordUserId: discordUserId,
+          ...(founderPrefs.outreach.email ? { outreachEmail: founderPrefs.outreach.email } : {}),
+        });
+        return founderAuth.uid;
+      }
+    }
+  } catch {
+    // Non-fatal fallback
+  }
 
   if (!snap.empty) {
     return snap.docs[0].id;
@@ -228,19 +346,26 @@ export async function POST(request: NextRequest) {
     }
 
     if (cmdName === 'eat') {
-      const mealText = String(getOpt('meal') || '').trim();
+      let mealText = String(getOpt('meal') || '').trim();
       const photoAttachmentId = getOpt('photo') ? String(getOpt('photo')) : null;
       const resolvedAttachments = interaction.data?.resolved?.attachments ?? {};
       const rawAtt = photoAttachmentId ? resolvedAttachments[photoAttachmentId] : null;
+      let fallbackAttachments: any[] = rawAtt ? [rawAtt] : [];
+      let claimedDmMessageId: string | null = null;
 
-      if (!mealText && !rawAtt) {
-        return NextResponse.json({
-          type: 4,
-          data: {
-            content: 'Include `meal:` text or attach a `photo:` so I can put it on your ledger.',
-            flags: EPHEMERAL_FLAG,
-          },
+      if (!mealText && fallbackAttachments.length === 0) {
+        const recentDm = await findRecentUnloggedDmMessage({
+          uid,
+          discordUserId,
+          channelId,
         });
+        if (recentDm) {
+          mealText = recentDm.text;
+          fallbackAttachments = recentDm.attachments;
+          claimedDmMessageId = recentDm.id;
+        } else {
+          return buildLogMealModalResponse();
+        }
       }
 
       const appId = String(interaction.application_id || process.env.NEXT_PUBLIC_DISCORD_APP_ID || '1570868560065077420');
@@ -248,9 +373,23 @@ export async function POST(request: NextRequest) {
 
       after(async () => {
         try {
-          const photoDataUris = rawAtt
-            ? await fetchDiscordImageAttachments([rawAtt])
-            : undefined;
+          if (claimedDmMessageId) {
+            const db = getAdminFirestore();
+            const prefs = await adminHealthService.getUserPreferences(db, uid);
+            await db.doc(`users/${uid}/preferences/settings`).set(
+              {
+                outreach: {
+                  ...(prefs?.outreach ?? {}),
+                  lastDiscordMessageId: claimedDmMessageId,
+                },
+              },
+              { merge: true },
+            );
+          }
+          const photoDataUris =
+            fallbackAttachments.length > 0
+              ? await fetchDiscordImageAttachments(fallbackAttachments)
+              : undefined;
           const parsedRes = await processOutreachFreeTextMeal({
             uid,
             rawText: mealText,
@@ -271,13 +410,20 @@ export async function POST(request: NextRequest) {
             label: 'View Ledger',
             url: buildOutreachActionUrl({ uid, action: 'view_ledger' }),
           });
+          const macroBadge = parsedRes.loggedMacros
+            ? ` (**+${parsedRes.loggedMacros.calories} kcal · ${parsedRes.loggedMacros.proteinG}g protein · ${parsedRes.loggedMacros.carbsG}g carbs · ${parsedRes.loggedMacros.fatG}g fat**)`
+            : '';
+          const clockUpdateLine =
+            parsedRes.updatedHeadline && parsedRes.updatedHeadline !== parsedRes.headline
+              ? `\n**Updated Clock:** ${parsedRes.updatedHeadline} — ${parsedRes.updatedBody || ''}${parsedRes.metricsLine ? `\n\`${parsedRes.metricsLine}\`` : ''}`
+              : '';
           await fetch(
             `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`,
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                content: `**${parsedRes.headline}**\n${parsedRes.agentReply || parsedRes.detail}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
+                content: `**${parsedRes.headline}**${macroBadge}\n${parsedRes.agentReply || parsedRes.detail}${clockUpdateLine}${parsedRes.lastFoodLine ? `\n_${parsedRes.lastFoodLine}_` : ''}`,
                 components: [{ type: 1, components: rowButtons }],
               }),
             },
@@ -301,29 +447,7 @@ export async function POST(request: NextRequest) {
 
     // Open native Discord modal popup for free-text meal entry
     if (parts[0] === 'outreach' && parts[1] === 'modal' && parts[2] === 'log_meal') {
-      return NextResponse.json({
-        type: 9, // MODAL
-        data: {
-          custom_id: 'outreach:modal_submit:log_meal',
-          title: 'Log Meal to CFO Ledger',
-          components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 4, // TEXT_INPUT
-                  custom_id: 'meal_description',
-                  label: 'What did you eat or drink?',
-                  style: 2, // Paragraph
-                  placeholder: 'e.g. 3 eggs, sourdough toast, black coffee',
-                  required: true,
-                  max_length: 400,
-                },
-              ],
-            },
-          ],
-        },
-      });
+      return buildLogMealModalResponse();
     }
 
     const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true);
@@ -389,30 +513,36 @@ export async function POST(request: NextRequest) {
     after(async () => {
       try {
         const res = await processOutreachFreeTextMeal({ uid, rawText: rawMeal });
-        const components =
-          res.loggedFoodId && res.localDate
-            ? [
-                {
-                  type: 1,
-                  components: [
-                    {
-                      type: 2,
-                      style: 2,
-                      label: 'Undo Entry',
-                      custom_id: `outreach:undo:${res.loggedFoodId}:${res.localDate}`,
-                    },
-                  ],
-                },
-              ]
-            : undefined;
+        const rowButtons: Array<Record<string, unknown>> = [];
+        if (res.loggedFoodId && res.localDate) {
+          rowButtons.push({
+            type: 2,
+            style: 2,
+            label: 'Undo Entry',
+            custom_id: `outreach:undo:${res.loggedFoodId}:${res.localDate}`,
+          });
+        }
+        rowButtons.push({
+          type: 2,
+          style: 5,
+          label: 'View Ledger',
+          url: buildOutreachActionUrl({ uid, action: 'view_ledger' }),
+        });
+        const macroBadge = res.loggedMacros
+          ? ` (**+${res.loggedMacros.calories} kcal · ${res.loggedMacros.proteinG}g protein · ${res.loggedMacros.carbsG}g carbs · ${res.loggedMacros.fatG}g fat**)`
+          : '';
+        const clockUpdateLine =
+          res.updatedHeadline && res.updatedHeadline !== res.headline
+            ? `\n**Updated Clock:** ${res.updatedHeadline} — ${res.updatedBody || ''}${res.metricsLine ? `\n\`${res.metricsLine}\`` : ''}`
+            : '';
         await fetch(
           `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              content: `**${res.headline}**\n${res.agentReply || res.detail}${res.lastFoodLine ? `\n_${res.lastFoodLine}_` : ''}`,
-              ...(components ? { components } : {}),
+              content: `**${res.headline}**${macroBadge}\n${res.agentReply || res.detail}${clockUpdateLine}${res.lastFoodLine ? `\n_${res.lastFoodLine}_` : ''}`,
+              components: [{ type: 1, components: rowButtons }],
             }),
           },
         );

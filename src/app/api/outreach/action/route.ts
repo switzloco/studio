@@ -72,6 +72,12 @@ function renderConfirmationPage(params: {
 async function renderLiveLedgerPage(uid: string, bannerNotice?: string): Promise<string> {
   const { composed, todayFoods, yesterdayFoods, proteinGoal, localDate } =
     await buildLiveUserOutreach({ uid });
+  const yesterdayDate = (() => {
+    const [y, m, d] = localDate.split('-').map(Number);
+    const dt = new Date(Date.UTC(y || 2026, (m || 1) - 1, d || 1, 12, 0, 0));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
+  })();
 
   const totalKcal = Math.round(todayFoods.reduce((s, f) => s + (f.calories || 0), 0));
   const totalProtein = Math.round(todayFoods.reduce((s, f) => s + (f.proteinG || 0), 0));
@@ -167,7 +173,7 @@ async function renderLiveLedgerPage(uid: string, bannerNotice?: string): Promise
       <h2 style="font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:0.06em;color:#64748b;margin:20px 0 8px;">
         Yesterday's Logged Meals (${yesterdayFoods.length})
       </h2>
-      ${renderFoodRows(yesterdayFoods)}
+      ${renderFoodRows(yesterdayFoods, yesterdayDate)}
 
       <div style="margin-top:22px;padding-top:14px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748b;">
         <span>Reply in Discord or Email to add or remove items</span>

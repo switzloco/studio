@@ -165,7 +165,7 @@ export function buildDiscordLedgerStatusPayload(params: {
       ? todayFoods
           .map(
             (f, idx) =>
-              `**#${idx + 1}** · \`${f.consumedAt || 'today'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P${f.plantMassG ? ` · ${Math.round(f.plantMassG)}g plants` : ''})`,
+              `**#${idx + 1}** · \`${f.consumedAt || 'today'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P · ${Math.round(f.carbsG || 0)}g C · ${Math.round(f.fatG || 0)}g F${f.plantMassG ? ` · ${Math.round(f.plantMassG)}g plants` : ''})`,
           )
           .join('\n')
       : '_No meals logged today yet._';
@@ -177,7 +177,7 @@ export function buildDiscordLedgerStatusPayload(params: {
           .slice(0, 5)
           .map(
             (f) =>
-              `• \`${f.consumedAt || 'yest'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P)`,
+              `• \`${f.consumedAt || 'yest'}\` — **${f.name}** (${Math.round(f.calories || 0)} kcal · ${Math.round(f.proteinG || 0)}g P · ${Math.round(f.carbsG || 0)}g C · ${Math.round(f.fatG || 0)}g F)`,
           )
           .join('\n')
       : '';
@@ -326,7 +326,15 @@ export async function sendDiscordDmReply(params: {
   replyToMessageId?: string;
   headline: string;
   agentReply: string;
+  loggedMacros?: {
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+  };
   updatedHeadline?: string;
+  updatedBody?: string;
+  metricsLine?: string;
   lastFoodLine?: string;
   loggedFoodId?: string;
   localDate?: string;
@@ -334,12 +342,17 @@ export async function sendDiscordDmReply(params: {
   const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!botToken || !params.channelId) return { success: false };
 
+  const macroBadge = params.loggedMacros
+    ? ` (**+${params.loggedMacros.calories} kcal · ${params.loggedMacros.proteinG}g protein · ${params.loggedMacros.carbsG}g carbs · ${params.loggedMacros.fatG}g fat**)`
+    : '';
+
   const lines = [
-    `**${params.headline}**`,
+    `**${params.headline}**${macroBadge}`,
     params.agentReply,
     params.updatedHeadline && params.updatedHeadline !== params.headline
-      ? `**Next up:** ${params.updatedHeadline}`
+      ? `**Next up:** ${params.updatedHeadline}${params.updatedBody ? ` — ${params.updatedBody}` : ''}`
       : '',
+    params.metricsLine ? `\`${params.metricsLine}\`` : '',
     params.lastFoodLine ? `_${params.lastFoodLine}_` : '',
   ].filter(Boolean);
 
