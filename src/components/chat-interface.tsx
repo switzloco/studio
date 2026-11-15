@@ -10,7 +10,7 @@ import { Send, Camera, X, Loader2, Zap, Images, Mic, Square, Search, ShieldCheck
 import { useTranscription } from "@/hooks/use-transcription";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebaseApp, useFirestore, useUser, useDoc, useMemoFirebase } from '@/firebase';
-import { doc, getDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import type { ChatMessage } from '@/lib/food-exercise-types';
 import { inferMealFromTime } from '@/lib/food-exercise-types';
 import { HealthData, UserPreferences, healthService } from '@/lib/health-service';
@@ -23,8 +23,9 @@ import { useHybridAi } from '@/components/hybrid-ai-provider';
 import { ExecutionReceiptBadge, SecComplianceAlertPanel } from '@/components/execution-receipt-badge';
 import {
   auditMealPhotoReceiptHybrid,
-  dataUriToInlineImage,
+  downscaleDataUriForHybrid,
   parseTickerTapeHybrid,
+  prewarmHybridEntryOnFocus,
   runHybridCoachTurn,
   SecPrivacyLockBlockedError,
   type NormalizedInferenceSource,
@@ -130,34 +131,38 @@ function readFileAsDataUri(file: File, maxDim = 1024, quality = 0.8): Promise<st
     const reader = new FileReader();
     reader.onerror = reject;
     reader.onload = (e) => {
+      const rawResult = String(e.target?.result || '');
       const img = new globalThis.Image();
-      img.onerror = () => resolve(e.target?.result as string);
+      img.onerror = () => resolve(rawResult);
       img.onload = () => {
         let width = img.width;
         let height = img.height;
-        if (width <= maxDim && height <= maxDim) {
-          resolve(e.target?.result as string);
+        const isSafeJpeg = /^data:image\/jpeg;base64,/i.test(rawResult);
+        if (width <= maxDim && height <= maxDim && isSafeJpeg) {
+          resolve(rawResult);
           return;
         }
-        if (width > height) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
         }
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(e.target?.result as string);
+          resolve(rawResult);
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
-      img.src = e.target?.result as string;
+      img.src = rawResult;
     };
     reader.readAsDataURL(file);
   });
@@ -553,18 +558,24 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         let totalLatency = 0;
 
         if (photos.length > 0) {
+          // Normalize to 768px JPEG (single Gemini vision tile + Chrome Nano compatible) and audit in parallel
+          const receiptResults = await Promise.all(
+            photos.map(async (photo) => {
+              const compactImage = await downscaleDataUriForHybrid(photo.dataUri, 768, 0.8);
+              return auditMealPhotoReceiptHybrid({
+                firebaseApp,
+                image: compactImage,
+                note: userMessage || undefined,
+                secPrivacyLock,
+              });
+            })
+          );
           const notes: string[] = [];
-          for (const photo of photos) {
-            const receiptRes = await auditMealPhotoReceiptHybrid({
-              firebaseApp,
-              image: dataUriToInlineImage(photo.dataUri),
-              note: userMessage || undefined,
-              secPrivacyLock,
-            });
+          for (const receiptRes of receiptResults) {
             recordReceipt(receiptRes.receipt);
             latestSource = receiptRes.receipt.inferenceSource;
-            totalLatency += receiptRes.receipt.latencyMs;
-            allFoods = [...allFoods, ...receiptRes.foods];
+            totalLatency = Math.max(totalLatency, receiptRes.receipt.latencyMs);
+            allFoods.push(...receiptRes.foods);
             notes.push(`**${receiptRes.receiptTitle}** — ${receiptRes.cfoCommentary}`);
           }
           summaryText = notes.join('\n\n');
@@ -600,95 +611,76 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
           return;
         }
 
-        // Auto-log immediately to Firestore Ledger (1-step UX) and capture IDs for 1-tap Undo!
+        // Pre-allocate Firestore doc IDs synchronously (0ms) so UI renders receipt + Undo immediately!
         const entryDate = photos[0]?.exifDate || localDate;
         const entryTime = photos[0]?.exifTime || nowTime;
         const mealSlot = inferMealFromTime(entryTime);
 
-        const foodDocIds: string[] = [];
-        for (const f of allFoods) {
-          const docId = await healthService.logFood(db, user.uid, {
-            name: f.name,
-            portionG: f.portionG,
-            calories: f.calories,
-            proteinG: f.proteinG,
-            carbsG: f.carbsG,
-            fatG: f.fatG,
-            fiberG: f.fiberG,
-            plantMassG: f.plantMassG,
-            glycemicIndex: f.glycemicIndex,
-            omega3Mg: f.omega3Mg,
-            caffeineMg: f.caffeineMg,
-            creatineG: f.creatineG,
-            betaAlanineG: f.betaAlanineG,
-            hasElectrolytes: f.hasElectrolytes,
-            alcoholDrinks: f.alcoholDrinks,
-            hasSeedOils: f.hasSeedOils,
-            meal: mealSlot,
-            source: f.source,
-            consumedAt: entryTime,
-            date: entryDate,
-            inferenceSource: latestSource,
-            inferenceLatencyMs: totalLatency,
-            cfoClass: f.cfoClass,
-          });
-          foodDocIds.push(docId);
-        }
+        const foodCollectionRef = collection(db, 'users', user.uid, 'food_log');
+        const workoutCollectionRef = collection(db, 'users', user.uid, 'exercise_log');
 
-        const workoutDocIds: string[] = [];
-        for (const w of allWorkouts) {
-          const docId = await healthService.logExercise(db, user.uid, {
-            name: w.name,
-            category: w.category,
-            durationMin: w.durationMin,
-            sets: w.sets,
-            reps: w.reps,
-            weightKg: w.weightKg,
-            estimatedCaloriesBurned: w.estimatedCaloriesBurned,
-            adjustedCalories: w.adjustedCalories,
-            activityTier: w.activityTier,
-            pointsDelta: w.pointsDelta,
-            performedAt: entryTime,
-            date: entryDate,
-            inferenceSource: latestSource,
-            inferenceLatencyMs: totalLatency,
-            cfoClass: w.cfoClass,
-          });
-          workoutDocIds.push(docId);
-        }
+        const preparedFoodDocs = allFoods.map((f) => {
+          const docRef = doc(foodCollectionRef);
+          const clean = Object.fromEntries(
+            Object.entries({
+              name: f.name,
+              portionG: f.portionG,
+              calories: f.calories,
+              proteinG: f.proteinG,
+              carbsG: f.carbsG,
+              fatG: f.fatG,
+              fiberG: f.fiberG,
+              plantMassG: f.plantMassG,
+              glycemicIndex: f.glycemicIndex,
+              omega3Mg: f.omega3Mg,
+              caffeineMg: f.caffeineMg,
+              creatineG: f.creatineG,
+              betaAlanineG: f.betaAlanineG,
+              hasElectrolytes: f.hasElectrolytes,
+              alcoholDrinks: f.alcoholDrinks,
+              hasSeedOils: f.hasSeedOils,
+              meal: mealSlot,
+              source: f.source,
+              consumedAt: entryTime,
+              date: entryDate,
+              inferenceSource: latestSource,
+              inferenceLatencyMs: totalLatency,
+              cfoClass: f.cfoClass,
+              timestamp: serverTimestamp(),
+            }).filter(([, v]) => v !== undefined)
+          );
+          return { docRef, clean };
+        });
 
-        if (entryDate === localDate && allFoods.length > 0) {
-          const isSameDay = healthData?.lastActiveDate === localDate;
-          const baseCal = isSameDay ? (healthData?.dailyCaloriesIn || 0) : 0;
-          const baseProt = isSameDay ? (healthData?.dailyProteinG || 0) : 0;
-          const baseCarbs = isSameDay ? (healthData?.dailyCarbsG || 0) : 0;
-          const basePlants = isSameDay ? (healthData?.dailyPlantG || 0) : 0;
+        const preparedWorkoutDocs = allWorkouts.map((w) => {
+          const docRef = doc(workoutCollectionRef);
+          const clean = Object.fromEntries(
+            Object.entries({
+              name: w.name,
+              category: w.category,
+              durationMin: w.durationMin,
+              sets: w.sets,
+              reps: w.reps,
+              weightKg: w.weightKg,
+              estimatedCaloriesBurned: w.estimatedCaloriesBurned,
+              adjustedCalories: w.adjustedCalories,
+              activityTier: w.activityTier,
+              pointsDelta: w.pointsDelta,
+              performedAt: entryTime,
+              date: entryDate,
+              inferenceSource: latestSource,
+              inferenceLatencyMs: totalLatency,
+              cfoClass: w.cfoClass,
+              timestamp: serverTimestamp(),
+            }).filter(([, v]) => v !== undefined)
+          );
+          return { docRef, clean };
+        });
 
-          const addedCalories = allFoods.reduce((s, f) => s + f.calories, 0);
-          const addedProtein = allFoods.reduce((s, f) => s + f.proteinG, 0);
-          const addedCarbs = allFoods.reduce((s, f) => s + f.carbsG, 0);
-          const addedPlants = allFoods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+        const foodDocIds = preparedFoodDocs.map((d) => d.docRef.id);
+        const workoutDocIds = preparedWorkoutDocs.map((d) => d.docRef.id);
 
-          await healthService.updateHealthData(db, user.uid, {
-            dailyCaloriesIn: baseCal + addedCalories,
-            dailyProteinG: baseProt + addedProtein,
-            dailyCarbsG: baseCarbs + addedCarbs,
-            dailyPlantG: basePlants + addedPlants,
-            lastActiveDate: localDate,
-          });
-        }
-
-        const totalKcal = allFoods.reduce((s, f) => s + f.calories, 0);
-        const totalProt = allFoods.reduce((s, f) => s + f.proteinG, 0);
-        const transcriptSummary = `${summaryText}\n\n*(Logged ${allFoods.length} food & ${allWorkouts.length} workout item(s): +${totalKcal} kcal, +${totalProt}g P)*`;
-        void persistLocalChatTurn(
-          user.uid,
-          localDate,
-          userMessage || 'Photo logged',
-          photos.length > 0,
-          transcriptSummary
-        );
-
+        // Optimistically render receipt bubble immediately (0ms post-AI wait)
         setMessages((prev) => [
           ...prev,
           {
@@ -706,6 +698,53 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             },
           },
         ]);
+        setIsLoading(false);
+
+        // Flush all Firestore writes + local cache updates concurrently in the background
+        const writePromises: Promise<unknown>[] = [
+          ...preparedFoodDocs.map((d) => setDoc(d.docRef, d.clean)),
+          ...preparedWorkoutDocs.map((d) => setDoc(d.docRef, d.clean)),
+        ];
+
+        if (entryDate === localDate && allFoods.length > 0) {
+          const isSameDay = healthData?.lastActiveDate === localDate;
+          const baseCal = isSameDay ? (healthData?.dailyCaloriesIn || 0) : 0;
+          const baseProt = isSameDay ? (healthData?.dailyProteinG || 0) : 0;
+          const baseCarbs = isSameDay ? (healthData?.dailyCarbsG || 0) : 0;
+          const basePlants = isSameDay ? (healthData?.dailyPlantG || 0) : 0;
+
+          const addedCalories = allFoods.reduce((s, f) => s + f.calories, 0);
+          const addedProtein = allFoods.reduce((s, f) => s + f.proteinG, 0);
+          const addedCarbs = allFoods.reduce((s, f) => s + f.carbsG, 0);
+          const addedPlants = allFoods.reduce((s, f) => s + (f.plantMassG || 0), 0);
+
+          writePromises.push(
+            healthService.updateHealthData(db, user.uid, {
+              dailyCaloriesIn: baseCal + addedCalories,
+              dailyProteinG: baseProt + addedProtein,
+              dailyCarbsG: baseCarbs + addedCarbs,
+              dailyPlantG: basePlants + addedPlants,
+              lastActiveDate: localDate,
+            })
+          );
+        }
+
+        const totalKcal = allFoods.reduce((s, f) => s + f.calories, 0);
+        const totalProt = allFoods.reduce((s, f) => s + f.proteinG, 0);
+        const transcriptSummary = `${summaryText}\n\n*(Logged ${allFoods.length} food & ${allWorkouts.length} workout item(s): +${totalKcal} kcal, +${totalProt}g P)*`;
+        writePromises.push(
+          persistLocalChatTurn(
+            user.uid,
+            localDate,
+            userMessage || 'Photo logged',
+            photos.length > 0,
+            transcriptSummary
+          )
+        );
+
+        void Promise.all(writePromises).catch((writeErr) => {
+          console.warn('[FastEntry] Background Firestore sync warning:', writeErr);
+        });
       } catch (err) {
         if (err instanceof SecPrivacyLockBlockedError) {
           setMessages((prev) => [...prev, { role: 'model', content: '', secAlert: err.alert }]);
@@ -729,13 +768,16 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
     // Hybrid AI Client Path: Strict On-Device SEC Privacy Lock (`ONLY_ON_DEVICE`) or Offline Mode (`PREFER_ON_DEVICE`)
     if (secPrivacyLock || !isOnline) {
       try {
+        const compactImages = await Promise.all(
+          photos.slice(0, 2).map((p) => downscaleDataUriForHybrid(p.dataUri, 768, 0.8))
+        );
         const hybridRes = await runHybridCoachTurn({
           firebaseApp,
           userMessage: fullMessage,
           secPrivacyLock,
           healthData,
           preferences: prefs,
-          attachedImages: photos.map((p) => dataUriToInlineImage(p.dataUri)),
+          attachedImages: compactImages,
         });
         recordReceipt(hybridRes.receipt);
         setMessages((prev) => [
@@ -864,12 +906,10 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
       const now = new Date();
       const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-      for (const id of receipt.foodDocIds) {
-        await healthService.setFoodEntryIgnored(db, user.uid, id, true);
-      }
-      for (const id of receipt.workoutDocIds) {
-        await healthService.setExerciseEntryIgnored(db, user.uid, id, true);
-      }
+      const undoWrites: Promise<unknown>[] = [
+        ...receipt.foodDocIds.map((id) => healthService.setFoodEntryIgnored(db, user.uid, id, true)),
+        ...receipt.workoutDocIds.map((id) => healthService.setExerciseEntryIgnored(db, user.uid, id, true)),
+      ];
 
       if (receipt.dateIso === todayIso && receipt.foods.length > 0 && healthData?.lastActiveDate === todayIso) {
         const removedCalories = receipt.foods.reduce((s, f) => s + f.calories, 0);
@@ -877,12 +917,14 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
         const removedCarbs = receipt.foods.reduce((s, f) => s + f.carbsG, 0);
         const removedPlants = receipt.foods.reduce((s, f) => s + (f.plantMassG || 0), 0);
 
-        await healthService.updateHealthData(db, user.uid, {
-          dailyCaloriesIn: Math.max(0, (healthData.dailyCaloriesIn || 0) - removedCalories),
-          dailyProteinG: Math.max(0, (healthData.dailyProteinG || 0) - removedProtein),
-          dailyCarbsG: Math.max(0, (healthData.dailyCarbsG || 0) - removedCarbs),
-          dailyPlantG: Math.max(0, (healthData.dailyPlantG || 0) - removedPlants),
-        });
+        undoWrites.push(
+          healthService.updateHealthData(db, user.uid, {
+            dailyCaloriesIn: Math.max(0, (healthData.dailyCaloriesIn || 0) - removedCalories),
+            dailyProteinG: Math.max(0, (healthData.dailyProteinG || 0) - removedProtein),
+            dailyCarbsG: Math.max(0, (healthData.dailyCarbsG || 0) - removedCarbs),
+            dailyPlantG: Math.max(0, (healthData.dailyPlantG || 0) - removedPlants),
+          })
+        );
       }
 
       setMessages((prev) =>
@@ -892,6 +934,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             : m
         )
       );
+      await Promise.all(undoWrites);
       toast({
         title: 'Undone from Ledger',
         description: `Removed ${receipt.foods.length + receipt.workouts.length} logged item(s).`,
@@ -1123,6 +1166,7 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
             onClick={() => {
               setComposerMode('entry');
               setAutoFlippedToCoach(false);
+              prewarmHybridEntryOnFocus(firebaseApp, secPrivacyLock);
             }}
             data-testid="coach-ticker-drawer-btn"
             aria-pressed={composerMode === 'entry'}
@@ -1184,6 +1228,11 @@ export function ChatInterface({ onSwitchToMetrics }: ChatInterfaceProps = {}) {
       <Textarea
         placeholder={placeholder}
         value={input}
+        onFocus={() => {
+          if (composerMode === 'entry') {
+            prewarmHybridEntryOnFocus(firebaseApp, secPrivacyLock);
+          }
+        }}
         onChange={(e) => applyInputUpdate(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {

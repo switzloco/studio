@@ -23,6 +23,9 @@ import {
   InferenceMode,
   InferenceSource,
   Schema,
+  ThinkingLevel,
+  type GenerationConfig,
+  type GenerativeModel,
   type Part,
 } from 'firebase/ai';
 import { getFirebaseAI, getFirebaseAgentPlatformAI } from '@/firebase/ai';
@@ -135,9 +138,16 @@ export async function probeLocalNanoAvailability(): Promise<LocalNanoStatus> {
   return 'unavailable';
 }
 
+// Hold a resident session / cached GenerativeModel reference so Chrome does NOT
+// evict Gemini Nano weights from GPU VRAM between prompts.
+let keptAliveNanoSession: { destroy?: () => void } | null = null;
+let focusPrewarmPromise: Promise<void> | null = null;
+const generativeModelCache = new Map<string, GenerativeModel>();
+
 /**
  * Triggered ONLY on 1-click user interaction ("WARM LOCAL NANO ENGINE").
- * Warms Chrome's built-in Gemini Nano model with real-time download progress.
+ * Warms Chrome's built-in Gemini Nano model with real-time download progress
+ * and pins the session in memory so weights stay hot in GPU/VRAM.
  */
 export async function warmLocalNanoEngine(
   firebaseApp: FirebaseApp,
@@ -148,6 +158,7 @@ export async function warmLocalNanoEngine(
 
   if (lm && typeof lm.create === 'function') {
     const session = await lm.create({
+      expectedInputs: [{ type: 'text' }],
       monitor(m) {
         m.addEventListener('downloadprogress', (e) => {
           const raw = typeof e.loaded === 'number' ? e.loaded : 0;
@@ -156,7 +167,10 @@ export async function warmLocalNanoEngine(
         });
       },
     });
-    session?.destroy?.();
+    if (keptAliveNanoSession && keptAliveNanoSession !== session) {
+      keptAliveNanoSession.destroy?.();
+    }
+    keptAliveNanoSession = session;
     onProgress(100);
     return 'available';
   }
@@ -164,15 +178,84 @@ export async function warmLocalNanoEngine(
   // Fallback via Firebase AI Logic SDK device model initializer (must run inside click handler)
   const ai = getFirebaseAI(firebaseApp);
   const rc = getCfoRemoteConfigSnapshot(firebaseApp);
-  const model = getGenerativeModel(ai, {
-    mode: InferenceMode.PREFER_ON_DEVICE,
-    inCloudParams: { model: rc.cfoCloudModel },
-  });
+  const cacheKey = `warm|${rc.cfoCloudModel}`;
+  let model = generativeModelCache.get(cacheKey);
+  if (!model) {
+    model = getGenerativeModel(ai, {
+      mode: InferenceMode.PREFER_ON_DEVICE,
+      inCloudParams: { model: rc.cfoCloudModel },
+      onDeviceParams: {
+        createOptions: {
+          expectedInputs: [{ type: 'text', languages: ['en'] }],
+        },
+      },
+    });
+    generativeModelCache.set(cacheKey, model);
+  }
   await model.initializeDeviceModel((progressValue) => {
     onProgress(Math.max(5, Math.min(100, Math.round(progressValue * 100))));
   });
   onProgress(100);
   return probeLocalNanoAvailability();
+}
+
+/**
+ * Pre-warms an ALREADY-downloaded local Gemini Nano model into GPU/VRAM when the user
+ * focuses or taps the Entry composer (a valid user activation gesture).
+ * Never triggers a multi-GB model download if Nano is only 'downloadable'.
+ */
+export function prewarmHybridEntryOnFocus(
+  firebaseApp: FirebaseApp,
+  secPrivacyLock: boolean
+): void {
+  if (typeof window === 'undefined') return;
+  if (keptAliveNanoSession || focusPrewarmPromise) return;
+
+  // Prime the primary Entry GenerativeModel singleton while inside user focus gesture
+  try {
+    const ai = getFirebaseAI(firebaseApp);
+    const rc = getCfoRemoteConfigSnapshot(firebaseApp);
+    const mode = resolveRequestedMode(
+      secPrivacyLock,
+      rc.hybridDefaultMode,
+      InferenceMode.PREFER_ON_DEVICE
+    );
+    const cloudCandidates = buildCloudModelCandidates(rc.cfoCloudModel, {
+      fastEntry: true,
+      remoteExplicit: rc.source === 'remote',
+    });
+    getOrCreateCachedHybridModel({
+      targetAi: ai,
+      backendTag: 'googleai',
+      activeMode: mode,
+      cloudModel: cloudCandidates[0],
+      schemaKey: 'TICKER_TAPE',
+      schema: ledgerEntrySchema,
+      multimodal: false,
+      includeOnDeviceConstraint: true,
+      fastInference: true,
+      disableThinking: false,
+    });
+  } catch {
+    // Non-fatal prewarm
+  }
+
+  focusPrewarmPromise = (async () => {
+    try {
+      const status = await probeLocalNanoAvailability();
+      if (status !== 'available' || keptAliveNanoSession) return;
+      const lm = getChromeLanguageModelGlobal();
+      if (lm && typeof lm.create === 'function') {
+        keptAliveNanoSession = await lm.create({
+          expectedInputs: [{ type: 'text' }],
+        });
+      }
+    } catch {
+      // Silent background prewarm
+    } finally {
+      focusPrewarmPromise = null;
+    }
+  })();
 }
 
 // ── Execution Receipt Formatting ──────────────────────────────────────────────
@@ -285,6 +368,15 @@ function safeParseJson<T>(rawText: string): T {
   return JSON.parse(jsonSlice) as T;
 }
 
+const FAST_ENTRY_CLOUD_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash',
+] as const;
+
 const CLOUD_MODEL_FALLBACK_CHAIN = [
   'gemini-3.8-flash',
   'gemini-3.5-flash',
@@ -292,11 +384,83 @@ const CLOUD_MODEL_FALLBACK_CHAIN = [
   'gemini-2.5-flash',
 ] as const;
 
-function buildCloudModelCandidates(primaryModel: string): string[] {
+const HYBRID_ROUTE_CACHE_KEY = 'cfo_hybrid_cloud_route_v1';
+const HYBRID_ROUTE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+interface PersistedCloudRoute {
+  preferredBackend?: 'googleai' | 'agentplatform';
+  fastModel?: string;
+  deepModel?: string;
+  noThinkingModels?: string[];
+  updatedAt: number;
+}
+
+let inMemoryRouteCache: PersistedCloudRoute | null = null;
+const noThinkingConfigModels = new Set<string>();
+
+function readPersistedCloudRoute(): PersistedCloudRoute | null {
+  if (inMemoryRouteCache && Date.now() - inMemoryRouteCache.updatedAt < HYBRID_ROUTE_TTL_MS) {
+    return inMemoryRouteCache;
+  }
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(HYBRID_ROUTE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedCloudRoute;
+    if (!parsed?.updatedAt || Date.now() - parsed.updatedAt >= HYBRID_ROUTE_TTL_MS) {
+      return null;
+    }
+    for (const m of parsed.noThinkingModels || []) {
+      noThinkingConfigModels.add(m);
+    }
+    inMemoryRouteCache = parsed;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function updatePersistedCloudRoute(patch: Partial<PersistedCloudRoute>): void {
+  const prev = readPersistedCloudRoute() || { updatedAt: Date.now() };
+  const next: PersistedCloudRoute = {
+    ...prev,
+    ...patch,
+    noThinkingModels: Array.from(noThinkingConfigModels),
+    updatedAt: Date.now(),
+  };
+  inMemoryRouteCache = next;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HYBRID_ROUTE_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function buildCloudModelCandidates(
+  primaryModel: string,
+  opts?: { fastEntry?: boolean; remoteExplicit?: boolean }
+): string[] {
+  const fastEntry = Boolean(opts?.fastEntry);
+  const remoteExplicit = Boolean(opts?.remoteExplicit);
+  const route = readPersistedCloudRoute();
+  const cachedWinner = fastEntry ? route?.fastModel : route?.deepModel;
+
+  const baseChain = fastEntry
+    ? remoteExplicit
+      ? [cachedWinner, primaryModel, ...FAST_ENTRY_CLOUD_MODELS]
+      : [cachedWinner, ...FAST_ENTRY_CLOUD_MODELS, primaryModel]
+    : [cachedWinner, primaryModel, ...CLOUD_MODEL_FALLBACK_CHAIN];
+
   const seen = new Set<string>();
   const list: string[] = [];
-  for (const candidate of [primaryModel, ...CLOUD_MODEL_FALLBACK_CHAIN]) {
-    if (candidate && !/^gemini-2\.0/i.test(candidate) && !seen.has(candidate)) {
+  for (const candidate of baseChain) {
+    if (
+      candidate &&
+      !/^gemini-2\.0/i.test(candidate) &&
+      !/^gemini-1\./i.test(candidate) &&
+      !seen.has(candidate)
+    ) {
       seen.add(candidate);
       list.push(candidate);
     }
@@ -316,6 +480,11 @@ function isQuotaOrBillingDepletedError(err: unknown): boolean {
   return /429|402|prepayment credits|quota|resource_exhausted/i.test(msg);
 }
 
+function isThinkingConfigUnsupportedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return /thinking[_\s-]*(config|level|budget)|invalid_argument|400/i.test(msg) && /thinking/i.test(msg);
+}
+
 function isOnDeviceQuotaOrUnavailableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err || '');
   const name = err instanceof Error ? err.name : '';
@@ -329,65 +498,179 @@ function isOnDeviceQuotaOrUnavailableError(err: unknown): boolean {
 
 let googleAiStudioQuotaDepleted = false;
 
+function buildCloudGenerationConfig(params: {
+  cloudModel: string;
+  schema?: ReturnType<typeof Schema.object>;
+  fastInference: boolean;
+  disableThinking: boolean;
+}): GenerationConfig | undefined {
+  const { cloudModel, schema, fastInference, disableThinking } = params;
+  const cfg: GenerationConfig = {};
+
+  if (schema) {
+    cfg.responseMimeType = 'application/json';
+    cfg.responseSchema = schema;
+  }
+
+  if (fastInference) {
+    cfg.maxOutputTokens = 512;
+    if (!disableThinking && !noThinkingConfigModels.has(cloudModel)) {
+      if (/^gemini-2\.5/i.test(cloudModel)) {
+        cfg.thinkingConfig = { thinkingBudget: 0 };
+      } else if (/^gemini-3/i.test(cloudModel)) {
+        cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      }
+    }
+  }
+
+  return Object.keys(cfg).length > 0 ? cfg : undefined;
+}
+
+function getOrCreateCachedHybridModel(params: {
+  targetAi: ReturnType<typeof getFirebaseAI>;
+  backendTag: 'googleai' | 'agentplatform';
+  activeMode: InferenceMode;
+  cloudModel: string;
+  schemaKey: string;
+  schema?: ReturnType<typeof Schema.object>;
+  multimodal: boolean;
+  includeOnDeviceConstraint: boolean;
+  fastInference: boolean;
+  disableThinking: boolean;
+}): GenerativeModel {
+  const {
+    targetAi,
+    backendTag,
+    activeMode,
+    cloudModel,
+    schemaKey,
+    schema,
+    multimodal,
+    includeOnDeviceConstraint,
+    fastInference,
+    disableThinking,
+  } = params;
+
+  const cacheKey = `${backendTag}|${activeMode}|${cloudModel}|${schemaKey}|${multimodal ? 'mm' : 'txt'}|${includeOnDeviceConstraint ? 'c1' : 'c0'}|${fastInference ? 'fast' : 'deep'}|${disableThinking ? 'ntk' : 'tk'}`;
+  const cached = generativeModelCache.get(cacheKey);
+  if (cached) return cached;
+
+  const generationConfig = buildCloudGenerationConfig({
+    cloudModel,
+    schema,
+    fastInference,
+    disableThinking,
+  });
+
+  const model = getGenerativeModel(targetAi, {
+    mode: activeMode,
+    inCloudParams: {
+      model: cloudModel,
+      ...(generationConfig ? { generationConfig } : {}),
+    },
+    onDeviceParams: {
+      createOptions: {
+        expectedInputs: multimodal
+          ? [{ type: 'image' as const }, { type: 'text' as const, languages: ['en'] }]
+          : [{ type: 'text' as const, languages: ['en'] }],
+      },
+      ...(schema && includeOnDeviceConstraint
+        ? {
+            promptOptions: {
+              responseConstraint: schema,
+            },
+          }
+        : {}),
+    },
+  });
+
+  generativeModelCache.set(cacheKey, model);
+  return model;
+}
+
 async function runResilientHybridGenerateContent(params: {
   ai: ReturnType<typeof getFirebaseAI>;
   mode: InferenceMode;
   primaryCloudModel: string;
   request: string | Array<string | Part>;
   schema?: ReturnType<typeof Schema.object>;
+  schemaKey?: string;
   multimodal?: boolean;
+  fastInference?: boolean;
+  remoteExplicit?: boolean;
 }) {
-  const { ai, mode, primaryCloudModel, request, schema, multimodal = false } = params;
-  const cloudCandidates = buildCloudModelCandidates(primaryCloudModel);
+  const {
+    ai,
+    mode,
+    primaryCloudModel,
+    request,
+    schema,
+    schemaKey = 'GENERIC',
+    multimodal = false,
+    fastInference = false,
+    remoteExplicit = false,
+  } = params;
+
+  const cloudCandidates = buildCloudModelCandidates(primaryCloudModel, {
+    fastEntry: fastInference,
+    remoteExplicit,
+  });
 
   const invokeOnce = async (
     targetAi: ReturnType<typeof getFirebaseAI>,
+    backendTag: 'googleai' | 'agentplatform',
     activeMode: InferenceMode,
     cloudModel: string,
-    includeOnDeviceConstraint: boolean
+    includeOnDeviceConstraint: boolean,
+    disableThinking = false
   ) => {
-    const model = getGenerativeModel(targetAi, {
-      mode: activeMode,
-      inCloudParams: {
-        model: cloudModel,
-        ...(schema
-          ? {
-              generationConfig: {
-                responseMimeType: 'application/json',
-                responseSchema: schema,
-              },
-            }
-          : {}),
-      },
-      onDeviceParams: {
-        createOptions: {
-          expectedInputs: multimodal
-            ? [{ type: 'image' as const }, { type: 'text' as const, languages: ['en'] }]
-            : [{ type: 'text' as const, languages: ['en'] }],
-        },
-        ...(schema && includeOnDeviceConstraint
-          ? {
-              promptOptions: {
-                responseConstraint: schema,
-              },
-            }
-          : {}),
-      },
+    const model = getOrCreateCachedHybridModel({
+      targetAi,
+      backendTag,
+      activeMode,
+      cloudModel,
+      schemaKey,
+      schema,
+      multimodal,
+      includeOnDeviceConstraint,
+      fastInference,
+      disableThinking,
     });
-    return model.generateContent(request);
+    try {
+      return await model.generateContent(request);
+    } catch (err) {
+      if (fastInference && !disableThinking && isThinkingConfigUnsupportedError(err)) {
+        noThinkingConfigModels.add(cloudModel);
+        updatePersistedCloudRoute({});
+        const fallbackModel = getOrCreateCachedHybridModel({
+          targetAi,
+          backendTag,
+          activeMode,
+          cloudModel,
+          schemaKey,
+          schema,
+          multimodal,
+          includeOnDeviceConstraint,
+          fastInference,
+          disableThinking: true,
+        });
+        return await fallbackModel.generateContent(request);
+      }
+      throw err;
+    }
   };
 
   // Strict on-device execution (`SEC PRIVACY LOCK`) — never touch cloud
   if (mode === InferenceMode.ONLY_ON_DEVICE) {
     try {
       return {
-        result: await invokeOnce(ai, InferenceMode.ONLY_ON_DEVICE, cloudCandidates[0], true),
+        result: await invokeOnce(ai, 'googleai', InferenceMode.ONLY_ON_DEVICE, cloudCandidates[0], true),
         resolvedCloudModel: cloudCandidates[0],
       };
     } catch (firstErr) {
       if (schema) {
         return {
-          result: await invokeOnce(ai, InferenceMode.ONLY_ON_DEVICE, cloudCandidates[0], false),
+          result: await invokeOnce(ai, 'googleai', InferenceMode.ONLY_ON_DEVICE, cloudCandidates[0], false),
           resolvedCloudModel: cloudCandidates[0],
         };
       }
@@ -396,15 +679,25 @@ async function runResilientHybridGenerateContent(params: {
   }
 
   // Hybrid modes (`PREFER_ON_DEVICE`, `PREFER_IN_CLOUD`, `ONLY_IN_CLOUD`):
-  // Try primary GoogleAIBackend first; once AI Studio prepayment credits return 429, promote Blaze AgentPlatformBackend.
+  // Use persisted winning backend first so reloads don't repeat 429/404 hops.
+  const persistedRoute = readPersistedCloudRoute();
+  const preferAgentPlatform =
+    googleAiStudioQuotaDepleted || persistedRoute?.preferredBackend === 'agentplatform';
   const agentPlatformAi = getFirebaseAgentPlatformAI(ai.app);
-  const backends: Array<ReturnType<typeof getFirebaseAI>> = googleAiStudioQuotaDepleted
-    ? [agentPlatformAi, ai]
-    : [ai, agentPlatformAi];
+  const backends: Array<{ instance: ReturnType<typeof getFirebaseAI>; tag: 'googleai' | 'agentplatform' }> =
+    preferAgentPlatform
+      ? [
+          { instance: agentPlatformAi, tag: 'agentplatform' },
+          { instance: ai, tag: 'googleai' },
+        ]
+      : [
+          { instance: ai, tag: 'googleai' },
+          { instance: agentPlatformAi, tag: 'agentplatform' },
+        ];
 
   let lastError: unknown = null;
   for (let bIdx = 0; bIdx < backends.length; bIdx++) {
-    const targetAi = backends[bIdx];
+    const { instance: targetAi, tag: backendTag } = backends[bIdx];
     let switchBackend = false;
 
     for (let i = 0; i < cloudCandidates.length; i++) {
@@ -412,7 +705,13 @@ async function runResilientHybridGenerateContent(params: {
       const effectiveMode =
         bIdx === 0 && i === 0 ? mode : InferenceMode.ONLY_IN_CLOUD;
       try {
-        const result = await invokeOnce(targetAi, effectiveMode, candidateModel, true);
+        const result = await invokeOnce(targetAi, backendTag, effectiveMode, candidateModel, true);
+        if (normalizeInferenceSource(result.response.inferenceSource) === 'IN_CLOUD') {
+          updatePersistedCloudRoute({
+            preferredBackend: backendTag,
+            ...(fastInference ? { fastModel: candidateModel } : { deepModel: candidateModel }),
+          });
+        }
         return { result, resolvedCloudModel: candidateModel };
       } catch (err) {
         lastError = err;
@@ -427,15 +726,23 @@ async function runResilientHybridGenerateContent(params: {
           try {
             const cloudResult = await invokeOnce(
               targetAi,
+              backendTag,
               InferenceMode.ONLY_IN_CLOUD,
               candidateModel,
               false
             );
+            updatePersistedCloudRoute({
+              preferredBackend: backendTag,
+              ...(fastInference ? { fastModel: candidateModel } : { deepModel: candidateModel }),
+            });
             return { result: cloudResult, resolvedCloudModel: candidateModel };
           } catch (cloudErr) {
             lastError = cloudErr;
             if (bIdx === 0 && isQuotaOrBillingDepletedError(cloudErr)) {
-              if (targetAi === ai) googleAiStudioQuotaDepleted = true;
+              if (backendTag === 'googleai') {
+                googleAiStudioQuotaDepleted = true;
+                updatePersistedCloudRoute({ preferredBackend: 'agentplatform' });
+              }
               switchBackend = true;
               break;
             }
@@ -447,7 +754,10 @@ async function runResilientHybridGenerateContent(params: {
         }
 
         if (bIdx === 0 && isQuotaOrBillingDepletedError(err)) {
-          if (targetAi === ai) googleAiStudioQuotaDepleted = true;
+          if (backendTag === 'googleai') {
+            googleAiStudioQuotaDepleted = true;
+            updatePersistedCloudRoute({ preferredBackend: 'agentplatform' });
+          }
           switchBackend = true;
           break;
         }
@@ -466,7 +776,7 @@ async function runResilientHybridGenerateContent(params: {
 }
 
 // ── Shared Hybrid Structured Output Schemas (`Schema.object(...)`) ────────────
-// Kept compact so serialized JSON constraints fit comfortably inside Chrome Gemini Nano's inputQuota.
+// Kept ultra-compact so serialized JSON constraints & output decode fly on Chrome Gemini Nano.
 
 export const ledgerEntrySchema = Schema.object({
   properties: {
@@ -483,11 +793,8 @@ export const ledgerEntrySchema = Schema.object({
           fiberG: Schema.number(),
           alcoholDrinks: Schema.number(),
           hasSeedOils: Schema.boolean(),
-          cfoCategory: Schema.enumString({
-            enum: ['CAPITAL_ASSET_INFLOW', 'LIABILITY_EXPOSURE', 'OPERATING_FUEL'],
-          }),
         },
-        optionalProperties: ['quantityText', 'fiberG', 'alcoholDrinks', 'hasSeedOils', 'cfoCategory'],
+        optionalProperties: ['quantityText', 'fiberG', 'alcoholDrinks', 'hasSeedOils'],
       }),
     }),
     workouts: Schema.array({
@@ -505,6 +812,7 @@ export const ledgerEntrySchema = Schema.object({
     }),
     cfoAuditNote: Schema.string(),
   },
+  optionalProperties: ['workouts', 'cfoAuditNote'],
 });
 
 export const expenseReceiptSchema = Schema.object({
@@ -613,11 +921,11 @@ export async function parseTickerTapeHybrid(params: {
 
   const prompt = truncateForNanoBudget(
     [
-      'Return JSON matching {foods:[{name,quantityText,portionG,calories,proteinG,carbsG,fatG,fiberG,alcoholDrinks,hasSeedOils,cfoCategory}],workouts:[{name,category,durationMin,estimatedCaloriesBurned}],cfoAuditNote}.',
-      personaDirective(rc.cfoPersonaStrictness),
+      'Parse meal/workout shorthand into JSON {foods:[{name,quantityText,portionG,calories,proteinG,carbsG,fatG,fiberG,alcoholDrinks,hasSeedOils}],workouts:[{name,category,durationMin,estimatedCaloriesBurned}],cfoAuditNote}.',
+      'Keep cfoAuditNote <= 10 words, crisp Wall Street CFO tone.',
       `Input: "${trimmed}"`,
     ].join('\n'),
-    3_500
+    2_000
   );
 
   const startedAt = performance.now();
@@ -628,6 +936,9 @@ export async function parseTickerTapeHybrid(params: {
       primaryCloudModel: rc.cfoCloudModel,
       request: prompt,
       schema: ledgerEntrySchema,
+      schemaKey: 'TICKER_TAPE',
+      fastInference: true,
+      remoteExplicit: rc.source === 'remote',
     });
 
     const latencyMs = performance.now() - startedAt;
@@ -707,7 +1018,8 @@ export async function normalizeImageFileForHybrid(
   return new Promise<NormalizedInlineImage>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const maxDim = 960;
+      // 768px max fits inside a single 258-token Gemini vision tile (vs 4 tiles at >768px)
+      const maxDim = 768;
       const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
       const width = Math.max(1, Math.round(img.width * scale));
       const height = Math.max(1, Math.round(img.height * scale));
@@ -724,12 +1036,54 @@ export async function normalizeImageFileForHybrid(
       const outUri =
         targetMime === 'image/png'
           ? canvas.toDataURL('image/png')
-          : canvas.toDataURL('image/jpeg', 0.84);
+          : canvas.toDataURL('image/jpeg', 0.8);
       const base64Data = outUri.split(',')[1] || '';
       resolve({ mimeType: targetMime, base64Data, previewDataUri: outUri });
     };
     img.onerror = () => reject(new Error('Could not decode uploaded meal photo.'));
     img.src = rawDataUri;
+  });
+}
+
+/**
+ * Ensures any data URI (including `image/webp` or `1024px` composer images) is
+ * converted into a compact `<= 768px` `image/jpeg` single-tile payload accepted
+ * by both Chrome Gemini Nano (`['image/jpeg', 'image/png']`) and Cloud Gemini.
+ */
+export async function downscaleDataUriForHybrid(
+  dataUri: string,
+  maxDim = 768,
+  quality = 0.8
+): Promise<NormalizedInlineImage> {
+  if (typeof document === 'undefined') {
+    return dataUriToInlineImage(dataUri);
+  }
+  return new Promise<NormalizedInlineImage>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+      const isAlreadyJpeg = /^data:image\/jpeg;base64,/i.test(dataUri);
+      if (scale === 1 && isAlreadyJpeg) {
+        resolve(dataUriToInlineImage(dataUri));
+        return;
+      }
+      const width = Math.max(1, Math.round(img.width * scale));
+      const height = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUriToInlineImage(dataUri));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      const outUri = canvas.toDataURL('image/jpeg', quality);
+      const base64Data = outUri.split(',')[1] || '';
+      resolve({ mimeType: 'image/jpeg', base64Data, previewDataUri: outUri });
+    };
+    img.onerror = () => resolve(dataUriToInlineImage(dataUri));
+    img.src = dataUri;
   });
 }
 
@@ -804,10 +1158,8 @@ export async function auditMealPhotoReceiptHybrid(params: {
 
   const textPrompt = truncateForNanoBudget(
     [
-      'You are the Chief Fitness Officer Multimodal Expense Receipt Auditor.',
-      personaDirective(rc.cfoPersonaStrictness),
-      'Inspect this meal photo or nutrition facts label. Identify every visible food item or nutrition panel serving, estimate portion grams and macros, flag seed oils or alcohol liabilities, and issue a crisp CFO Expense Audit verdict.',
-      note?.trim() ? `Auditor Note from User: "${note.trim()}"` : '',
+      'CFO Multimodal Expense Receipt Auditor: identify visible food items or nutrition label servings, estimate portionG and macros, flag seedOils/alcoholDrinks, and issue auditVerdict + concise cfoCommentary (<= 14 words).',
+      note?.trim() ? `User Note: "${note.trim()}"` : '',
     ]
       .filter(Boolean)
       .join('\n')
@@ -822,7 +1174,10 @@ export async function auditMealPhotoReceiptHybrid(params: {
       primaryCloudModel: rc.cfoCloudModel,
       request: [textPrompt, imagePart],
       schema: expenseReceiptSchema,
+      schemaKey: 'EXPENSE_RECEIPT',
       multimodal: true,
+      fastInference: true,
+      remoteExplicit: rc.source === 'remote',
     });
 
     const latencyMs = performance.now() - startedAt;
@@ -961,7 +1316,10 @@ export async function runHybridCoachTurn(params: {
       mode,
       primaryCloudModel: rc.cfoCloudModel,
       request: requestParts,
+      schemaKey: 'HYBRID_COACH',
       multimodal: attachedImages.length > 0,
+      fastInference: secPrivacyLock,
+      remoteExplicit: rc.source === 'remote',
     });
     const latencyMs = performance.now() - startedAt;
     const replyText = result.response.text().trim();
@@ -1084,6 +1442,8 @@ export async function runQuarterlyEarningsCallHybrid(params: {
       primaryCloudModel: rc.cfoCloudModel,
       request: prompt,
       schema: earningsCallSchema,
+      schemaKey: 'EARNINGS_CALL',
+      remoteExplicit: rc.source === 'remote',
     });
     const latencyMs = performance.now() - startedAt;
     const parsed = safeParseJson<Partial<QuarterlyEarningsCallResult>>(result.response.text());
