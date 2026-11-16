@@ -130,6 +130,7 @@ async function resolveOrCreateUidForDiscordUser(
   discordUserId: string,
   channelId?: string,
   autoCreate = false,
+  discordDisplayName?: string,
 ): Promise<string | null> {
   const db = getAdminFirestore();
   const snap = await db
@@ -165,7 +166,11 @@ async function resolveOrCreateUidForDiscordUser(
   }
 
   if (!snap.empty) {
-    return snap.docs[0].id;
+    const existingUid = snap.docs[0].id;
+    if (discordDisplayName && !snap.docs[0].data()?.displayName) {
+      await db.doc(`users/${existingUid}`).set({ displayName: discordDisplayName }, { merge: true }).catch(() => null);
+    }
+    return existingUid;
   }
 
   if (!autoCreate) return null;
@@ -185,6 +190,9 @@ async function resolveOrCreateUidForDiscordUser(
       nightHour: 19,
     },
   });
+  if (discordDisplayName) {
+    await db.doc(`users/${syntheticUid}`).set({ displayName: discordDisplayName }, { merge: true }).catch(() => null);
+  }
   return syntheticUid;
 }
 
@@ -219,6 +227,8 @@ export async function POST(request: NextRequest) {
 
   const discordUser = interaction.member?.user ?? interaction.user;
   const discordUserId = discordUser?.id ? String(discordUser.id) : null;
+  const discordDisplayName =
+    String(interaction.member?.nick || discordUser?.global_name || discordUser?.username || '').trim() || undefined;
   const channelId = interaction.channel_id ? String(interaction.channel_id) : undefined;
 
   if (!discordUserId) {
@@ -268,7 +278,7 @@ export async function POST(request: NextRequest) {
       const dmChannelId = dmOpened.channelId || channelId;
 
       const uid =
-        matchedUid || (await resolveOrCreateUidForDiscordUser(discordUserId, dmChannelId, true))!;
+        matchedUid || (await resolveOrCreateUidForDiscordUser(discordUserId, dmChannelId, true, discordDisplayName))!;
       await saveUserOutreachSettings({
         uid,
         outreach: {
@@ -308,6 +318,7 @@ export async function POST(request: NextRequest) {
       discordUserId,
       channelId,
       cmdName === 'eat' || cmdName === 'status',
+      discordDisplayName,
     );
     if (!uid) {
       return NextResponse.json({
@@ -450,7 +461,63 @@ export async function POST(request: NextRequest) {
       return buildLogMealModalResponse();
     }
 
-    const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true);
+    // 1-Tap Server Enroll Button (`outreach:enroll`)
+    if (parts[0] === 'outreach' && parts[1] === 'enroll') {
+      const tz = parts[2] || 'America/New_York';
+      const dmOpened = await openDiscordDmChannel(discordUserId);
+      const dmChannelId = dmOpened.channelId || channelId;
+      const uid = (await resolveOrCreateUidForDiscordUser(
+        discordUserId,
+        dmChannelId,
+        true,
+        discordDisplayName,
+      ))!;
+      await saveUserOutreachSettings({
+        uid,
+        outreach: {
+          enabled: true,
+          channel: 'discord',
+          cadence: '3x',
+          discordUserId,
+          discordChannelId: dmChannelId,
+          timezone: tz,
+          morningHour: 7,
+          middayHour: 12,
+          nightHour: 19,
+        },
+      });
+      const { composed } = await buildLiveUserOutreach({ uid });
+      await sendOutreachDiscordDM({
+        uid,
+        discordUserId,
+        discordChannelId: dmChannelId,
+        cadence: '3x',
+        composed,
+      }).catch(() => null);
+      const ledgerUrl = buildOutreachActionUrl({ uid, action: 'view_ledger' });
+      return NextResponse.json({
+        type: 4,
+        data: {
+          content: `**You're Enrolled${discordDisplayName ? `, ${discordDisplayName}` : ''}! ($0)**\nJust sent your first live Eat-By Briefing to your **Discord DMs**.\n\n**Right Now:** ${composed.headline}\n${composed.body}\n\n• Reply right in our DM in plain English (e.g. _"3 eggs and toast"_) or drop a meal photo.\n• Or use \`/eat\` and \`/status\` anytime.`,
+          flags: EPHEMERAL_FLAG,
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 5,
+                  label: 'Open Live Web Ledger',
+                  url: ledgerUrl,
+                },
+              ],
+            },
+          ],
+        },
+      });
+    }
+
+    const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true, discordDisplayName);
     if (!uid) {
       return NextResponse.json({
         type: 4,
@@ -496,7 +563,7 @@ export async function POST(request: NextRequest) {
 
   // 4. Modal Submit (`type === 5`)
   if (interaction.type === 5 && interaction.data?.custom_id === 'outreach:modal_submit:log_meal') {
-    const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true);
+    const uid = await resolveOrCreateUidForDiscordUser(discordUserId, channelId, true, discordDisplayName);
     const rows = interaction.data?.components ?? [];
     const rawMeal = String(rows?.[0]?.components?.[0]?.value || '').trim();
 

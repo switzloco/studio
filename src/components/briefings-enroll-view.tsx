@@ -378,21 +378,20 @@ export function BriefingsEnrollView() {
                         </>
                       ) : (
                         <div className="space-y-3">
-                          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-3.5 space-y-2">
-                            <p className="text-xs font-bold text-foreground">
-                              Fastest Setup (Zero ID Needed):
+                          <div className="rounded-2xl border-2 border-indigo-500/40 bg-indigo-500/5 p-4 space-y-2.5">
+                            <p className="text-xs font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                              Instant Setup · No ID Needed
                             </p>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                              Add <strong>the CFO</strong> to Discord in 1 click, then type{' '}
-                              <code className="font-mono font-bold text-foreground">/start</code> (or{' '}
-                              <code className="font-mono font-bold text-foreground">/start email:you@gmail.com</code>) right in Discord.
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              <strong>1.</strong> Tap <strong>Add the CFO to Discord</strong> below.<br />
+                              <strong>2.</strong> Type <code className="font-mono font-bold text-foreground">/start</code> (or <code className="font-mono font-bold text-foreground">/eat</code>) anywhere in Discord — or click the <strong>Start 3x/Day DM Briefings</strong> button in our server. Your ledger &amp; history save to your Discord account automatically.
                             </p>
                             <Button
                               asChild
                               type="button"
                               variant="default"
                               size="sm"
-                              className="w-full h-10 rounded-xl font-black uppercase tracking-wider text-xs gap-2"
+                              className="w-full h-11 rounded-xl font-black uppercase tracking-wider text-xs gap-2 shadow-md"
                             >
                               <a
                                 href={`https://discord.com/oauth2/authorize?client_id=${process.env.NEXT_PUBLIC_DISCORD_APP_ID || '1570868560065077420'}`}
@@ -400,26 +399,30 @@ export function BriefingsEnrollView() {
                                 rel="noopener noreferrer"
                               >
                                 <MessageCircle className="w-4 h-4" />
-                                1-Click Add to Discord
+                                Add the CFO to Discord (1-Click)
                               </a>
                             </Button>
                           </div>
 
-                          <div className="space-y-1.5">
-                            <Label htmlFor="briefings-discord" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-                              Or Enroll Directly by Discord User ID (17–20 Digits)
-                            </Label>
-                            <Input
-                              id="briefings-discord"
-                              type="text"
-                              inputMode="numeric"
-                              required
-                              placeholder="123456789012345678"
-                              value={discordUserId}
-                              onChange={(e) => setDiscordUserId(e.target.value)}
-                              className="h-12 rounded-xl font-mono text-sm"
-                            />
-                          </div>
+                          <details className="rounded-xl border border-border/60 px-3.5 py-2.5 text-xs">
+                            <summary className="cursor-pointer font-bold text-muted-foreground hover:text-foreground">
+                              Advanced: Enroll by numeric Discord User ID instead
+                            </summary>
+                            <div className="space-y-1.5 pt-2.5">
+                              <Label htmlFor="briefings-discord" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+                                Discord User ID (17–20 Digits)
+                              </Label>
+                              <Input
+                                id="briefings-discord"
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="123456789012345678"
+                                value={discordUserId}
+                                onChange={(e) => setDiscordUserId(e.target.value)}
+                                className="h-11 rounded-xl font-mono text-sm"
+                              />
+                            </div>
+                          </details>
                         </div>
                       )}
                     </div>
