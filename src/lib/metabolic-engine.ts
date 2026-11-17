@@ -104,8 +104,8 @@ function timeToSlot(minutesSinceMidnight: number): number {
 }
 
 export function computeMuscleGlycogenMaxKcal(weightKg?: number, bodyFatPct?: number, hasCreatine?: boolean): number {
-  const kg = weightKg ?? 70;
-  const bfFraction = (bodyFatPct ?? 20) / 100;
+  const kg = weightKg && weightKg > 0 ? weightKg : 70;
+  const bfFraction = (bodyFatPct && bodyFatPct > 0 ? bodyFatPct : 20) / 100;
   const leanKg = kg * (1 - bfFraction);
   let baseMax = leanKg * 60;
   if (hasCreatine) baseMax *= 1.15;

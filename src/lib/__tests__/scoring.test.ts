@@ -98,6 +98,11 @@ describe('VF v2 — Alpert-normalized scale', () => {
     expect(heavier.breakdown.pointsDenominator).toBeGreaterThan(lean.breakdown.pointsDenominator);
   });
 
+  it('treats 0 or undefined weightKg/bodyFatPct as unset defaults (1162 kcal) instead of collapsing to the 500 kcal floor', () => {
+    expect(computeAlpertNumber(undefined, undefined)).toBe(1162);
+    expect(computeAlpertNumber(0, 0)).toBe(1162);
+  });
+
   it('rewards a clean deficit day with a positive score', () => {
     expect(calculateDailyVFScore(cleanDay()).score).toBeGreaterThan(0);
   });

@@ -52,8 +52,8 @@ export const LIVER_MAX_KCAL = 400; // 100g × 4 kcal/g
  * Falls back to 500 g (2000 kcal) when no body comp is available.
  */
 export function computeMaxGlycogenKcal(weightKg?: number, bodyFatPct?: number): number {
-    if (!weightKg) return 2000;
-    const bfFraction = bodyFatPct != null ? bodyFatPct / 100 : 0.25;
+    if (!weightKg || weightKg <= 0) return 2000;
+    const bfFraction = bodyFatPct != null && bodyFatPct > 0 ? bodyFatPct / 100 : 0.25;
     const leanKg = weightKg * (1 - bfFraction);
     const glycogenG = Math.min(700, Math.max(300, Math.round(leanKg * 15 + 100)));
     return glycogenG * 4;

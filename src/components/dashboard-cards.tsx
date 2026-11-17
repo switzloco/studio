@@ -367,7 +367,11 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const fitbitForDate = !isViewingToday ? (data?.fitbitByDate?.[selectedDateStr] ?? null) : todayFitbitSnapshot;
   const isLegacyFitbit = fitbitCreds?.provider === 'fitbit';
 
-  const bmrKcal = estimateBmrKcal(data?.weightKg, data?.heightCm, prefs?.profile?.age);
+  const effectiveWeightKg = data?.weightKg ?? prefs?.profile?.weightKg;
+  const effectiveBodyFatPct = data?.bodyFatPct ?? prefs?.profile?.bodyFatPct;
+  const effectiveHeightCm = data?.heightCm ?? prefs?.profile?.heightCm;
+
+  const bmrKcal = estimateBmrKcal(effectiveWeightKg, effectiveHeightCm, prefs?.profile?.age);
 
   const dailyProteinG = computedTotals?.proteinG ?? (isViewingToday ? (data?.dailyProteinG || 0) : (historyEntry?.breakdown?.proteinG || 0));
   const dailyCaloriesIn = computedTotals?.caloriesIn ?? (isViewingToday ? (data?.dailyCaloriesIn || 0) : (historyEntry?.breakdown?.caloriesIn || 0));
@@ -415,7 +419,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
   const showRecovery = prefs?.display?.showRecovery ?? true;
   const showVfScore = prefs?.display?.showVfScore ?? true;
 
-  const alpertNumber = computeAlpertNumber(data?.weightKg || 0, data?.bodyFatPct || 0);
+  const alpertNumber = computeAlpertNumber(effectiveWeightKg, effectiveBodyFatPct);
   const scoredCaloriesOut = historyEntry?.breakdown?.scoredCaloriesOut
     ?? creditedCaloriesOut(dailyCaloriesOut, bmrKcal);
   const alpertDeficit = scoredCaloriesOut - dailyCaloriesIn;
@@ -470,9 +474,9 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
       alcoholDrinks: Number(lockAlcoholDrinks) || 0,
       sleepHours: data.sleepHours ?? 7,
       seedOilMeals: 0,
-      weightKg: data.weightKg,
-      bodyFatPct: data.bodyFatPct,
-      heightCm: data.heightCm,
+      weightKg: effectiveWeightKg,
+      bodyFatPct: effectiveBodyFatPct,
+      heightCm: effectiveHeightCm,
       age: prefs?.profile?.age,
       foodLogs: todayFoodLogs ?? undefined,
       prevFoodLogs: prevFoodLogs ?? undefined,
@@ -531,7 +535,7 @@ export function DashboardCards({ data, isLoading }: DashboardCardsProps) {
 
   const simulationResult = React.useMemo(() => {
     if (!data || dailyCaloriesOut <= 0) return null;
-    const muscleMax = computeMuscleGlycogenMaxKcal(data.weightKg, data.bodyFatPct);
+    const muscleMax = computeMuscleGlycogenMaxKcal(effectiveWeightKg, effectiveBodyFatPct);
     const now = new Date();
     const hoursElapsedNow = isViewingToday ? Math.max(1, now.getHours() + now.getMinutes() / 60) : 24;
     const projectedFullDayScoredOut =

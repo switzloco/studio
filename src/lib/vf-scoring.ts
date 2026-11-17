@@ -64,8 +64,8 @@ const MEAL_DEFAULT_MIN: Record<string, number> = {
 
 /** Compute maximum sustainable fat oxidation in kcal/day (Alpert 2005). */
 export function computeAlpertNumber(weightKg?: number, bodyFatPct?: number): number {
-  const kg = weightKg ?? 68;           // ~150 lbs default
-  const bfFraction = bodyFatPct != null ? bodyFatPct / 100 : 0.25;
+  const kg = weightKg && weightKg > 0 ? weightKg : 68; // ~150 lbs default
+  const bfFraction = bodyFatPct != null && bodyFatPct > 0 ? bodyFatPct / 100 : 0.25;
   const fatMassLbs = kg * bfFraction * 2.20462;
   return Math.round(Math.max(500, fatMassLbs * 31)); // floor at 500 to avoid div-by-zero extremes
 }

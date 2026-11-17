@@ -138,6 +138,7 @@ export interface ChatSession {
 export interface UserProfile {
   heightCm?: number;
   weightKg?: number;
+  bodyFatPct?: number;
   age?: number;
   activityLevel?: 'sedentary' | 'light' | 'moderate' | 'active';
   goals?: string[];
