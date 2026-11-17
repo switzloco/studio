@@ -230,6 +230,11 @@ export async function POST(request: NextRequest) {
   const discordDisplayName =
     String(interaction.member?.nick || discordUser?.global_name || discordUser?.username || '').trim() || undefined;
   const channelId = interaction.channel_id ? String(interaction.channel_id) : undefined;
+  // In a 1:1 Bot DM (`!interaction.guild_id`), post responses as normal persistent messages (`flags: 0`)
+  // so they sync across the user's phone AND desktop Discord clients (ephemeral `flags: 64` messages
+  // only appear on the active device and vanish on reload/device switch).
+  const isDirectMessage = !interaction.guild_id;
+  const responseFlags = isDirectMessage ? undefined : EPHEMERAL_FLAG;
 
   if (!discordUserId) {
     return NextResponse.json({
@@ -351,7 +356,7 @@ export async function POST(request: NextRequest) {
         type: 4,
         data: {
           ...statusPayload,
-          flags: EPHEMERAL_FLAG,
+          ...(responseFlags ? { flags: responseFlags } : {}),
         },
       });
     }
@@ -446,7 +451,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (prevents Discord 3.0s timeout on LLM parse)
-        data: { flags: EPHEMERAL_FLAG },
+        data: responseFlags ? { flags: responseFlags } : {},
       });
     }
   }
@@ -539,7 +544,7 @@ export async function POST(request: NextRequest) {
         type: 4,
         data: {
           content: `**${res.title}** — ${res.detail}${clockNote}`,
-          flags: EPHEMERAL_FLAG,
+          ...(responseFlags ? { flags: responseFlags } : {}),
         },
       });
     }
@@ -555,7 +560,7 @@ export async function POST(request: NextRequest) {
         type: 4,
         data: {
           content: `**${res.title}** — ${res.detail}${clockNote}`,
-          flags: EPHEMERAL_FLAG,
+          ...(responseFlags ? { flags: responseFlags } : {}),
         },
       });
     }
@@ -620,7 +625,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
-      data: { flags: EPHEMERAL_FLAG },
+      data: responseFlags ? { flags: responseFlags } : {},
     });
   }
 
