@@ -13,6 +13,8 @@ export interface UserRosterRow {
   lastActiveDate: string | null;
   foodLogsPeriod: number;
   exerciseLogsPeriod: number;
+  /** True only when the user has explicitly consented AND the founder has greenlit food-detail sharing. Defaults to false. */
+  shareFoodDetailsWithFounder?: boolean;
   latestMealLabel: string | null;
   dailyProteinG: number;
   proteinGoalG: number;
@@ -234,15 +236,24 @@ export async function getUserSummaryMetrics(periodDays = 3): Promise<UserSummary
           else outreach3xUsers++;
         }
 
-        // Latest meal in period
+        // Privacy-by-default: only capture what the user ate if BOTH user permission and founder greenlight are true.
+        // Otherwise only track activity dates and log counts (whether they are actively using it or not).
+        const shareFoodDetailsWithFounder = Boolean(
+          data.shareFoodDetailsWithFounder === true &&
+            (prefs as any)?.privacy?.shareFoodDetailsWithFounder === true,
+        );
+
         let latestMealLabel: string | null = null;
         let latestMealKey = '';
         foodSnap.docs.forEach((fDoc) => {
           const f = fDoc.data();
+          if (f.ignored) return;
           const sortKey = `${f.date || ''}T${f.consumedAt || '00:00'}`;
-          if (sortKey >= latestMealKey && f.name) {
+          if (sortKey >= latestMealKey) {
             latestMealKey = sortKey;
-            latestMealLabel = `${f.name} (${Math.round(f.calories || 0)} kcal, ${Math.round(f.proteinG || 0)}g P)`;
+            if (shareFoodDetailsWithFounder && f.name) {
+              latestMealLabel = `${f.name} (${Math.round(f.calories || 0)} kcal, ${Math.round(f.proteinG || 0)}g P)`;
+            }
           }
         });
 
@@ -297,8 +308,9 @@ export async function getUserSummaryMetrics(periodDays = 3): Promise<UserSummary
           lastActiveDate: data.lastActiveDate || (latestMealKey ? latestMealKey.split('T')[0] : null),
           foodLogsPeriod: foodSnap.size,
           exerciseLogsPeriod: exSnap.size,
+          shareFoodDetailsWithFounder,
           latestMealLabel,
-          dailyProteinG: Math.round(Number(data.dailyProteinG || 0)),
+          dailyProteinG: shareFoodDetailsWithFounder ? Math.round(Number(data.dailyProteinG || 0)) : 0,
           proteinGoalG: Math.round(Number(prefs?.targets?.proteinGoal || 150)),
           visceralFatPoints: Math.round(Number(data.visceralFatPoints || 0)),
           aiCallsPeriod: userAiCalls,
@@ -383,9 +395,19 @@ export function renderUserSummaryEmailHtml(params: {
       const newBadge = u.isNewInPeriod
         ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:800;">NEW</span>`
         : '';
-      const latestMealHtml = u.latestMealLabel
-        ? `<div style="font-size:11px;color:#475569;margin-top:3px;">Last: ${escapeHtml(u.latestMealLabel)}</div>`
-        : '';
+      const isActivelyUsing =
+        u.foodLogsPeriod > 0 ||
+        u.exerciseLogsPeriod > 0 ||
+        u.aiCallsPeriod > 0 ||
+        (u.lastActiveDate != null && u.lastActiveDate >= metrics.dateRange.start);
+      const usageStatusBadge = isActivelyUsing
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:800;">Actively Using</span>`
+        : `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:11px;font-weight:700;">Quiet</span>`;
+
+      const optedInMealHtml =
+        u.shareFoodDetailsWithFounder && u.latestMealLabel
+          ? `<div style="font-size:11px;color:#475569;margin-top:3px;">Shared: ${escapeHtml(u.latestMealLabel)}</div>`
+          : `<div style="font-size:10px;color:#94a3b8;margin-top:3px;">Food details private</div>`;
 
       return `
         <tr style="border-bottom:1px solid #e2e8f0;">
@@ -404,12 +426,13 @@ export function renderUserSummaryEmailHtml(params: {
             }
           </td>
           <td style="padding:10px 8px;vertical-align:top;font-size:12px;color:#0f172a;">
-            <strong>${u.foodLogsPeriod}</strong> meals · <strong>${u.exerciseLogsPeriod}</strong> ex
-            ${latestMealHtml}
+            <div style="margin-bottom:3px;">${usageStatusBadge}</div>
+            <div style="font-size:11px;color:#475569;"><strong>${u.foodLogsPeriod}</strong> entries · <strong>${u.exerciseLogsPeriod}</strong> workouts</div>
+            ${optedInMealHtml}
           </td>
           <td style="padding:10px 8px;vertical-align:top;font-size:12px;color:#0f172a;">
             <div>${escapeHtml(u.lastActiveDate || '—')}</div>
-            <div style="font-size:11px;color:#64748b;">${u.dailyProteinG}/${u.proteinGoalG}g P · VF ${u.visceralFatPoints}</div>
+            <div style="font-size:11px;color:#64748b;">${u.isNewInPeriod ? 'Joined this window' : u.lastActiveDate ? 'Last active date' : 'No activity yet'}</div>
           </td>
           <td style="padding:10px 8px;vertical-align:top;text-align:right;font-size:12px;color:#0f172a;white-space:nowrap;">
             <div><strong>${u.aiCallsPeriod}</strong> calls</div>
@@ -474,8 +497,8 @@ export function renderUserSummaryEmailHtml(params: {
           <tr style="background:#f8fafc;border-bottom:1px solid #cbd5e1;text-align:left;font-size:11px;color:#475569;text-transform:uppercase;">
             <th style="padding:8px;">User</th>
             <th style="padding:8px;">Briefings</th>
-            <th style="padding:8px;">${metrics.periodDays}d Activity</th>
-            <th style="padding:8px;">Latest Snapshot</th>
+            <th style="padding:8px;">${metrics.periodDays}d Usage</th>
+            <th style="padding:8px;">Last Active</th>
             <th style="padding:8px;text-align:right;">${metrics.periodDays}d AI</th>
           </tr>
         </thead>

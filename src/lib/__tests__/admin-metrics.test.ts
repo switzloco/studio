@@ -55,7 +55,63 @@ describe('renderUserSummaryEmailHtml', () => {
     expect(html).toContain('3-Day Founder User Summary');
     expect(html).toContain('4 Active Users · 3 on Daily Briefings');
     expect(html).toContain('gina.switzer@gmail.com');
-    expect(html).toContain('Salmon &amp; Asparagus (520 kcal, 46g P)');
+    expect(html).toContain('Actively Using');
+    expect(html).toContain('Food details private');
+    expect(html).not.toContain('Salmon &amp; Asparagus');
     expect(html).toContain('$0.0124');
+  });
+
+  it('only renders latestMealLabel when shareFoodDetailsWithFounder is explicitly enabled', () => {
+    const metrics: UserSummaryMetrics = {
+      periodDays: 3,
+      dateRange: { start: '2026-11-10', end: '2026-11-12' },
+      totalUsers: 1,
+      registeredUsers: 1,
+      anonymousUsers: 0,
+      dau: 1,
+      activeUsersPeriod: 1,
+      wau: 1,
+      newUsersPeriod: 0,
+      newUsersWeek: 0,
+      outreachActiveUsers: 1,
+      outreach3xUsers: 1,
+      outreachMorningOnlyUsers: 0,
+      totalFoodLogsPeriod: 2,
+      totalExerciseLogsPeriod: 0,
+      totalFoodLogsWeek: 2,
+      totalExerciseLogsWeek: 0,
+      totalLLMCallsPeriod: 2,
+      totalLLMCallsWeek: 2,
+      totalAiCostUsdPeriod: 0.0003,
+      roster: [
+        {
+          uid: 'u1',
+          name: 'Opted-In User',
+          email: 'optin@example.com',
+          tier: 'free',
+          outreachStatus: '3x/day Email',
+          outreachActive: true,
+          lastOutreachInteraction: '2026-11-12',
+          lastActiveDate: '2026-11-12',
+          foodLogsPeriod: 2,
+          exerciseLogsPeriod: 0,
+          shareFoodDetailsWithFounder: true,
+          latestMealLabel: 'Salmon & Asparagus (520 kcal, 46g P)',
+          dailyProteinG: 110,
+          proteinGoalG: 150,
+          visceralFatPoints: 143,
+          aiCallsPeriod: 2,
+          aiCostUsdPeriod: 0.0003,
+          isNewInPeriod: false,
+        },
+      ],
+    };
+
+    const html = renderUserSummaryEmailHtml({
+      metrics,
+      summary: '1 user active.',
+    });
+
+    expect(html).toContain('Shared: Salmon &amp; Asparagus (520 kcal, 46g P)');
   });
 });

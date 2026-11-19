@@ -22,10 +22,14 @@ export async function generateFounderUserSummary(periodDays = 3): Promise<{
 
   const topActiveLines = metrics.roster
     .slice(0, 12)
-    .map(
-      (u) =>
-        `- ${u.name} (${u.email}): Briefings=${u.outreachStatus}, ${metrics.periodDays}d=${u.foodLogsPeriod} meals/${u.exerciseLogsPeriod} ex, last=${u.lastActiveDate || 'none'}, AI=$${u.aiCostUsdPeriod.toFixed(4)}`,
-    )
+    .map((u) => {
+      const isActivelyUsing =
+        u.foodLogsPeriod > 0 ||
+        u.exerciseLogsPeriod > 0 ||
+        u.aiCallsPeriod > 0 ||
+        (u.lastActiveDate != null && u.lastActiveDate >= metrics.dateRange.start);
+      return `- ${u.name} (${u.email}): status=${isActivelyUsing ? 'Actively Using' : 'Quiet'}, Briefings=${u.outreachStatus}, ${metrics.periodDays}d=${u.foodLogsPeriod} entries/${u.exerciseLogsPeriod} workouts, lastActive=${u.lastActiveDate || 'none'}, AI=$${u.aiCostUsdPeriod.toFixed(4)}`;
+    })
     .join('\n');
 
   const promptText = `You are the Chief Operating Analyst for "the CFO" fitness app reporting directly to founder Nick Switzer.
@@ -33,12 +37,12 @@ Write a crisp, direct 2–3 sentence executive pulse covering the last ${metrics
 - Registered users: ${metrics.registeredUsers} (+${metrics.newUsersPeriod} new; ${metrics.anonymousUsers} anon sessions)
 - Active (${metrics.periodDays}d / 24h): ${metrics.activeUsersPeriod} / ${metrics.dau}
 - Daily Briefings active: ${metrics.outreachActiveUsers} (${metrics.outreach3xUsers} on 3x/day, ${metrics.outreachMorningOnlyUsers} on 1x AM)
-- Volume: ${metrics.totalFoodLogsPeriod} meals, ${metrics.totalExerciseLogsPeriod} workouts
+- Volume: ${metrics.totalFoodLogsPeriod} logged entries, ${metrics.totalExerciseLogsPeriod} workouts
 - Total AI spend: ${metrics.totalLLMCallsPeriod} calls ($${metrics.totalAiCostUsdPeriod.toFixed(4)})
 Top roster snapshot:
 ${topActiveLines || '(none)'}
 
-Plain text only (no markdown headers or bullets). Mention specific active/enrolled users by first name or email handle where notable, call out anyone enrolled on briefings with 0 meals logged if applicable, and note unit cost health.`;
+Plain text only (no markdown headers or bullets). Focus strictly on whether users are actively using the product or quiet (never mention specific foods or calorie/macro intake), call out anyone enrolled on briefings who has been quiet if applicable, and note unit cost health.`;
 
   try {
     let res;
