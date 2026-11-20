@@ -14,26 +14,27 @@ In `the CFO`'s double-entry biometric accounting engine:
 
 ## Hybrid AI Architecture (`#BuildHybridAI 2026`)
 
-Built for Google's **#BuildHybridAI 2026** hackathon, `the CFO` routes every user interaction across **On-Device Gemini Nano** (via Chrome's Prompt API + Multimodal Prompt API) and **Cloud Gemini** (`gemini-3.8-flash` configured dynamically via Firebase Remote Config) using a single unified `firebase/ai` Web SDK surface:
+Built for Google's **#BuildHybridAI 2026** hackathon, `the CFO` unifies **On-Device Gemini Nano** (via Chrome's Prompt API + Multimodal Prompt API) and **Cloud Gemini** (`firebase/ai` Hybrid SDK) inside a single **`[ ⚡ Entry | 🧠 Coach ]`** composer so 85% of everyday logging runs locally at **`$0.00 GAS`**, while deep coaching and 30-day portfolio forecasting route to the cloud:
 
 | Capability | `InferenceMode` | Why Hybrid / On-Device Wins |
 | :--- | :--- | :--- |
-| **Top-Bar Local AI Telemetry & Warmup** | `LanguageModel.availability()` + `create({ monitor })` | 1-click **`WARM LOCAL NANO ENGINE`** downloads/warms Gemini Nano weights with a live CRT progress bar (`DOWNLOADING NANO: 68%` -> `NANO ENGINE: ONLINE`). |
-| **Feature A — Instant "Ticker Tape" Macro & Workout Parser** | `InferenceMode.PREFER_ON_DEVICE` | Sub-second natural-language shorthand parsing (`"3 eggs, 1 cup oats, black coffee, and 35 min heavy squats"`) at **`$0.00 GAS`** and **100% offline**, using `Schema.object(...)` passed simultaneously to `onDeviceParams.promptOptions.responseConstraint` and `inCloudParams.generationConfig.responseSchema`, reconciled locally against an embedded USDA FoodData Central + Compendium METs engine. |
-| **Feature B — Multimodal "Expense Receipt" Meal & Label Auditor** | `InferenceMode.PREFER_ON_DEVICE` | Converts meal/label photos to normalized `image/jpeg` or `image/png` `inlineData` (`<= 960px`), running locally on Chrome's Multimodal Prompt API when enabled and seamlessly falling back to Cloud Gemini otherwise. |
-| **Feature C — "SEC Insider Privacy Lock"** | `InferenceMode.ONLY_ON_DEVICE` | Mathematical zero-cloud guarantee for single-turn biometric & visceral-fat audits (`< 6,000` tokens). Raw health notes never leave the browser; if Gemini Nano is unavailable, issues an institutional CRT compliance alert with exact remediation steps. |
+| **Unified `[ ⚡ Entry \| 🧠 Coach ]` Composer & 200-Char Auto-Flip** | `PREFER_ON_DEVICE` → Cloud Coach | Defaults to **Fast Entry (`⚡ Entry`, Free & Unlimited)** with focus VRAM pre-warming and 1-step optimistic auto-logging + **`↩ Undo`**. Typing past `200` chars automatically flips to **Full Cloud Coach (`🧠 Coach`)** with 12-turn memory & live wearable tools. |
+| **Top-Bar Local AI Telemetry & VRAM-Pinned Warmup** | `LanguageModel.availability()` + `create({ monitor })` | 1-click **`WARM LOCAL NANO ENGINE`** downloads/warms Gemini Nano weights with a live CRT progress bar (`DOWNLOADING NANO: 68%` -> `NANO ENGINE: ONLINE`) and keeps the session pinned in VRAM across entries. |
+| **Feature A — Instant Shorthand Macro & Workout Auto-Logger** | `InferenceMode.PREFER_ON_DEVICE` | Sub-second natural-language shorthand parsing (`"3 eggs, 1 cup oats, black coffee, and 35 min heavy squats"`) at **`$0.00 GAS`** and **100% offline**, using compact `Schema.object(...)` passed simultaneously to `onDeviceParams.promptOptions.responseConstraint` and `inCloudParams.generationConfig.responseSchema` (with `ThinkingLevel.MINIMAL` cloud fallback), reconciled locally against an embedded USDA FoodData Central + Compendium METs engine. |
+| **Feature B — Multimodal "Expense Receipt" Meal & Label Auditor** | `InferenceMode.PREFER_ON_DEVICE` | Normalizes meal/label photos (including pasted WebP) into single-tile `<= 768px` `image/jpeg` `inlineData`, running locally on Chrome's Multimodal Prompt API when enabled and seamlessly falling back to Cloud Gemini in parallel (`Promise.all`) otherwise. |
+| **Feature C — "SEC Insider Privacy Lock"** | `InferenceMode.ONLY_ON_DEVICE` | Mathematical zero-cloud guarantee for single-turn biometric & visceral-fat audits (`< 6,000` tokens). Raw health notes never leave the browser; if Gemini Nano is unavailable, renders an institutional CRT compliance alert with exact remediation steps. |
 | **Feature D — "Quarterly Earnings Call" 30-Day Forecast** | `InferenceMode.PREFER_IN_CLOUD` | Intentional upward routing to Cloud Gemini (`cfo_cloud_model` from Remote Config) for long-context 30-day Audit Ledger synthesis and metabolic break-even forecasting—while automatically falling back to on-device Gemini Nano when offline. |
 | **Cryptographic-Style Execution Receipts** | `result.response.inferenceSource` | Every AI response and committed ledger item renders a live monospace badge: `[EXEC: ON_DEVICE // GEMINI NANO // XXXms // $0.00 GAS]` or `[EXEC: IN_CLOUD // GEMINI CLOUD // XXXms // FALLBACK]`. |
 
-See [**`SUBMISSION.md`**](./SUBMISSION.md) for the complete **#BuildHybridAI 2026** Existing App Disclosure, exact runtime file/line code pointers, Judge Testing Instructions, and 2m30s Demo Video Script.
+See [**`SUBMISSION.md`**](./SUBMISSION.md) for the complete **#BuildHybridAI 2026** Existing App Disclosure, exact runtime file/line code pointers, Judge Testing Instructions, and Demo Video Script.
 
 ---
 
 ## Tech Stack
 
 - **Framework**: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS (`Inter` + `JetBrains Mono` Bloomberg CRT theme)
-- **Hybrid Inference**: Firebase AI Logic Web SDK (`firebase/ai` `^13.3.0`, `GoogleAIBackend`, `InferenceMode`, `Schema.object`, `result.response.inferenceSource`) + Chrome Built-in AI (`window.LanguageModel`)
-- **Security & Dynamic Config**: Firebase App Check (`firebase/app-check` with `ReCaptchaEnterpriseProvider` + local/judge debug token support) & Firebase Remote Config (`firebase/remote-config`)
+- **Hybrid Inference**: Firebase AI Logic Web SDK (`firebase/ai` `^13.3.0`, `GoogleAIBackend`, `AgentPlatformBackend`, `InferenceMode`, `Schema.object`, `ThinkingLevel.MINIMAL`, `result.response.inferenceSource`) + Chrome Built-in AI (`window.LanguageModel`)
+- **Security & Dynamic Config**: Firebase App Check (`firebase/app-check` with `ReCaptchaEnterpriseProvider` + local/judge debug token support), hardened `firestore.rules`, & Firebase Remote Config (`firebase/remote-config`)
 - **Offline-First State**: Cloud Firestore (`initializeFirestore` with `persistentLocalCache` + `persistentMultipleTabManager`) + 1-click Anonymous Guest Auth (`signInAnonymously`) + Google OAuth
 - **Server Agent Loop & Observability**: Genkit 1.x multi-tool coaching backend + optional Arize Phoenix OTLP tracing
 
@@ -52,7 +53,7 @@ npm run dev                  # Launches http://localhost:9002
 ```bash
 npm run typecheck            # TypeScript strict check (tsc --noEmit)
 npm run lint                 # Next.js ESLint check
-npm run test                 # Vitest unit test suite (199 tests including Hybrid AI & USDA reconciler)
+npm run test                 # Vitest unit test suite (200 tests including Hybrid AI & USDA reconciler)
 npm run build                # Production Next.js build
 ```
 
@@ -67,7 +68,7 @@ npm run build                # Production Next.js build
 
 ## Documentation
 
-- [**`SUBMISSION.md`**](./SUBMISSION.md) — **#BuildHybridAI 2026** Devpost submission package, Existing App Disclosure, runtime code pointers, judge offline test guide, and 2m30s video script
+- [**`SUBMISSION.md`**](./SUBMISSION.md) — **#BuildHybridAI 2026** Devpost submission package, Existing App Disclosure, runtime code pointers, judge offline test guide, and demo video script
 - [**`CLAUDE.md`**](./CLAUDE.md) — Codebase architecture & engineering conventions
 - [**`.env.example`**](./.env.example) — Documented environment variables (zero hardcoded secrets)
 

@@ -1,16 +1,76 @@
-
 rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model & Security Invariants
+// ===============================================================
+//
+// Collection: /users/{userId}
+//   - Owner-managed health, onboarding, and outreach fields (e.g.,
+//     dailyCaloriesIn, dailyProteinG, dailyCarbsG, dailyPlantG,
+//     dailyCaloriesOut, steps, hrv, sleepHours, recoveryStatus,
+//     weightKg, heightCm, bodyFatPct, visceralFatPoints, history,
+//     lastActiveDate, onboardingDay, onboardingComplete, isAnonymous,
+//     updatedAt, createdAt, outreachEnabled, outreachEmail,
+//     outreachDiscordUserId).
+//   - Server-managed billing/entitlement fields (written exclusively
+//     via Admin SDK in Stripe webhooks, verify-session, and server
+//     entitlement actions; client create/update/removal is blocked):
+//       entitlementTier, bonusAiAudits, redeemedFounderCode,
+//       redeemedGiftCode, subscriptionPlan, stripeCustomerId,
+//       stripeSubscriptionId, subscriptionStatus, cancelAtPeriodEnd,
+//       currentPeriodEnd.
+//
+// Subcollections under /users/{userId}:
+//   - preferences, logs, food_log, exercise_log, fast_log,
+//     chat_sessions, campaign, campaign_briefs, shared_data
+//     (strictly owner-scoped).
+//
+// Collection: /shared_meals/{shareId}
+//   - Publicly shareable meal snapshots (link-as-bearer-token).
+//     Single-doc get allowed unless revoked; list and client writes denied.
+//
+// Unmatched paths are denied by default.
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() {
       return request.auth != null;
     }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Server-managed billing and entitlement fields that clients must never
+    // set on create or add/modify/remove on update.
+    function protectedBillingFields() {
+      return [
+        'entitlementTier',
+        'bonusAiAudits',
+        'redeemedFounderCode',
+        'redeemedGiftCode',
+        'subscriptionPlan',
+        'stripeCustomerId',
+        'stripeSubscriptionId',
+        'subscriptionStatus',
+        'cancelAtPeriodEnd',
+        'currentPeriodEnd'
+      ];
+    }
+
+    function hasNoProtectedBillingFields() {
+      return !request.resource.data.keys().hasAny(protectedBillingFields());
+    }
+
+    function protectedBillingFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedBillingFields());
+    }
+
     match /users/{userId} {
-      allow get, list, create, update, delete: if isOwner(userId);
+      allow get, list, delete: if isOwner(userId);
+      allow create: if isOwner(userId) && hasNoProtectedBillingFields();
+      allow update: if isOwner(userId) && protectedBillingFieldsUnchanged();
 
       match /preferences/{prefId} {
         allow get, list, create, update, delete: if isOwner(userId);

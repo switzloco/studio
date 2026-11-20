@@ -39,17 +39,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const originTrialToken = (
+    process.env.NEXT_PUBLIC_CHROME_ORIGIN_TRIAL_TOKEN ||
+    process.env.VITE_CHROME_ORIGIN_TRIAL_TOKEN ||
+    ''
+  ).trim();
+
   return (
     <html lang="en">
       <head>
-        <meta
-          httpEquiv="origin-trial"
-          content={
-            process.env.NEXT_PUBLIC_CHROME_ORIGIN_TRIAL_TOKEN ||
-            process.env.VITE_CHROME_ORIGIN_TRIAL_TOKEN ||
-            ''
-          }
-        />
+        {originTrialToken && (
+          <meta httpEquiv="origin-trial" content={originTrialToken} />
+        )}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
